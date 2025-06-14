@@ -16,7 +16,7 @@ const PDFUploader = () => {
   const [progress, setProgress] = useState(0);
   const [subject, setSubject] = useState('');
   const [examSession, setExamSession] = useState('');
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
   const { addQuestions } = useQuestionStore();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,8 +43,8 @@ const PDFUploader = () => {
   }, []);
 
   const parseRealPDF = async () => {
-    if (!file || !openaiApiKey.trim()) {
-      toast.error('PDF 파일과 OpenAI API 키를 모두 입력해주세요.');
+    if (!file || !geminiApiKey.trim()) {
+      toast.error('PDF 파일과 Gemini API 키를 모두 입력해주세요.');
       return;
     }
 
@@ -62,11 +62,11 @@ const PDFUploader = () => {
         throw new Error('PDF에서 텍스트를 추출할 수 없습니다. 스캔된 이미지 PDF일 가능성이 있습니다.');
       }
 
-      // Step 2: AI로 문제 파싱
-      toast.info('AI가 문제를 분석하고 구조화하는 중...');
+      // Step 2: Gemini AI로 문제 파싱
+      toast.info('Gemini AI가 문제를 분석하고 구조화하는 중...');
       setProgress(50);
 
-      const questions = await parseQuestionsWithAI(text, subject, examSession, openaiApiKey);
+      const questions = await parseQuestionsWithAI(text, subject, examSession, geminiApiKey);
       
       if (questions.length === 0) {
         throw new Error('PDF에서 유효한 객관식 문제를 찾을 수 없습니다.');
@@ -166,18 +166,18 @@ const PDFUploader = () => {
             <div>
               <Label htmlFor="apiKey" className="flex items-center space-x-2">
                 <Key className="w-4 h-4" />
-                <span>OpenAI API 키</span>
+                <span>Google Gemini API 키</span>
               </Label>
               <Input
                 id="apiKey"
                 type="password"
-                placeholder="sk-..."
-                value={openaiApiKey}
-                onChange={(e) => setOpenaiApiKey(e.target.value)}
+                placeholder="AIza..."
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
                 className="font-mono text-sm"
               />
               <p className="text-xs text-gray-500 mt-1">
-                한글 문제 파싱을 위해 OpenAI API가 필요합니다.
+                한글 문제 파싱을 위해 Google Gemini API가 필요합니다.
               </p>
             </div>
             
@@ -213,10 +213,10 @@ const PDFUploader = () => {
 
             <Button
               onClick={parseRealPDF}
-              disabled={!file || !openaiApiKey.trim() || uploading}
+              disabled={!file || !geminiApiKey.trim() || uploading}
               className="w-full"
             >
-              {uploading ? '파싱 중...' : '실제 PDF 파싱 시작'}
+              {uploading ? '파싱 중...' : 'Gemini로 PDF 파싱 시작'}
             </Button>
           </CardContent>
         </Card>
@@ -226,7 +226,7 @@ const PDFUploader = () => {
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <AlertCircle className="w-5 h-5 text-blue-600" />
-            <span>실제 파싱 안내</span>
+            <span>Gemini 파싱 안내</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -241,7 +241,7 @@ const PDFUploader = () => {
               </ul>
             </div>
             <div>
-              <h4 className="font-medium text-gray-900 mb-2">AI 파싱 기능</h4>
+              <h4 className="font-medium text-gray-900 mb-2">Gemini AI 파싱 기능</h4>
               <ul className="space-y-1 text-gray-600">
                 <li>• 문제와 선택지 자동 분리</li>
                 <li>• 정답 추론</li>
@@ -252,8 +252,14 @@ const PDFUploader = () => {
           </div>
           <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
             <p className="text-sm text-yellow-800">
-              <strong>주의:</strong> OpenAI API 키는 브라우저에 저장되지 않으며, 파싱 과정에서만 사용됩니다.
-              실제 운영 환경에서는 서버 사이드에서 처리하는 것을 권장합니다.
+              <strong>주의:</strong> Gemini API 키는 브라우저에 저장되지 않으며, 파싱 과정에서만 사용됩니다.
+              Google AI Studio에서 무료 API 키를 발급받을 수 있습니다.
+            </p>
+          </div>
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-sm text-blue-800">
+              <strong>MCP 대안:</strong> API 연결 대신 MCP(Model Context Protocol)를 통한 로컬 모델 연결도 고려해볼 수 있습니다.
+              Ollama, LM Studio 등의 오픈소스 도구를 활용하여 로컬에서 모델을 실행할 수 있습니다.
             </p>
           </div>
         </CardContent>

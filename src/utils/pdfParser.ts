@@ -31,7 +31,7 @@ export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> 
   };
 }
 
-export async function parseQuestionsWithAI(
+export async function parseQuestionsWithGemini(
   pdfText: string, 
   subject: string, 
   examSession: string,
@@ -74,35 +74,60 @@ ${pdfText.substring(0, 8000)} // 너무 긴 텍스트는 잘라서 전송
 JSON 배열만 응답해주세요.`;
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
+        contents: [
           {
-            role: 'system',
-            content: '당신은 한국어 교육 자료 분석 전문가입니다. PDF에서 추출한 텍스트를 분석하여 객관식 문제를 정확히 파싱합니다.'
-          },
-          {
-            role: 'user',
-            content: prompt
+            parts: [
+              {
+                text: prompt
+              }
+            ]
           }
         ],
-        temperature: 0.1,
-        max_tokens: 4000
+        generationConfig: {
+          temperature: 0.1,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 4096,
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          }
+        ]
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API 오류: ${response.status} ${response.statusText}`);
+      const errorData = await response.json();
+      throw new Error(`Gemini API 오류: ${response.status} - ${errorData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
+    
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error('Gemini API에서 응답을 받지 못했습니다.');
+    }
+
+    const content = data.candidates[0].content.parts[0].text;
     
     // JSON 부분만 추출
     const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -124,7 +149,17 @@ JSON 배열만 응답해주세요.`;
     }));
 
   } catch (error) {
-    console.error('AI 파싱 오류:', error);
+    console.error('Gemini 파싱 오류:', error);
     throw new Error(`문제 파싱 중 오류가 발생했습니다: ${error.message}`);
   }
+}
+
+// OpenAI 호환성을 위해 기존 함수명 유지하되 내부에서 Gemini 사용
+export async function parseQuestionsWithAI(
+  pdfText: string, 
+  subject: string, 
+  examSession: string,
+  apiKey: string
+): Promise<Question[]> {
+  return parseQuestionsWithGemini(pdfText, subject, examSession, apiKey);
 }
