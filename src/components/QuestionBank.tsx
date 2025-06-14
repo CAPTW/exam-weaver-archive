@@ -19,8 +19,8 @@ const QuestionBank = () => {
   const filteredQuestions = questions.filter(question => {
     const matchesSearch = question.question.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          question.hashtags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesSubject = !selectedSubject || question.hashtags.includes(selectedSubject);
-    const matchesDifficulty = !selectedDifficulty || question.difficulty === selectedDifficulty;
+    const matchesSubject = !selectedSubject || selectedSubject === 'all' || question.hashtags.includes(selectedSubject);
+    const matchesDifficulty = !selectedDifficulty || selectedDifficulty === 'all' || question.difficulty === selectedDifficulty;
     
     return matchesSearch && matchesSubject && matchesDifficulty;
   });
@@ -76,7 +76,7 @@ const QuestionBank = () => {
                 <SelectValue placeholder="과목 선택" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">모든 과목</SelectItem>
+                <SelectItem value="all">모든 과목</SelectItem>
                 {allSubjects.map(subject => (
                   <SelectItem key={subject} value={subject}>{subject}</SelectItem>
                 ))}
@@ -87,7 +87,7 @@ const QuestionBank = () => {
                 <SelectValue placeholder="난이도 선택" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">모든 난이도</SelectItem>
+                <SelectItem value="all">모든 난이도</SelectItem>
                 {difficulties.map(difficulty => (
                   <SelectItem key={difficulty} value={difficulty}>
                     {getDifficultyLabel(difficulty)}
