@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
-import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Key } from 'lucide-react';
 import { useQuestionStore, Question } from '../store/questionStore';
 import { toast } from 'sonner';
+import { extractTextFromPDF, parseQuestionsWithAI } from '../utils/pdfParser';
 
 const PDFUploader = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -15,6 +16,7 @@ const PDFUploader = () => {
   const [progress, setProgress] = useState(0);
   const [subject, setSubject] = useState('');
   const [examSession, setExamSession] = useState('');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
   const { addQuestions } = useQuestionStore();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,53 +42,57 @@ const PDFUploader = () => {
     event.preventDefault();
   }, []);
 
-  const simulateParsing = async () => {
+  const parseRealPDF = async () => {
+    if (!file || !openaiApiKey.trim()) {
+      toast.error('PDF 파일과 OpenAI API 키를 모두 입력해주세요.');
+      return;
+    }
+
     setUploading(true);
     setProgress(0);
 
-    // 시뮬레이션된 파싱 과정
-    const steps = [
-      { message: 'PDF 파일 읽는 중...', progress: 20 },
-      { message: '문제 텍스트 추출 중...', progress: 40 },
-      { message: '보기 및 이미지 인식 중...', progress: 60 },
-      { message: '해시태그 생성 중...', progress: 80 },
-      { message: '데이터베이스 저장 중...', progress: 100 }
-    ];
-
-    for (const step of steps) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(step.progress);
-      toast.info(step.message);
-    }
-
-    // 샘플 문제 데이터 생성 (타입 안전하게)
-    const sampleQuestions: Question[] = [
-      {
-        id: Math.random().toString(36).substr(2, 9),
-        question: 'SQL에서 테이블의 구조를 변경하는 명령어는?',
-        options: ['SELECT', 'ALTER', 'INSERT', 'DELETE'],
-        correctAnswer: 1,
-        hashtags: [subject || '정보처리기사', examSession || '2024년 1회', 'SQL', '데이터베이스'],
-        difficulty: 'medium' as const,
-        explanation: 'ALTER 명령어는 테이블의 구조를 변경할 때 사용됩니다.'
-      },
-      {
-        id: Math.random().toString(36).substr(2, 9),
-        question: '객체지향 프로그래밍의 특징이 아닌 것은?',
-        options: ['캡슐화', '상속', '다형성', '순차성'],
-        correctAnswer: 3,
-        hashtags: [subject || '정보처리기사', examSession || '2024년 1회', '객체지향', '프로그래밍'],
-        difficulty: 'easy' as const,
-        explanation: '순차성은 객체지향 프로그래밍의 특징이 아닙니다.'
+    try {
+      // Step 1: PDF 텍스트 추출
+      toast.info('PDF 파일에서 텍스트를 추출하는 중...');
+      setProgress(25);
+      
+      const { text, pages } = await extractTextFromPDF(file);
+      
+      if (!text.trim()) {
+        throw new Error('PDF에서 텍스트를 추출할 수 없습니다. 스캔된 이미지 PDF일 가능성이 있습니다.');
       }
-    ];
 
-    addQuestions(sampleQuestions);
-    setUploading(false);
-    toast.success(`${sampleQuestions.length}개 문제가 성공적으로 파싱되었습니다!`);
-    setFile(null);
-    setSubject('');
-    setExamSession('');
+      // Step 2: AI로 문제 파싱
+      toast.info('AI가 문제를 분석하고 구조화하는 중...');
+      setProgress(50);
+
+      const questions = await parseQuestionsWithAI(text, subject, examSession, openaiApiKey);
+      
+      if (questions.length === 0) {
+        throw new Error('PDF에서 유효한 객관식 문제를 찾을 수 없습니다.');
+      }
+
+      // Step 3: 데이터베이스에 저장
+      toast.info('문제를 데이터베이스에 저장하는 중...');
+      setProgress(75);
+
+      addQuestions(questions);
+      setProgress(100);
+
+      toast.success(`${questions.length}개의 문제가 성공적으로 파싱되어 저장되었습니다! (총 ${pages}페이지 처리)`);
+      
+      // 폼 초기화
+      setFile(null);
+      setSubject('');
+      setExamSession('');
+      
+    } catch (error) {
+      console.error('PDF 파싱 오류:', error);
+      toast.error(error.message || '파싱 중 오류가 발생했습니다.');
+    } finally {
+      setUploading(false);
+      setProgress(0);
+    }
   };
 
   return (
@@ -153,10 +159,28 @@ const PDFUploader = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>문제 정보</CardTitle>
-            <CardDescription>파싱할 문제의 메타데이터를 입력하세요.</CardDescription>
+            <CardTitle>파싱 설정</CardTitle>
+            <CardDescription>문제 파싱에 필요한 정보를 입력하세요.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="apiKey" className="flex items-center space-x-2">
+                <Key className="w-4 h-4" />
+                <span>OpenAI API 키</span>
+              </Label>
+              <Input
+                id="apiKey"
+                type="password"
+                placeholder="sk-..."
+                value={openaiApiKey}
+                onChange={(e) => setOpenaiApiKey(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                한글 문제 파싱을 위해 OpenAI API가 필요합니다.
+              </p>
+            </div>
+            
             <div>
               <Label htmlFor="subject">과목명</Label>
               <Input
@@ -166,6 +190,7 @@ const PDFUploader = () => {
                 onChange={(e) => setSubject(e.target.value)}
               />
             </div>
+            
             <div>
               <Label htmlFor="examSession">시험 회차</Label>
               <Input
@@ -187,11 +212,11 @@ const PDFUploader = () => {
             )}
 
             <Button
-              onClick={simulateParsing}
-              disabled={!file || uploading}
+              onClick={parseRealPDF}
+              disabled={!file || !openaiApiKey.trim() || uploading}
               className="w-full"
             >
-              {uploading ? '파싱 중...' : '문제 파싱 시작'}
+              {uploading ? '파싱 중...' : '실제 PDF 파싱 시작'}
             </Button>
           </CardContent>
         </Card>
@@ -201,7 +226,7 @@ const PDFUploader = () => {
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <AlertCircle className="w-5 h-5 text-blue-600" />
-            <span>파싱 가이드라인</span>
+            <span>실제 파싱 안내</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -209,21 +234,27 @@ const PDFUploader = () => {
             <div>
               <h4 className="font-medium text-gray-900 mb-2">지원되는 형식</h4>
               <ul className="space-y-1 text-gray-600">
+                <li>• 텍스트 기반 PDF (스캔 이미지 X)</li>
                 <li>• 4지선다형 객관식 문제</li>
-                <li>• 한글/영문 텍스트</li>
-                <li>• 이미지 포함 문제</li>
-                <li>• 표준 PDF 형식</li>
+                <li>• 한글 기출문제</li>
+                <li>• 명확한 문제 구조</li>
               </ul>
             </div>
             <div>
-              <h4 className="font-medium text-gray-900 mb-2">자동 생성 정보</h4>
+              <h4 className="font-medium text-gray-900 mb-2">AI 파싱 기능</h4>
               <ul className="space-y-1 text-gray-600">
-                <li>• 과목별 해시태그</li>
-                <li>• 키워드 해시태그</li>
-                <li>• 회차 정보</li>
-                <li>• 난이도 분석</li>
+                <li>• 문제와 선택지 자동 분리</li>
+                <li>• 정답 추론</li>
+                <li>• 키워드 해시태그 생성</li>
+                <li>• 난이도 자동 분석</li>
               </ul>
             </div>
+          </div>
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+            <p className="text-sm text-yellow-800">
+              <strong>주의:</strong> OpenAI API 키는 브라우저에 저장되지 않으며, 파싱 과정에서만 사용됩니다.
+              실제 운영 환경에서는 서버 사이드에서 처리하는 것을 권장합니다.
+            </p>
           </div>
         </CardContent>
       </Card>
