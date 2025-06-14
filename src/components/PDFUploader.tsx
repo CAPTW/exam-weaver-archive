@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react';
-import { useQuestionStore } from '../store/questionStore';
+import { useQuestionStore, Question } from '../store/questionStore';
 import { toast } from 'sonner';
 
 const PDFUploader = () => {
@@ -59,15 +59,15 @@ const PDFUploader = () => {
       toast.info(step.message);
     }
 
-    // 샘플 문제 데이터 생성
-    const sampleQuestions = [
+    // 샘플 문제 데이터 생성 (타입 안전하게)
+    const sampleQuestions: Question[] = [
       {
         id: Math.random().toString(36).substr(2, 9),
         question: 'SQL에서 테이블의 구조를 변경하는 명령어는?',
         options: ['SELECT', 'ALTER', 'INSERT', 'DELETE'],
         correctAnswer: 1,
         hashtags: [subject || '정보처리기사', examSession || '2024년 1회', 'SQL', '데이터베이스'],
-        difficulty: 'medium',
+        difficulty: 'medium' as const,
         explanation: 'ALTER 명령어는 테이블의 구조를 변경할 때 사용됩니다.'
       },
       {
@@ -76,7 +76,7 @@ const PDFUploader = () => {
         options: ['캡슐화', '상속', '다형성', '순차성'],
         correctAnswer: 3,
         hashtags: [subject || '정보처리기사', examSession || '2024년 1회', '객체지향', '프로그래밍'],
-        difficulty: 'easy',
+        difficulty: 'easy' as const,
         explanation: '순차성은 객체지향 프로그래밍의 특징이 아닙니다.'
       }
     ];

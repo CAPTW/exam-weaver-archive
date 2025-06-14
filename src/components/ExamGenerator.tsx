@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -184,7 +183,7 @@ const ExamGenerator = () => {
                 <Checkbox
                   id="includeAnswerSheet"
                   checked={includeAnswerSheet}
-                  onCheckedChange={setIncludeAnswerSheet}
+                  onCheckedChange={(checked) => setIncludeAnswerSheet(checked === true)}
                 />
                 <Label htmlFor="includeAnswerSheet">정답표 포함</Label>
               </div>
@@ -193,7 +192,7 @@ const ExamGenerator = () => {
                 <Checkbox
                   id="randomizeOrder"
                   checked={randomizeOrder}
-                  onCheckedChange={setRandomizeOrder}
+                  onCheckedChange={(checked) => setRandomizeOrder(checked === true)}
                 />
                 <Label htmlFor="randomizeOrder">문제 순서 랜덤화</Label>
               </div>
