@@ -1,11 +1,8 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { Question } from '../store/questionStore';
 
-// PDF.js worker 설정 - 로컬 worker 사용
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url
-).toString();
+// PDF.js worker 설정 - Vite 환경에 맞게 수정
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 export interface ParsedPDFContent {
   text: string;
