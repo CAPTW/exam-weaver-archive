@@ -226,7 +226,7 @@ const PDFUploader = () => {
             </div>
           </div>
         </CardContent>
-      </div>
+      </Card>
     </div>
   );
 };
