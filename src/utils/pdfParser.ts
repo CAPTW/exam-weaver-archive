@@ -1,9 +1,11 @@
-
 import * as pdfjsLib from 'pdfjs-dist';
 import { Question } from '../store/questionStore';
 
-// PDF.js worker 설정
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// PDF.js worker 설정 - 로컬 worker 사용
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.js',
+  import.meta.url
+).toString();
 
 export interface ParsedPDFContent {
   text: string;
