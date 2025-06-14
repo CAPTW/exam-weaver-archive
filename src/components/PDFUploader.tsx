@@ -1,11 +1,11 @@
-
 import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
-import { Upload, FileText, CheckCircle, AlertCircle, Key } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Upload, FileText, CheckCircle, AlertCircle, Key, Server } from 'lucide-react';
 import { useQuestionStore, Question } from '../store/questionStore';
 import { toast } from 'sonner';
 import { extractTextFromPDF, parseQuestionsWithAI } from '../utils/pdfParser';
@@ -17,6 +17,8 @@ const PDFUploader = () => {
   const [subject, setSubject] = useState('');
   const [examSession, setExamSession] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [useLocalModel, setUseLocalModel] = useState(true);
+  const [mcpEndpoint, setMcpEndpoint] = useState('http://localhost:11434');
   const { addQuestions } = useQuestionStore();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,8 +45,13 @@ const PDFUploader = () => {
   }, []);
 
   const parseRealPDF = async () => {
-    if (!file || !geminiApiKey.trim()) {
-      toast.error('PDF 파일과 Gemini API 키를 모두 입력해주세요.');
+    if (!file) {
+      toast.error('PDF 파일을 선택해주세요.');
+      return;
+    }
+
+    if (!useLocalModel && !geminiApiKey.trim()) {
+      toast.error('로컬 모델을 사용하지 않는 경우 Gemini API 키가 필요합니다.');
       return;
     }
 
@@ -62,11 +69,19 @@ const PDFUploader = () => {
         throw new Error('PDF에서 텍스트를 추출할 수 없습니다. 스캔된 이미지 PDF일 가능성이 있습니다.');
       }
 
-      // Step 2: Gemini AI로 문제 파싱
-      toast.info('Gemini AI가 문제를 분석하고 구조화하는 중...');
+      // Step 2: AI로 문제 파싱
+      const aiType = useLocalModel ? '로컬 AI 모델' : 'Gemini AI';
+      toast.info(`${aiType}이 문제를 분석하고 구조화하는 중...`);
       setProgress(50);
 
-      const questions = await parseQuestionsWithAI(text, subject, examSession, geminiApiKey);
+      const questions = await parseQuestionsWithAI(
+        text, 
+        subject, 
+        examSession, 
+        geminiApiKey,
+        useLocalModel,
+        mcpEndpoint
+      );
       
       if (questions.length === 0) {
         throw new Error('PDF에서 유효한 객관식 문제를 찾을 수 없습니다.');
@@ -79,7 +94,7 @@ const PDFUploader = () => {
       addQuestions(questions);
       setProgress(100);
 
-      toast.success(`${questions.length}개의 문제가 성공적으로 파싱되어 저장되었습니다! (총 ${pages}페이지 처리)`);
+      toast.success(`${questions.length}개의 문제가 성공적으로 파싱되어 저장되었습니다! (총 ${pages}페이지 처리, ${aiType} 사용)`);
       
       // 폼 초기화
       setFile(null);
@@ -163,23 +178,50 @@ const PDFUploader = () => {
             <CardDescription>문제 파싱에 필요한 정보를 입력하세요.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="apiKey" className="flex items-center space-x-2">
-                <Key className="w-4 h-4" />
-                <span>Google Gemini API 키</span>
-              </Label>
-              <Input
-                id="apiKey"
-                type="password"
-                placeholder="AIza..."
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                className="font-mono text-sm"
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Server className="w-4 h-4" />
+                <Label htmlFor="local-model">로컬 AI 모델 사용</Label>
+              </div>
+              <Switch
+                id="local-model"
+                checked={useLocalModel}
+                onCheckedChange={setUseLocalModel}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                한글 문제 파싱을 위해 Google Gemini API가 필요합니다.
-              </p>
             </div>
+
+            {useLocalModel ? (
+              <div>
+                <Label htmlFor="mcp-endpoint">MCP 엔드포인트</Label>
+                <Input
+                  id="mcp-endpoint"
+                  placeholder="http://localhost:11434"
+                  value={mcpEndpoint}
+                  onChange={(e) => setMcpEndpoint(e.target.value)}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Ollama 서버 주소를 입력하세요. 로컬에서 실행 중인 한국어 모델이 필요합니다.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <Label htmlFor="apiKey" className="flex items-center space-x-2">
+                  <Key className="w-4 h-4" />
+                  <span>Google Gemini API 키</span>
+                </Label>
+                <Input
+                  id="apiKey"
+                  type="password"
+                  placeholder="AIza..."
+                  value={geminiApiKey}
+                  onChange={(e) => setGeminiApiKey(e.target.value)}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  한글 문제 파싱을 위해 Google Gemini API가 필요합니다.
+                </p>
+              </div>
+            )}
             
             <div>
               <Label htmlFor="subject">과목명</Label>
@@ -213,7 +255,7 @@ const PDFUploader = () => {
 
             <Button
               onClick={parseRealPDF}
-              disabled={!file || !geminiApiKey.trim() || uploading}
+              disabled={!file || !useLocalModel && !geminiApiKey.trim() || uploading}
               className="w-full"
             >
               {uploading ? '파싱 중...' : 'Gemini로 PDF 파싱 시작'}

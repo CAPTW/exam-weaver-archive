@@ -1,10 +1,10 @@
-
 import React, { useState } from 'react';
-import { Upload, Database, FileText, Tags, Download } from 'lucide-react';
+import { Upload, Database, FileText, Tags, Download, Settings } from 'lucide-react';
 import PDFUploader from '../components/PDFUploader';
 import QuestionBank from '../components/QuestionBank';
 import ExamGenerator from '../components/ExamGenerator';
 import Dashboard from '../components/Dashboard';
+import LocalSetup from '../components/LocalSetup';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -31,7 +31,7 @@ const Index = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-8">
+          <TabsList className="grid w-full grid-cols-5 mb-8">
             <TabsTrigger value="dashboard" className="flex items-center space-x-2">
               <Database className="w-4 h-4" />
               <span>대시보드</span>
@@ -47,6 +47,10 @@ const Index = () => {
             <TabsTrigger value="generate" className="flex items-center space-x-2">
               <Download className="w-4 h-4" />
               <span>시험지 생성</span>
+            </TabsTrigger>
+            <TabsTrigger value="local-setup" className="flex items-center space-x-2">
+              <Settings className="w-4 h-4" />
+              <span>로컬 환경</span>
             </TabsTrigger>
           </TabsList>
 
@@ -64,6 +68,10 @@ const Index = () => {
 
           <TabsContent value="generate">
             <ExamGenerator />
+          </TabsContent>
+
+          <TabsContent value="local-setup">
+            <LocalSetup />
           </TabsContent>
         </Tabs>
       </main>
