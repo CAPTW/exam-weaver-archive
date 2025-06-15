@@ -1,14 +1,12 @@
-import React, { useState, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
-import { Switch } from '@/components/ui/switch';
-import { Upload, FileText, CheckCircle, AlertCircle, Key, Server } from 'lucide-react';
-import { useQuestionStore, Question } from '../store/questionStore';
+
+import React, { useState } from 'react';
+import { useQuestionStore } from '../store/questionStore';
 import { toast } from 'sonner';
 import { extractTextFromPDF, parseQuestionsWithAI } from '../utils/pdfParser';
+import FileUploadZone from './FileUploadZone';
+import ParsingSettings from './ParsingSettings';
+import ParsingProgress from './ParsingProgress';
+import ParsingInfo from './ParsingInfo';
 
 const PDFUploader = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -20,29 +18,6 @@ const PDFUploader = () => {
   const [useLocalModel, setUseLocalModel] = useState(true);
   const [mcpEndpoint, setMcpEndpoint] = useState('http://localhost:11434');
   const { addQuestions } = useQuestionStore();
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (selectedFile && selectedFile.type === 'application/pdf') {
-      setFile(selectedFile);
-    } else {
-      toast.error('PDF 파일만 업로드 가능합니다.');
-    }
-  };
-
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const droppedFile = event.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type === 'application/pdf') {
-      setFile(droppedFile);
-    } else {
-      toast.error('PDF 파일만 업로드 가능합니다.');
-    }
-  }, []);
-
-  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-  }, []);
 
   const parseRealPDF = async () => {
     if (!file) {
@@ -118,194 +93,34 @@ const PDFUploader = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>파일 업로드</CardTitle>
-            <CardDescription>PDF 파일을 드래그하거나 클릭하여 업로드하세요.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors duration-200 relative ${
-                  file ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400'
-                }`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-              >
-                {file ? (
-                  <div className="space-y-3">
-                    <CheckCircle className="w-12 h-12 text-green-600 mx-auto" />
-                    <div>
-                      <p className="text-sm font-medium text-green-800">{file.name}</p>
-                      <p className="text-xs text-green-600">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <Upload className="w-12 h-12 text-gray-400 mx-auto" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">PDF 파일을 드래그하여 업로드</p>
-                      <p className="text-xs text-gray-500">또는 클릭하여 파일 선택</p>
-                    </div>
-                  </div>
-                )}
-                
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileChange}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </div>
-              
-              {file && (
-                <Button
-                  onClick={() => setFile(null)}
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                >
-                  파일 제거
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <FileUploadZone 
+          file={file} 
+          setFile={setFile} 
+          uploading={uploading}
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>파싱 설정</CardTitle>
-            <CardDescription>문제 파싱에 필요한 정보를 입력하세요.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex items-center space-x-2">
-                <Server className="w-4 h-4" />
-                <Label htmlFor="local-model">로컬 AI 모델 사용</Label>
-              </div>
-              <Switch
-                id="local-model"
-                checked={useLocalModel}
-                onCheckedChange={setUseLocalModel}
-              />
-            </div>
-
-            {useLocalModel ? (
-              <div>
-                <Label htmlFor="mcp-endpoint">MCP 엔드포인트</Label>
-                <Input
-                  id="mcp-endpoint"
-                  placeholder="http://localhost:11434"
-                  value={mcpEndpoint}
-                  onChange={(e) => setMcpEndpoint(e.target.value)}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Ollama 서버 주소를 입력하세요. 로컬에서 실행 중인 한국어 모델이 필요합니다.
-                </p>
-              </div>
-            ) : (
-              <div>
-                <Label htmlFor="apiKey" className="flex items-center space-x-2">
-                  <Key className="w-4 h-4" />
-                  <span>Google Gemini API 키</span>
-                </Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  placeholder="AIza..."
-                  value={geminiApiKey}
-                  onChange={(e) => setGeminiApiKey(e.target.value)}
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  한글 문제 파싱을 위해 Google Gemini API가 필요합니다.
-                </p>
-              </div>
-            )}
-            
-            <div>
-              <Label htmlFor="subject">과목명</Label>
-              <Input
-                id="subject"
-                placeholder="예: 정보처리기사, 컴활 1급"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-              />
-            </div>
-            
-            <div>
-              <Label htmlFor="examSession">시험 회차</Label>
-              <Input
-                id="examSession"
-                placeholder="예: 2024년 1회, 2023년 3회"
-                value={examSession}
-                onChange={(e) => setExamSession(e.target.value)}
-              />
-            </div>
-            
-            {uploading && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">파싱 진행률</span>
-                  <span className="text-sm text-gray-500">{progress}%</span>
-                </div>
-                <Progress value={progress} className="w-full" />
-              </div>
-            )}
-
-            <Button
-              onClick={parseRealPDF}
-              disabled={!file || !useLocalModel && !geminiApiKey.trim() || uploading}
-              className="w-full"
-            >
-              {uploading ? '파싱 중...' : 'Gemini로 PDF 파싱 시작'}
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <ParsingSettings
+            subject={subject}
+            setSubject={setSubject}
+            examSession={examSession}
+            setExamSession={setExamSession}
+            geminiApiKey={geminiApiKey}
+            setGeminiApiKey={setGeminiApiKey}
+            useLocalModel={useLocalModel}
+            setUseLocalModel={setUseLocalModel}
+            mcpEndpoint={mcpEndpoint}
+            setMcpEndpoint={setMcpEndpoint}
+            onParseClick={parseRealPDF}
+            file={file}
+            uploading={uploading}
+          />
+          
+          <ParsingProgress progress={progress} uploading={uploading} />
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <AlertCircle className="w-5 h-5 text-blue-600" />
-            <span>Gemini 파싱 안내</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">지원되는 형식</h4>
-              <ul className="space-y-1 text-gray-600">
-                <li>• 텍스트 기반 PDF (스캔 이미지 X)</li>
-                <li>• 4지선다형 객관식 문제</li>
-                <li>• 한글 기출문제</li>
-                <li>• 명확한 문제 구조</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Gemini AI 파싱 기능</h4>
-              <ul className="space-y-1 text-gray-600">
-                <li>• 문제와 선택지 자동 분리</li>
-                <li>• 정답 추론</li>
-                <li>• 키워드 해시태그 생성</li>
-                <li>• 난이도 자동 분석</li>
-              </ul>
-            </div>
-          </div>
-          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-            <p className="text-sm text-yellow-800">
-              <strong>주의:</strong> Gemini API 키는 브라우저에 저장되지 않으며, 파싱 과정에서만 사용됩니다.
-              Google AI Studio에서 무료 API 키를 발급받을 수 있습니다.
-            </p>
-          </div>
-          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-sm text-blue-800">
-              <strong>MCP 대안:</strong> API 연결 대신 MCP(Model Context Protocol)를 통한 로컬 모델 연결도 고려해볼 수 있습니다.
-              Ollama, LM Studio 등의 오픈소스 도구를 활용하여 로컬에서 모델을 실행할 수 있습니다.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <ParsingInfo />
     </div>
   );
 };
