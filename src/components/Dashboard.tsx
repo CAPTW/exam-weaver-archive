@@ -44,6 +44,8 @@ const Dashboard = () => {
     { action: 'PDF 업로드', file: '컴활 1급 기출문제.pdf', time: '1일 전' }
   ];
 
+  const totalQuestions = getTotalQuestions();
+
   return (
     <div className="space-y-8">
       <div>
@@ -80,20 +82,24 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {Array.from(getQuestionsBySubject()).map(([subject, count]) => (
-                <div key={subject} className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-700">{subject}</span>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-32 bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full" 
-                        style={{ width: `${(count / getTotalQuestions()) * 100}%` }}
-                      />
+              {Array.from(getQuestionsBySubject()).map(([subject, count]) => {
+                const ratio = totalQuestions > 0 ? (count / totalQuestions) * 100 : 0;
+
+                return (
+                  <div key={subject} className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-700">{subject}</span>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-32 bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full"
+                          style={{ width: `${ratio}%` }}
+                        />
+                      </div>
+                      <span className="text-sm text-gray-500">{count}개</span>
                     </div>
-                    <span className="text-sm text-gray-500">{count}개</span>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
