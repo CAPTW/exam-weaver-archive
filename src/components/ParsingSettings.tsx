@@ -16,6 +16,8 @@ interface ParsingSettingsProps {
   setGeminiApiKey: (key: string) => void;
   useLocalModel: boolean;
   setUseLocalModel: (use: boolean) => void;
+  useHeuristicParser: boolean;
+  setUseHeuristicParser: (use: boolean) => void;
   mcpEndpoint: string;
   setMcpEndpoint: (endpoint: string) => void;
   onParseClick: () => void;
@@ -32,12 +34,20 @@ const ParsingSettings: React.FC<ParsingSettingsProps> = ({
   setGeminiApiKey,
   useLocalModel,
   setUseLocalModel,
+  useHeuristicParser,
+  setUseHeuristicParser,
   mcpEndpoint,
   setMcpEndpoint,
   onParseClick,
   file,
   uploading
 }) => {
+  const buttonLabel = uploading
+    ? '파싱 중...'
+    : useHeuristicParser
+      ? '규칙 기반 파싱 실행'
+      : 'AI로 PDF 파싱 시작';
+
   return (
     <Card>
       <CardHeader>
@@ -46,18 +56,34 @@ const ParsingSettings: React.FC<ParsingSettingsProps> = ({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between p-3 border rounded-lg">
-          <div className="flex items-center space-x-2">
-            <Server className="w-4 h-4" />
-            <Label htmlFor="local-model">로컬 AI 모델 사용</Label>
+          <div className="space-y-1">
+            <Label htmlFor="heuristic-parser">규칙 기반 파서 사용</Label>
+            <p className="text-xs text-gray-500">
+              AI 없이도 빠르게 문제를 분리하고 정렬할 수 있는 내장 파서를 사용합니다.
+            </p>
           </div>
           <Switch
-            id="local-model"
-            checked={useLocalModel}
-            onCheckedChange={setUseLocalModel}
+            id="heuristic-parser"
+            checked={useHeuristicParser}
+            onCheckedChange={setUseHeuristicParser}
           />
         </div>
 
-        {useLocalModel ? (
+        {!useHeuristicParser && (
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div className="flex items-center space-x-2">
+              <Server className="w-4 h-4" />
+              <Label htmlFor="local-model">로컬 AI 모델 사용</Label>
+            </div>
+            <Switch
+              id="local-model"
+              checked={useLocalModel}
+              onCheckedChange={setUseLocalModel}
+            />
+          </div>
+        )}
+
+        {!useHeuristicParser && useLocalModel ? (
           <div>
             <Label htmlFor="mcp-endpoint">MCP 엔드포인트</Label>
             <Input
@@ -70,7 +96,7 @@ const ParsingSettings: React.FC<ParsingSettingsProps> = ({
               Ollama 서버 주소를 입력하세요. 로컬에서 실행 중인 한국어 모델이 필요합니다.
             </p>
           </div>
-        ) : (
+        ) : !useHeuristicParser ? (
           <div>
             <Label htmlFor="apiKey" className="flex items-center space-x-2">
               <Key className="w-4 h-4" />
@@ -88,7 +114,7 @@ const ParsingSettings: React.FC<ParsingSettingsProps> = ({
               한글 문제 파싱을 위해 Google Gemini API가 필요합니다.
             </p>
           </div>
-        )}
+        ) : null}
         
         <div>
           <Label htmlFor="subject">과목명</Label>
@@ -112,10 +138,14 @@ const ParsingSettings: React.FC<ParsingSettingsProps> = ({
 
         <Button
           onClick={onParseClick}
-          disabled={!file || (!useLocalModel && !geminiApiKey.trim()) || uploading}
+          disabled={
+            !file ||
+            uploading ||
+            (!useHeuristicParser && !useLocalModel && !geminiApiKey.trim())
+          }
           className="w-full"
         >
-          {uploading ? '파싱 중...' : 'AI로 PDF 파싱 시작'}
+          {buttonLabel}
         </Button>
       </CardContent>
     </Card>

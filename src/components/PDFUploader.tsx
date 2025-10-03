@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useQuestionStore } from '../store/questionStore';
 import { toast } from 'sonner';
-import { extractTextFromPDF, parseQuestionsWithAI } from '../utils/pdfParser';
+import { extractTextFromPDF, parseQuestionsWithAI, parseQuestionsWithHeuristics } from '../utils/pdfParser';
 import FileUploadZone from './FileUploadZone';
 import ParsingSettings from './ParsingSettings';
 import ParsingProgress from './ParsingProgress';
@@ -16,6 +16,7 @@ const PDFUploader = () => {
   const [examSession, setExamSession] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [useLocalModel, setUseLocalModel] = useState(true);
+  const [useHeuristicParser, setUseHeuristicParser] = useState(true);
   const [mcpEndpoint, setMcpEndpoint] = useState('http://localhost:11434');
   const { addQuestions } = useQuestionStore();
 
@@ -25,7 +26,7 @@ const PDFUploader = () => {
       return;
     }
 
-    if (!useLocalModel && !geminiApiKey.trim()) {
+    if (!useHeuristicParser && !useLocalModel && !geminiApiKey.trim()) {
       toast.error('로컬 모델을 사용하지 않는 경우 Gemini API 키가 필요합니다.');
       return;
     }
@@ -45,21 +46,38 @@ const PDFUploader = () => {
       }
 
       // Step 2: AI로 문제 파싱
-      const aiType = useLocalModel ? '로컬 AI 모델' : 'Gemini AI';
-      toast.info(`${aiType}이 문제를 분석하고 구조화하는 중...`);
+      const parserType = useHeuristicParser
+        ? '규칙 기반 파서'
+        : useLocalModel
+          ? '로컬 AI 모델'
+          : 'Gemini AI';
+      toast.info(`${parserType}이 문제를 분석하고 구조화하는 중...`);
       setProgress(50);
 
-      const questions = await parseQuestionsWithAI(
-        text, 
-        subject, 
-        examSession, 
-        geminiApiKey,
-        useLocalModel,
-        mcpEndpoint
-      );
-      
+      const questions = useHeuristicParser
+        ? parseQuestionsWithHeuristics(text, subject, examSession)
+        : await parseQuestionsWithAI(
+            text,
+            subject,
+            examSession,
+            geminiApiKey,
+            useLocalModel,
+            mcpEndpoint
+          );
+
       if (questions.length === 0) {
-        throw new Error('PDF에서 유효한 객관식 문제를 찾을 수 없습니다.');
+        throw new Error(
+          useHeuristicParser
+            ? '규칙 기반 파서가 문제를 찾지 못했습니다. AI 파서를 사용하거나 PDF가 텍스트 기반인지 확인해주세요.'
+            : 'PDF에서 유효한 객관식 문제를 찾을 수 없습니다.'
+        );
+      }
+
+      if (useHeuristicParser) {
+        const fallbackAnswers = questions.filter(question => question.explanation?.includes('임시 정답')).length;
+        if (fallbackAnswers > 0) {
+          toast.warning(`${fallbackAnswers}개의 문제는 정답 표기가 없어 1번을 임시 정답으로 설정했습니다.`);
+        }
       }
 
       // Step 3: 데이터베이스에 저장
@@ -69,7 +87,13 @@ const PDFUploader = () => {
       addQuestions(questions);
       setProgress(100);
 
-      toast.success(`${questions.length}개의 문제가 성공적으로 파싱되어 저장되었습니다! (총 ${pages}페이지 처리, ${aiType} 사용)`);
+      const successType = useHeuristicParser
+        ? '규칙 기반 파서'
+        : useLocalModel
+          ? '로컬 AI 모델'
+          : 'Gemini AI';
+
+      toast.success(`${questions.length}개의 문제가 성공적으로 파싱되어 저장되었습니다! (총 ${pages}페이지 처리, ${successType} 사용)`);
       
       // 폼 초기화
       setFile(null);
@@ -109,6 +133,8 @@ const PDFUploader = () => {
             setGeminiApiKey={setGeminiApiKey}
             useLocalModel={useLocalModel}
             setUseLocalModel={setUseLocalModel}
+            useHeuristicParser={useHeuristicParser}
+            setUseHeuristicParser={setUseHeuristicParser}
             mcpEndpoint={mcpEndpoint}
             setMcpEndpoint={setMcpEndpoint}
             onParseClick={parseRealPDF}
