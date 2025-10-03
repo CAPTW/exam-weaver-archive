@@ -13,10 +13,76 @@ export interface ParsedPDFContent {
   pages: number;
 }
 
+const KOREAN_STOPWORDS = new Set([
+  '다음',
+  '무엇',
+  '다음은',
+  '다음의',
+  '다음중',
+  '다음중에서',
+  '어느',
+  '다음에서',
+  '가장',
+  '옳은',
+  '있는',
+  '것은',
+  '옳지',
+  '설명으로',
+  '맞는',
+  '맞는것은',
+  '해당하는'
+]);
+
+const OPTION_SYMBOLS = ['①', '②', '③', '④'];
+
+const symbolToIndex: Record<string, number> = {
+  '①': 0,
+  '②': 1,
+  '③': 2,
+  '④': 3
+};
+
+const normalizeText = (text: string) =>
+  text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\t/g, ' ');
+
+const extractKeywords = (text: string, limit = 3) => {
+  const words = text.match(/[가-힣A-Za-z]{2,}/g) || [];
+  const unique: string[] = [];
+
+  for (const word of words) {
+    const normalized = word.toLowerCase();
+    if (KOREAN_STOPWORDS.has(normalized)) continue;
+    if (unique.some(existing => existing.toLowerCase() === normalized)) continue;
+    unique.push(word.trim());
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
+};
+
+const estimateDifficulty = (question: string, options: string[]): Question['difficulty'] => {
+  const lengthScore = question.length;
+  const averageOptionLength = options.reduce((sum, option) => sum + option.length, 0) / options.length;
+
+  if (lengthScore > 220 || averageOptionLength > 90) {
+    return 'hard';
+  }
+
+  if (lengthScore > 120 || averageOptionLength > 65) {
+    return 'medium';
+  }
+
+  return 'easy';
+};
+
 export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ 
+    const pdf = await pdfjsLib.getDocument({
       data: arrayBuffer,
       cMapUrl: '/pdfjs/cmaps/',
       cMapPacked: true,
@@ -44,10 +110,111 @@ export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> 
   }
 }
 
+export function parseQuestionsWithHeuristics(
+  pdfText: string,
+  subject: string,
+  examSession: string
+): Question[] {
+  const normalized = normalizeText(pdfText);
+  const questionRegex = /(?:^|\n)(?:문제\s*)?(\d{1,3})\s*[).]\s*([\s\S]*?)(?=\n(?:문제\s*)?\d{1,3}\s*[).]\s*|$)/g;
+  const questions: Question[] = [];
+  let match: RegExpExecArray | null;
+  const timestampBase = Date.now().toString(36);
+  let fallbackCounter = 0;
+
+  while ((match = questionRegex.exec(normalized)) !== null) {
+    let body = match[2].trim();
+    if (!body) continue;
+
+    // Remove explanation and answers for cleaner parsing
+    let explanation: string | undefined;
+    const explanationMatch = body.match(/해설\s*[:：]?\s*([\s\S]*)/);
+    if (explanationMatch) {
+      explanation = explanationMatch[1].trim();
+      body = body.replace(explanationMatch[0], '').trim();
+    }
+
+    let correctAnswer: number | undefined;
+    const answerMatch = body.match(/(?:정답|답)\s*(?:\(|\[)?\s*[:：]?\s*([①②③④1-4])/);
+    if (answerMatch) {
+      const answerSymbol = answerMatch[1];
+      correctAnswer = symbolToIndex[answerSymbol] ?? (parseInt(answerSymbol, 10) - 1);
+      body = body.replace(answerMatch[0], '').trim();
+    }
+
+    const firstSymbolIndex = OPTION_SYMBOLS
+      .map(symbol => body.indexOf(symbol))
+      .filter(index => index >= 0)
+      .sort((a, b) => a - b)[0];
+
+    const numericOptionRegex = /(?:^|\n)\s*([1-4])\s*[).．ㆍ:]\s*/g;
+    const numericMatches = [...body.matchAll(numericOptionRegex)];
+
+    const firstNumericIndex = numericMatches.length >= 4
+      ? numericMatches[0].index ?? -1
+      : -1;
+
+    const optionStartIndex =
+      typeof firstSymbolIndex === 'number'
+        ? firstSymbolIndex
+        : firstNumericIndex;
+
+    const rawQuestion = optionStartIndex >= 0 ? body.slice(0, optionStartIndex) : body;
+    const questionText = rawQuestion.replace(/\s+/g, ' ').trim();
+
+    let options: string[] = [];
+    if (optionStartIndex >= 0) {
+      const optionSection = body.slice(optionStartIndex);
+      const symbolOptions = [...optionSection.matchAll(/[①②③④]\s*([\s\S]*?)(?=[①②③④]\s*|$)/g)]
+        .map(optionMatch => optionMatch[1].replace(/\s+/g, ' ').trim())
+        .filter(option => option.length > 0);
+
+      if (symbolOptions.length >= 4) {
+        options = symbolOptions.slice(0, 4);
+      } else {
+        const numericOptions = [...optionSection.matchAll(/(?:^|\n)\s*([1-4])\s*[).．ㆍ:]\s*([\s\S]*?)(?=(?:\n\s*[1-4]\s*[).．ㆍ:]|\n?\s*[①②③④]|$))/g)]
+          .map(optionMatch => optionMatch[2].replace(/\s+/g, ' ').trim())
+          .filter(option => option.length > 0);
+        if (numericOptions.length >= 4) {
+          options = numericOptions.slice(0, 4);
+        }
+      }
+    }
+
+    if (options.length < 4) {
+      continue;
+    }
+
+    if (typeof correctAnswer !== 'number' || correctAnswer < 0 || correctAnswer > 3) {
+      correctAnswer = 0;
+      const defaultExplanation = '정답 정보를 찾을 수 없어 1번을 임시 정답으로 설정했습니다.';
+      explanation = explanation ? `${explanation}\n${defaultExplanation}` : defaultExplanation;
+    }
+
+    const baseHashtags = [subject.trim(), examSession.trim()].filter(Boolean);
+    const keywords = extractKeywords(questionText);
+    const hashtags = Array.from(new Set([...baseHashtags, ...keywords]));
+
+    const difficulty = estimateDifficulty(questionText, options);
+
+    questions.push({
+      id: `heuristic-${timestampBase}-${fallbackCounter++}`,
+      question: questionText,
+      options,
+      correctAnswer,
+      hashtags,
+      difficulty,
+      explanation
+    });
+  }
+
+  return questions;
+}
+
 // MCP 클라이언트 구현
 export async function parseQuestionsWithMCP(
-  pdfText: string, 
-  subject: string, 
+  pdfText: string,
+  subject: string,
   examSession: string,
   mcpEndpoint: string = 'http://localhost:11434'
 ): Promise<Question[]> {
