@@ -1,0 +1,18 @@
+이 디렉토리에 앱 아이콘을 배치하세요:
+
+Windows용:
+- icon.ico (256x256 권장)
+
+macOS용:
+- icon.icns
+
+Linux용:
+- icons/ 디렉토리 안에 다양한 크기의 PNG 파일
+  예: 16x16.png, 32x32.png, 64x64.png, 128x128.png, 256x256.png
+
+아이콘 생성 도구:
+- https://www.electron.build/icons (공식 문서)
+- https://iconverticons.com/online/ (온라인 변환기)
+- Figma, Sketch 등의 디자인 도구
+
+아이콘이 없으면 Electron 기본 아이콘이 사용됩니다.

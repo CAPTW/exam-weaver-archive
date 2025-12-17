@@ -22,3 +22,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Electron 빌드 출력
+release/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.snap
+
+# PDF.js 복사된 파일 (npm install 시 자동 생성)
+public/pdfjs/*.mjs
+public/pdfjs/*.js
+public/pdfjs/cmaps/
+public/pdfjs/standard_fonts/
+
+# 빌드 캐시
+.cache/
+*.tsbuildinfo

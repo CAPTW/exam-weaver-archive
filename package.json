@@ -1,14 +1,25 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "exam-weaver",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "description": "시험 문제 관리 및 생성 시스템 - Exam Weaver",
+  "author": "Exam Weaver Team",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:8080 && electron .\"",
+    "electron:build": "npm run build && npm run copy-pdfjs && electron-builder --win",
+    "electron:build:portable": "npm run build && npm run copy-pdfjs && electron-builder --win portable",
+    "electron:build:mac": "npm run build && npm run copy-pdfjs && electron-builder --mac",
+    "electron:build:linux": "npm run build && npm run copy-pdfjs && electron-builder --linux",
+    "electron:preview": "npm run build && electron .",
+    "copy-pdfjs": "node scripts/copy-pdfjs.js",
+    "postinstall": "node scripts/copy-pdfjs.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -71,6 +82,9 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^8.2.2",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.9.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
@@ -80,6 +94,7 @@
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
-    "vite": "^5.4.1"
+    "vite": "^5.4.1",
+    "wait-on": "^7.2.0"
   }
 }
