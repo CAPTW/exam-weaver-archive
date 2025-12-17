@@ -8,9 +8,18 @@ if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 }
 
+export interface ExtractedImage {
+  pageNumber: number;
+  imageIndex: number;
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
 export interface ParsedPDFContent {
   text: string;
   pages: number;
+  images?: ExtractedImage[];
 }
 
 const KOREAN_STOPWORDS = new Set([
@@ -79,7 +88,92 @@ const estimateDifficulty = (question: string, options: string[]): Question['diff
   return 'easy';
 };
 
-export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> {
+// 이미지 추출 함수
+async function extractImagesFromPage(page: any, pageNum: number): Promise<ExtractedImage[]> {
+  const images: ExtractedImage[] = [];
+
+  try {
+    const operatorList = await page.getOperatorList();
+    const objs = page.objs;
+
+    for (let i = 0; i < operatorList.fnArray.length; i++) {
+      const fnId = operatorList.fnArray[i];
+
+      // OPS.paintImageXObject = 85, OPS.paintJpegXObject = 82
+      if (fnId === 85 || fnId === 82) {
+        const imgName = operatorList.argsArray[i][0];
+
+        try {
+          const imgData = await new Promise<any>((resolve, reject) => {
+            objs.get(imgName, (data: any) => {
+              if (data) resolve(data);
+              else reject(new Error('Image not found'));
+            });
+          });
+
+          if (imgData && imgData.data) {
+            const canvas = document.createElement('canvas');
+            canvas.width = imgData.width;
+            canvas.height = imgData.height;
+            const ctx = canvas.getContext('2d');
+
+            if (ctx) {
+              const imageData = ctx.createImageData(imgData.width, imgData.height);
+              const data = imgData.data;
+
+              // Convert image data to RGBA format
+              if (imgData.kind === 1) {
+                // RGB format
+                for (let j = 0, k = 0; j < data.length; j += 3, k += 4) {
+                  imageData.data[k] = data[j];
+                  imageData.data[k + 1] = data[j + 1];
+                  imageData.data[k + 2] = data[j + 2];
+                  imageData.data[k + 3] = 255;
+                }
+              } else if (imgData.kind === 2) {
+                // RGBA format
+                for (let j = 0; j < data.length; j++) {
+                  imageData.data[j] = data[j];
+                }
+              } else {
+                // Grayscale
+                for (let j = 0, k = 0; j < data.length; j++, k += 4) {
+                  imageData.data[k] = data[j];
+                  imageData.data[k + 1] = data[j];
+                  imageData.data[k + 2] = data[j];
+                  imageData.data[k + 3] = 255;
+                }
+              }
+
+              ctx.putImageData(imageData, 0, 0);
+
+              const dataUrl = canvas.toDataURL('image/png');
+
+              // Skip very small images (likely icons or decorations)
+              if (imgData.width > 50 && imgData.height > 50) {
+                images.push({
+                  pageNumber: pageNum,
+                  imageIndex: images.length,
+                  dataUrl,
+                  width: imgData.width,
+                  height: imgData.height
+                });
+              }
+            }
+          }
+        } catch (imgError) {
+          console.warn(`페이지 ${pageNum}의 이미지 추출 실패:`, imgError);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`페이지 ${pageNum}의 이미지 리스트 추출 실패:`, error);
+  }
+
+  return images;
+}
+
+export async function extractTextFromPDF(file: File, extractImages: boolean = false): Promise<ParsedPDFContent> {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({
@@ -88,9 +182,10 @@ export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> 
       cMapPacked: true,
       standardFontDataUrl: '/pdfjs/standard_fonts/'
     }).promise;
-    
+
     let fullText = '';
-    
+    const allImages: ExtractedImage[] = [];
+
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
@@ -98,15 +193,48 @@ export async function extractTextFromPDF(file: File): Promise<ParsedPDFContent> 
         .map((item: any) => item.str)
         .join(' ');
       fullText += pageText + '\n';
+
+      // Extract images if requested
+      if (extractImages) {
+        const pageImages = await extractImagesFromPage(page, pageNum);
+        allImages.push(...pageImages);
+      }
     }
-    
+
     return {
       text: fullText,
-      pages: pdf.numPages
+      pages: pdf.numPages,
+      images: extractImages ? allImages : undefined
     };
   } catch (error) {
     console.error('PDF 텍스트 추출 오류:', error);
     throw new Error(`PDF 파싱 실패: ${error.message}`);
+  }
+}
+
+// 별도의 이미지 추출 함수 export
+export async function extractImagesFromPDF(file: File): Promise<ExtractedImage[]> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: '/pdfjs/cmaps/',
+      cMapPacked: true,
+      standardFontDataUrl: '/pdfjs/standard_fonts/'
+    }).promise;
+
+    const allImages: ExtractedImage[] = [];
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const pageImages = await extractImagesFromPage(page, pageNum);
+      allImages.push(...pageImages);
+    }
+
+    return allImages;
+  } catch (error) {
+    console.error('PDF 이미지 추출 오류:', error);
+    throw new Error(`PDF 이미지 추출 실패: ${error.message}`);
   }
 }
 

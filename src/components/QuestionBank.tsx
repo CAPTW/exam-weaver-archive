@@ -1,20 +1,26 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, Edit, Trash2, Eye } from 'lucide-react';
-import { useQuestionStore } from '../store/questionStore';
+import { Search, Filter, Edit, Trash2, Eye, Plus, Download, Upload, Trash } from 'lucide-react';
+import { useQuestionStore, Question } from '../store/questionStore';
 import QuestionDetail from './QuestionDetail';
+import QuestionEditor from './QuestionEditor';
+import { toast } from 'sonner';
 
 const QuestionBank = () => {
-  const { questions, deleteQuestion } = useQuestionStore();
+  const { questions, deleteQuestion, clearAllQuestions, exportQuestions, importQuestions } = useQuestionStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState('');
-  const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const filteredQuestions = questions.filter(question => {
     const matchesSearch = question.question.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -46,11 +52,96 @@ const QuestionBank = () => {
     }
   };
 
+  const handleCreateQuestion = () => {
+    setEditingQuestion(null);
+    setEditorMode('create');
+    setIsEditorOpen(true);
+  };
+
+  const handleEditQuestion = (question: Question) => {
+    setEditingQuestion(question);
+    setEditorMode('edit');
+    setIsEditorOpen(true);
+  };
+
+  const handleCloseEditor = () => {
+    setIsEditorOpen(false);
+    setEditingQuestion(null);
+  };
+
+  const handleExport = () => {
+    const data = exportQuestions();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `exam-questions-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('문제 데이터가 내보내기 되었습니다.');
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        const success = importQuestions(result);
+        if (success) {
+          toast.success('문제가 성공적으로 가져오기 되었습니다.');
+        } else {
+          toast.error('잘못된 형식의 파일입니다.');
+        }
+      };
+      reader.readAsText(file);
+    }
+    if (importInputRef.current) {
+      importInputRef.current.value = '';
+    }
+  };
+
+  const handleClearAll = () => {
+    if (window.confirm('정말로 모든 문제를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+      clearAllQuestions();
+      toast.success('모든 문제가 삭제되었습니다.');
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">문제은행</h2>
-        <p className="text-gray-600">저장된 문제들을 검색하고 관리하세요.</p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">문제은행</h2>
+          <p className="text-gray-600">저장된 문제들을 검색하고 관리하세요. (총 {questions.length}개)</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={handleCreateQuestion} className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="w-4 h-4 mr-2" />
+            문제 추가
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
+          <Button variant="outline" onClick={() => importInputRef.current?.click()}>
+            <Upload className="w-4 h-4 mr-2" />
+            가져오기
+          </Button>
+          <Button variant="outline" onClick={handleExport} disabled={questions.length === 0}>
+            <Download className="w-4 h-4 mr-2" />
+            내보내기
+          </Button>
+          {questions.length > 0 && (
+            <Button variant="outline" onClick={handleClearAll} className="text-red-600 hover:text-red-700">
+              <Trash className="w-4 h-4 mr-2" />
+              전체 삭제
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -131,13 +222,24 @@ const QuestionBank = () => {
                 </div>
               </div>
               
+              {/* 문제 이미지 표시 */}
+              {question.imageData && (
+                <div className="mb-4">
+                  <img
+                    src={question.imageData}
+                    alt="문제 이미지"
+                    className="max-h-32 object-contain rounded border"
+                  />
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {question.options.map((option, optionIndex) => (
-                  <div 
-                    key={optionIndex} 
+                  <div
+                    key={optionIndex}
                     className={`p-2 rounded border text-sm ${
-                      optionIndex === question.correctAnswer 
-                        ? 'bg-green-50 border-green-200 text-green-800' 
+                      optionIndex === question.correctAnswer
+                        ? 'bg-green-50 border-green-200 text-green-800'
                         : 'bg-gray-50 border-gray-200'
                     }`}
                   >
@@ -155,7 +257,11 @@ const QuestionBank = () => {
                   <Eye className="w-4 h-4 mr-1" />
                   상세보기
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleEditQuestion(question)}
+                >
                   <Edit className="w-4 h-4 mr-1" />
                   수정
                 </Button>
@@ -188,6 +294,13 @@ const QuestionBank = () => {
           onClose={() => setSelectedQuestion(null)}
         />
       )}
+
+      <QuestionEditor
+        question={editingQuestion}
+        isOpen={isEditorOpen}
+        onClose={handleCloseEditor}
+        mode={editorMode}
+      />
     </div>
   );
 };
