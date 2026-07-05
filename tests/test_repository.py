@@ -69,8 +69,17 @@ def test_init_database_backfills_missing_tags_and_reference_data(repo):
     assert '#기관1' in tags
     assert '#계산' in tags
 
-    subject_codes = [row['code'] for row in repo.get_subject_options('3급항해사(상선)')]
-    assert subject_codes == ['navigation', 'operation', 'regulation', 'english', 'merchant']
+    options = repo.get_filter_options()
+    assert [row['code'] for row in options['exams']] == ['3급기관사']
+    assert [row['code'] for row in repo.get_subject_options('3급기관사')] == ['engine1']
+
+
+def test_empty_database_hides_seed_reference_options(repo):
+    options = repo.get_filter_options()
+
+    assert options['exams'] == []
+    assert repo.get_subject_options() == []
+    assert repo.get_subject_options('4급기관사') == []
 
 
 def test_init_database_creates_comcbt_source_group_tables_and_question_columns(tmp_path):
@@ -264,10 +273,27 @@ def test_init_database_migrates_partial_comcbt_tables_and_importer_can_insert(tm
         assert conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 1
 
 
-def test_init_database_seeds_4th_engine_exam_subjects(repo):
-    subject_codes = [row['code'] for row in repo.get_subject_options('4급기관사')]
+def test_filter_subject_options_only_include_subjects_with_questions(repo):
+    metadata = type('Metadata', (), {'year': 2025, 'session': 1, 'exam_type': '4급기관사'})()
+    question = Question(
+        number=1,
+        text='4급 기관 문제',
+        choices=[
+            Choice(number=1, symbol='㉮', text='가'),
+            Choice(number=2, symbol='㉯', text='나'),
+            Choice(number=3, symbol='㉴', text='사'),
+            Choice(number=4, symbol='㉵', text='아'),
+        ],
+        correct_answer=1,
+        subject_name='기관1',
+        year=2025,
+        session=1,
+        exam_type='4급기관사',
+    )
 
-    assert subject_codes == ['engine1', 'engine2', 'engine3', 'general', 'english']
+    assert repo.save_questions([question], metadata) == 1
+
+    assert [row['code'] for row in repo.get_subject_options('4급기관사')] == ['engine1']
 
 
 def test_save_questions_accepts_4th_engine_exam(repo):

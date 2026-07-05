@@ -813,7 +813,17 @@ class ExamRepository:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            cursor.execute("SELECT code, name FROM exams")
+            cursor.execute("""
+                SELECT e.code, e.name
+                FROM exams e
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM exam_subjects es
+                    JOIN questions q ON q.exam_subject_id = es.id
+                    WHERE es.exam_id = e.id
+                )
+                ORDER BY e.name ASC, e.code ASC
+            """)
             options['exams'] = [{'code': r[0], 'name': r[1]} for r in cursor.fetchall()]
             
             cursor.execute("SELECT DISTINCT year FROM questions ORDER BY year DESC")
@@ -835,7 +845,9 @@ class ExamRepository:
                     FROM subjects s
                     JOIN exam_subjects es ON es.subject_id = s.id
                     JOIN exams e ON es.exam_id = e.id
+                    JOIN questions q ON q.exam_subject_id = es.id
                     WHERE e.code = ?
+                    GROUP BY s.code, s.name_ko, es.display_order
                     ORDER BY es.display_order ASC
                 """, (exam_code,))
                 rows = cursor.fetchall()
@@ -845,6 +857,7 @@ class ExamRepository:
                 SELECT DISTINCT s.code, s.name_ko
                 FROM subjects s
                 JOIN exam_subjects es ON es.subject_id = s.id
+                JOIN questions q ON q.exam_subject_id = es.id
                 ORDER BY s.name_ko ASC
             """)
             return [{'code': r[0], 'name_ko': r[1]} for r in cursor.fetchall()]

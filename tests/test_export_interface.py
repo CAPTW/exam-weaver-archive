@@ -118,6 +118,17 @@ def test_export_interface_keeps_random_subject_section_visible_on_initial_window
     APP.processEvents()
 
 
+def test_export_interface_hides_seed_exams_when_database_has_no_questions(repo):
+    interface = ExportInterface(repo.db_path)
+
+    assert interface.examFilter.count() == 0
+    assert interface.subjectFilter.count() == 1
+    assert interface.subjectSelectionTable.rowCount() == 0
+
+    interface.deleteLater()
+    APP.processEvents()
+
+
 def test_apply_all_subject_count_selects_every_subject_with_same_count():
     interface = ExportInterface.__new__(ExportInterface)
     interface.subjectSelectionRows = [

@@ -111,6 +111,17 @@ def test_practice_interface_defaults_to_end_of_exam_grading(repo, sample_metadat
     APP.processEvents()
 
 
+def test_practice_interface_hides_seed_exams_when_database_has_no_questions(repo):
+    widget = PracticeInterface(repo.db_path)
+
+    assert widget.examFilter.count() == 0
+    assert widget.subjectSelectionTable.rowCount() == 0
+    assert widget.subjectSelectionRows == []
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_practice_interface_instant_mode_reveals_and_locks_answer(
     repo,
     sample_metadata,
