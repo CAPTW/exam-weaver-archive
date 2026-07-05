@@ -23,6 +23,7 @@ def test_codex_panel_defaults_to_read_only_and_denies_approval_requests(tmp_path
     assert widget.thread_id is None
     assert widget.side_panel is True
     assert widget.collapseButton.text() == "접기"
+    assert widget.loginButton.text() == "로그인"
 
     widget.deleteLater()
     APP.processEvents()

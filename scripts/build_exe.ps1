@@ -123,6 +123,9 @@ ExamGenerator Portable
 4. data\exam_bank.db is the writable user database used by the app.
 5. If data\exam_bank.db is missing, the app recreates it from seed_exam_bank.db.
 6. Images referenced by the DB are stored under data\portable_images.
+7. The Codex side panel is bundled through openai-codex. No personal auth is
+   shipped with the app. Each user can open Codex > 로그인 to connect their
+   own account; local auth is stored under data\codex_panel_home.
 
 Build timestamp: $timestamp
 Source DB: $PortableDbPath

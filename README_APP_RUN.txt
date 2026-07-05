@@ -18,6 +18,15 @@ Exam Generator 실행 안내
 - 수정 직후 빠른 확인: Run_Latest_App.bat
 - 다른 사용자에게 전달하기 전 확인: Build_And_Run_Packaged_App.bat
 
+Codex 패널
+
+- 이 코드베이스에는 Codex SDK 연결이 포함되어 있습니다.
+- requirements.txt의 openai-codex와 ExamGenerator.spec의 openai_codex/codex_cli_bin 번들 설정으로 실행됩니다.
+- 개인 인증 파일은 저장소에 포함하지 않습니다.
+- 앱에서 Codex > 로그인 버튼을 누르면 각 사용자의 계정으로 Codex 로그인을 진행합니다.
+- 로그인 결과는 로컬 런타임 폴더인 data\codex_panel_home 아래에만 저장됩니다.
+- 이미 %USERPROFILE%\.codex\auth.json이 있는 사용자는 앱이 해당 인증을 data\codex_panel_home으로 복사해 사용합니다.
+
 주의
 
 - Build_And_Run_Packaged_App.bat은 패키징 과정 때문에 시간이 걸릴 수 있습니다.

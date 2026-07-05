@@ -4,6 +4,7 @@ import os
 import shutil
 import traceback
 import uuid
+import webbrowser
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
@@ -320,6 +321,43 @@ class CodexStatusWorker(QThread):
         return "Codex 계정 정보를 읽었습니다."
 
 
+class CodexLoginWorker(QThread):
+    login_started = pyqtSignal(str, str)
+    result = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, cwd: str, parent=None):
+        super().__init__(parent)
+        self.cwd = cwd
+
+    def run(self):
+        try:
+            from openai_codex import Codex, CodexConfig
+
+            apply_hidden_codex_process_patch()
+            codex_home = prepare_panel_codex_home(self.cwd)
+            config = CodexConfig(
+                cwd=self.cwd,
+                client_name="exam_generator_codex_panel",
+                client_title="Exam Generator Codex Panel",
+                client_version="0.1.0",
+                env={"CODEX_HOME": str(codex_home)},
+            )
+            with Codex(config=config) as codex:
+                login = codex.login_chatgpt_device_code()
+                self.login_started.emit(login.verification_url, login.user_code)
+                try:
+                    webbrowser.open(login.verification_url)
+                except Exception:
+                    pass
+                login.wait()
+                account = codex.account(refresh_token=False)
+                self.result.emit(CodexStatusWorker._format_account(account))
+        except Exception as exc:  # noqa: BLE001 - surfaced to UI
+            traceback.print_exc()
+            self.error.emit(str(exc))
+
+
 class CodexInterface(QWidget):
     collapse_requested = pyqtSignal()
 
@@ -331,6 +369,7 @@ class CodexInterface(QWidget):
         self.image_paths: list[str] = []
         self.worker: CodexRunWorker | None = None
         self.status_worker: CodexStatusWorker | None = None
+        self.login_worker: CodexLoginWorker | None = None
         self.progress_timer = QTimer(self)
         self.progress_timer.setInterval(2500)
         self.progress_timer.timeout.connect(self._append_progress_tick)
@@ -397,6 +436,9 @@ class CodexInterface(QWidget):
         self.checkStatusButton = PushButton("인증 확인", self)
         self.checkStatusButton.clicked.connect(self.check_status)
 
+        self.loginButton = PushButton("로그인", self)
+        self.loginButton.clicked.connect(self.login_codex)
+
         self.newThreadButton = PushButton("새 Thread", self)
         self.newThreadButton.clicked.connect(self.new_thread)
 
@@ -407,6 +449,7 @@ class CodexInterface(QWidget):
 
             button_row = QHBoxLayout()
             button_row.addWidget(self.checkStatusButton)
+            button_row.addWidget(self.loginButton)
             button_row.addWidget(self.newThreadButton)
 
             controls_layout.addWidget(self.modelCombo)
@@ -419,6 +462,7 @@ class CodexInterface(QWidget):
             controls_layout.addWidget(self.approvalCombo)
             controls_layout.addStretch(1)
             controls_layout.addWidget(self.checkStatusButton)
+            controls_layout.addWidget(self.loginButton)
             controls_layout.addWidget(self.newThreadButton)
         self.vBoxLayout.addLayout(controls_layout)
 
@@ -498,6 +542,7 @@ class CodexInterface(QWidget):
             self.stopButton,
             self.sendButton,
             self.checkStatusButton,
+            self.loginButton,
             self.newThreadButton,
         ):
             self._apply_font_size(widget)
@@ -516,6 +561,7 @@ class CodexInterface(QWidget):
             self.stopButton: 56,
             self.sendButton: 64,
             self.checkStatusButton: 76,
+            self.loginButton: 58,
             self.newThreadButton: 78,
         }
         for button, width in button_widths.items():
@@ -650,6 +696,18 @@ class CodexInterface(QWidget):
         self.status_worker.finished.connect(lambda: self.checkStatusButton.setEnabled(True))
         self.status_worker.start()
 
+    def login_codex(self):
+        if self.login_worker is not None and self.login_worker.isRunning():
+            return
+        self.loginButton.setEnabled(False)
+        self._set_status("Codex 로그인 준비 중...")
+        self.login_worker = CodexLoginWorker(self.base_dir, self)
+        self.login_worker.login_started.connect(self._on_login_started)
+        self.login_worker.result.connect(self._on_login_result)
+        self.login_worker.error.connect(self._on_login_error)
+        self.login_worker.finished.connect(lambda: self.loginButton.setEnabled(True))
+        self.login_worker.start()
+
     def attach_image(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self,
@@ -756,6 +814,46 @@ class CodexInterface(QWidget):
             parent=self,
         )
 
+    def _on_login_started(self, verification_url: str, user_code: str):
+        self._set_status("브라우저에서 Codex 로그인 진행 중")
+        self._append_block(
+            "System",
+            f"Codex 로그인 페이지가 열렸습니다.\nURL: {verification_url}\nCode: {user_code}",
+        )
+        InfoBar.info(
+            title="Codex 로그인",
+            content=f"브라우저에서 코드를 입력하세요: {user_code}",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=10000,
+            parent=self,
+        )
+
+    def _on_login_result(self, message: str):
+        self._set_status(message)
+        InfoBar.success(
+            title="Codex 로그인 완료",
+            content=message,
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+            parent=self,
+        )
+
+    def _on_login_error(self, message: str):
+        self._set_status("로그인 실패")
+        InfoBar.error(
+            title="Codex 로그인 실패",
+            content=message,
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=6000,
+            parent=self,
+        )
+
     def _set_running(self, running: bool):
         self.sendButton.setEnabled(not running)
         self.stopButton.setEnabled(running)
@@ -821,4 +919,6 @@ class CodexInterface(QWidget):
             self.worker.wait(1500)
         if self.status_worker is not None and self.status_worker.isRunning():
             self.status_worker.wait(1500)
+        if self.login_worker is not None and self.login_worker.isRunning():
+            self.login_worker.wait(1500)
         super().closeEvent(event)
