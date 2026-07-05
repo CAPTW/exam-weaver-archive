@@ -9,6 +9,8 @@ from src.gui.interface.codex_panel import (
     apply_hidden_codex_process_patch,
     prepare_panel_codex_home,
     progress_message_for_event_method,
+    render_codex_inline_html,
+    render_codex_text_to_html,
 )
 
 
@@ -70,6 +72,39 @@ def test_codex_panel_uses_compact_side_panel_controls(tmp_path):
     assert widget.attachImageButton.height() <= 32
     assert widget.sendButton.minimumWidth() >= 64
     assert widget.progressView.maximumHeight() <= 72
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_codex_renderer_formats_math_symbols_and_code():
+    html = render_codex_text_to_html(
+        r"식은 \(V=\frac{IR}{2}\), \sqrt{GM}, \overline{AB}, \theta \leq 30^\circ 입니다."
+    )
+
+    assert "math-inline" in html
+    assert "&frasl;" in html
+    assert "√" in html
+    assert "text-decoration: overline" in html
+    assert "θ" in html
+    assert "≤" in html
+    assert "°" in html
+
+    inline = render_codex_inline_html(r"`<tag>` and \(x<y\)")
+    assert "<code>&lt;tag&gt;</code>" in inline
+    assert "x&lt;y" in inline
+
+
+def test_codex_panel_rerenders_split_streaming_math_delta(tmp_path):
+    widget = CodexInterface(tmp_path, side_panel=True)
+
+    widget._append_block("Codex")
+    widget._append_answer_delta(r"계산식: \sqrt")
+    widget._append_answer_delta(r"{2} + \frac{1}{3}")
+
+    plain_text = widget.chatView.toPlainText()
+    assert "√2" in plain_text
+    assert "1⁄3" in plain_text or "1/3" in plain_text
 
     widget.deleteLater()
     APP.processEvents()

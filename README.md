@@ -134,6 +134,11 @@ Codex SDK support is included through:
 - `openai_codex` and `codex_cli_bin` collection in `ExamGenerator.spec`
 - `src/gui/interface/codex_panel.py`
 
+The side panel renders Codex responses as safe rich text, including common
+LaTeX formulas such as `\sqrt{}`, `\frac{}{}`, `\overline{}`, inline
+`\( ... \)` / display `$$ ... $$` math, code blocks, and common mathematical
+symbols.
+
 Personal authentication is not included. Each user can open the app, use the
 Codex panel's **로그인** button, and connect their own account. Local Codex state
 is stored under:
@@ -347,6 +352,10 @@ Codex SDK 연결은 다음 파일에 준비되어 있습니다.
 - `requirements.txt`의 `openai-codex`
 - `ExamGenerator.spec`의 `openai_codex`, `codex_cli_bin` 번들 설정
 - `src/gui/interface/codex_panel.py`
+
+Codex 사이드 패널은 응답을 안전한 rich text로 렌더링하며, `\sqrt{}`,
+`\frac{}{}`, `\overline{}`, inline `\( ... \)` / display `$$ ... $$` 수식,
+code block, 주요 수학 특수기호를 보기 좋게 표시합니다.
 
 개인 인증은 저장소에 포함하지 않습니다. 사용자는 앱의 Codex 패널에서
 **로그인** 버튼을 눌러 자기 계정으로 연결하면 됩니다. 로컬 Codex 상태는 아래
