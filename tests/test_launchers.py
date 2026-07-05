@@ -39,6 +39,18 @@ def test_packaged_app_launcher_tests_builds_and_runs_dist_exe():
     assert "start \"\" \"%PACKAGED_EXE%\"" in content
 
 
+def test_github_portable_launcher_builds_no_db_zip():
+    launcher = ROOT / "Build_GitHub_Portable_App.bat"
+
+    content = launcher.read_text(encoding="utf-8")
+
+    assert ".venv\\Scripts\\python.exe" in content
+    assert "scripts\\build_exe.ps1" in content
+    assert "-GithubPortable" in content
+    assert "-IsolatedDist" in content
+    assert "without a question DB" in content
+
+
 def test_run_readme_explains_both_non_programmer_paths():
     readme = ROOT / "README_APP_RUN.txt"
 
@@ -46,5 +58,6 @@ def test_run_readme_explains_both_non_programmer_paths():
 
     assert "Run_Latest_App.bat" in content
     assert "Build_And_Run_Packaged_App.bat" in content
+    assert "Portable ZIP" in content
     assert "최신 코드" in content
     assert "패키징" in content

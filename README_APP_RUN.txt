@@ -13,10 +13,17 @@ Exam Generator 실행 안내
    - 새로 만들어진 dist\ExamGenerator\ExamGenerator.exe를 실행합니다.
    - 프로그래밍을 모르는 사용자가 실제 배포본 기준으로 확인할 때 사용합니다.
 
+3. GitHub Releases의 Portable ZIP
+   - Python, pip, .venv 설정 없이 실행할 수 있는 사용자용 배포본입니다.
+   - ZIP을 압축 해제한 뒤 Run_ExamGenerator.bat을 실행하면 됩니다.
+   - GitHub용 Portable ZIP에는 실제 문제은행 DB가 포함되지 않습니다.
+   - 첫 실행 시 빈 data\exam_bank.db가 생성되며, 문제를 import하거나 DB를 연결한 뒤 문제풀이/시험지 출력 목록이 표시됩니다.
+
 권장 사용 방식
 
 - 수정 직후 빠른 확인: Run_Latest_App.bat
 - 다른 사용자에게 전달하기 전 확인: Build_And_Run_Packaged_App.bat
+- Python 환경이 없는 사용자에게 전달: GitHub Releases의 Portable ZIP
 
 Codex 패널
 

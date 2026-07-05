@@ -159,6 +159,14 @@ Or double-click:
 Run_Latest_App.bat
 ```
 
+### Portable Release
+
+Users who do not want to configure Python can download the portable ZIP from
+GitHub Releases, extract it, and run `Run_ExamGenerator.bat`. The GitHub
+portable build intentionally ships without the production question-bank DB. On
+first launch it creates an empty local `data\exam_bank.db`; exam dropdowns stay
+empty until questions are imported or a local DB is connected.
+
 ### CLI Examples
 
 Initialize a local empty DB:
@@ -362,6 +370,14 @@ python -m venv .venv
 ```text
 Run_Latest_App.bat
 ```
+
+### Portable Release
+
+Python 환경 구성이 어려운 사용자는 GitHub Releases에서 portable ZIP을 내려받아
+압축 해제 후 `Run_ExamGenerator.bat`을 실행하면 됩니다. GitHub portable
+build에는 운영 문제은행 DB가 포함되지 않습니다. 첫 실행 시 빈 로컬
+`data\exam_bank.db`가 생성되며, 문제를 import하거나 로컬 DB를 연결한 뒤
+문제풀이/시험지 출력의 Exam 목록이 표시됩니다.
 
 ### CLI 예시
 
