@@ -22,8 +22,8 @@ def dump_text(pdf_path, label, max_pages=3):
         print(f"Error reading PDF: {e}")
 
 if __name__ == "__main__":
-    q_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2025/2025 3급 기관사.pdf"
-    a_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2025/2025 정답 모음.pdf"
+    q_path = "G:/내 드라이브/수업/시험자료 모음/2025/2025 3급 기관사.pdf"
+    a_path = "G:/내 드라이브/수업/시험자료 모음/2025/2025 정답 모음.pdf"
     
     dump_text(q_path, "2025 QUESTION PDF", max_pages=5)
     dump_text(a_path, "2025 ANSWER PDF", max_pages=3)

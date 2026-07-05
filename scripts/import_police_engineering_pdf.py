@@ -1,4 +1,4 @@
-"""Import RonPark police navigation PDF questions into the SQLite question bank."""
+"""Import offline police engineering PDF questions into the SQLite question bank."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.analyze_police_navigation_pdfs import (  # noqa: E402
+from scripts.analyze_police_engineering_pdfs import (  # noqa: E402
     KNOWN_GROUPS,
     SUBJECT_NAME,
     build_groups,
@@ -40,8 +40,8 @@ from src.parser.question import Choice, Question  # noqa: E402
 from src.web_import.importer import QuestionSource, QuestionSourceRegistry, sha256_file, utc_timestamp  # noqa: E402
 
 
-DEFAULT_OUTPUT_DIR = Path("outputs/ronpark_police_navigation_20260702_v3")
-EXAM_CODE = "해양경찰 경찰직 항해학"
+DEFAULT_OUTPUT_DIR = Path("outputs/police_engineering_pdf_20260702")
+EXAM_CODE = "해양경찰 경찰직 기관학"
 GENERIC_CHOICES = [
     "① 원문 보기 참조",
     "② 원문 보기 참조",
@@ -50,9 +50,9 @@ GENERIC_CHOICES = [
 ]
 
 ANSWER_FILENAMES = {
-    "recent_2025_h2": "[기출정답]경찰직 항해학(25년 하반기).pdf",
-    "recent_2024_h2_2025_h1": "[기출정답]경찰직 항해학(24년 하반기-25년 상반기).pdf",
-    "archive_2024_2013": "[기출정답]경찰직 항해학(24년-13년).pdf",
+    "recent_2025_h2": "[기출정답]경찰직 기관학(25년 하반기).pdf",
+    "recent_2024_h2_2025_h1": "[기출정답]경찰직 기관학(24년 하반기-25년 상반기).pdf",
+    "archive_2024_2013": "[기출정답]경찰직 기관술(학)(24-13년).pdf",
 }
 
 
@@ -63,13 +63,21 @@ def _keys(filename: str, indexes: Iterable[int] | None = None) -> list[str]:
 
 
 ANSWER_KEYS = {
-    "recent_2025_h2": _keys("[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf", [0, 1]),
+    "recent_2025_h2": _keys("[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf", [0, 1]),
     "recent_2024_h2_2025_h1": _keys(
-        "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+        "[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf",
         [2, 3, 4],
     ),
-    "archive_2024_2013": _keys("[기출문제]경찰직 항해학(24년-13년).pdf"),
+    "archive_2024_2013": _keys(
+        "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+        [0, 1, 2, 3, 4] + list(range(6, 23)),
+    ),
 }
+
+NO_SOURCE_ANSWER_KEYS = set(_keys("[기출문제]경찰직 기관술(학)(24-13년).pdf", [5]))
+
+MANUAL_ARCHIVE_2020_1 = [3, 3, 4, 2, 4, 4, 2, 3, 3, 4, 4, 4, 1, 3, 2, 3, 1, 3, 3, 2]
+MANUAL_ARCHIVE_2017_2 = [2, 4, 1, 2, 3, 3, 1, 4, 3, 2, 4, 2, 1, 3, 4, 1, 2, 4, 3, 4]
 
 
 @dataclass
@@ -86,7 +94,7 @@ class ParsedQuestion:
 
 
 class DigitAnswerTableReader:
-    """Read RonPark answer tables using grid geometry plus central digit matching."""
+    """Read offline answer tables using grid geometry plus central digit matching."""
 
     def __init__(self) -> None:
         self.templates = self._build_digit_templates()
@@ -439,10 +447,18 @@ def build_answer_map(input_dir: Path) -> dict[str, list[int]]:
     expected_counts = {
         "recent_2025_h2": 2,
         "recent_2024_h2_2025_h1": 3,
-        "archive_2024_2013": 24,
+        "archive_2024_2013": 22,
     }
     for bucket, filename in ANSWER_FILENAMES.items():
         tables = reader.read_pdf(answer_dir / filename)
+        if bucket == "archive_2024_2013" and len(tables) == 20:
+            tables = (
+                tables[:9]
+                + [MANUAL_ARCHIVE_2020_1]
+                + tables[9:13]
+                + [MANUAL_ARCHIVE_2017_2]
+                + tables[13:]
+            )
         expected = expected_counts[bucket]
         if len(tables) != expected:
             raise RuntimeError(f"Expected {expected} answer tables in {filename}, got {len(tables)}")
@@ -451,6 +467,8 @@ def build_answer_map(input_dir: Path) -> dict[str, list[int]]:
             raise RuntimeError(f"Answer key/table count mismatch for {filename}: {len(keys)} keys, {len(tables)} tables")
         for key, answers in zip(keys, tables):
             result[key] = answers
+    for key in NO_SOURCE_ANSWER_KEYS:
+        result[key] = [0] * 20
     return result
 
 
@@ -520,9 +538,9 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
             topic = classify_topic(segment)
             topic_tags = [
                 "해양경찰",
-                "론박",
-                "경찰직항해학",
-                "항해학",
+                "외부자료",
+                "경찰직기관학",
+                "기관학",
                 f"G{group_index:03d}",
                 answer_key,
                 str(group.get("period") or "").strip(),
@@ -583,7 +601,7 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
 
 def backup_database(db_path: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = db_path.with_name(f"{db_path.stem}.before_ronpark_police_navigation_{stamp}{db_path.suffix}")
+    backup = db_path.with_name(f"{db_path.stem}.before_police_engineering_pdf_{stamp}{db_path.suffix}")
     shutil.copy2(db_path, backup)
     return backup
 
@@ -630,7 +648,7 @@ def make_source(item: ParsedQuestion) -> QuestionSource:
     source_hash = sha256_file(source_path) if source_path.exists() else item.source_filename
     content_hash = hashlib.sha256((source_hash + f":G{item.group_index:03d}").encode("utf-8")).hexdigest()
     return QuestionSource(
-        provider="ronpark_pdf",
+        provider="offline_pdf",
         source_url=str(source_path),
         document_id=f"G{item.group_index:03d}",
         attachment_url=None,
@@ -700,7 +718,7 @@ def load_page_records(output_dir: Path) -> list[dict]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input_dir", type=Path, help="Folder containing the RonPark police navigation PDFs.")
+    parser.add_argument("input_dir", type=Path, help="Folder containing the offline police engineering PDFs.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Folder containing extracted_text/pages.jsonl.")
     parser.add_argument("--db", type=Path, action="append", default=None, help="Target SQLite DB. Repeat for multiple DBs.")
     parser.add_argument("--apply", action="store_true", help="Write to DB. Without this flag, only validate and summarize.")

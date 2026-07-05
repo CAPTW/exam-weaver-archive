@@ -157,7 +157,7 @@ class QuestionParser:
             return True
         if QUESTION_START.search(text):
             return False
-        indicators = ['해기사 시험', '기출']
+        indicators = ['자격시험', '정기시험', '기출']
         return any(ind in text for ind in indicators)
     
     def _recover_missing_questions(

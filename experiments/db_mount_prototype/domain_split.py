@@ -14,7 +14,7 @@ from .mount_repo import MountedDatabase, write_manifest
 
 DOMAIN_KEYWORDS: Dict[str, List[str]] = {
     "maritime": [
-        "항해사", "기관사", "해기사", "상선", "어선", "소형선박", "운항사", "해양",
+        "항해사", "기관사", "자격", "상선", "어선", "소형선박", "운항사", "해양",
         "항로표지",
     ],
     "public_service": [

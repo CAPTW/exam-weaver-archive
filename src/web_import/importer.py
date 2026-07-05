@@ -484,4 +484,19 @@ class QuestionSourceRegistry:
             (source.provider, source.source_url, source.content_hash),
         )
         row = cursor.fetchone()
+        if row:
+            return int(row[0])
+
+        cursor = conn.execute(
+            """
+            SELECT id
+            FROM question_sources
+            WHERE source_url = ?
+              AND content_hash = ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (source.source_url, source.content_hash),
+        )
+        row = cursor.fetchone()
         return int(row[0]) if row else None

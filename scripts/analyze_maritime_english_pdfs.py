@@ -216,7 +216,7 @@ def strip_noise(text: str) -> str:
         if not line:
             continue
         compact = re.sub(r"\s+", "", line)
-        if "론박" in compact or "합격코스" in compact or "RONPARK" in line.upper():
+        if "합격코스" in compact or "커리큘럼" in compact or "동시학습" in compact:
             continue
         if "커리큘럼" in compact or "실전대비" in compact:
             continue

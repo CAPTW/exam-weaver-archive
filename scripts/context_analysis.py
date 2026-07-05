@@ -41,5 +41,5 @@ def detailed_context_analysis(pdf_path):
         traceback.print_exc()
 
 if __name__ == "__main__":
-    q_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2025/2025 3급 기관사.pdf"
+    q_path = "G:/내 드라이브/수업/시험자료 모음/2025/2025 3급 기관사.pdf"
     detailed_context_analysis(q_path)

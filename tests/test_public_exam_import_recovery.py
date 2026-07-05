@@ -1,4 +1,4 @@
-from scripts.audit_gonggichul_import_blocks import (
+from scripts.audit_public_exam_import_blocks import (
     answer_secondary_links,
     classify_no_text_case,
     classify_roleish,
@@ -6,7 +6,7 @@ from scripts.audit_gonggichul_import_blocks import (
     matching_primary_relatives,
     status_counts,
 )
-from scripts.import_gonggichul_pdf_folder import (
+from scripts.import_public_exam_pdf_folder import (
     ExamKey,
     NoTextProbeResult,
     candidate_key_aliases,

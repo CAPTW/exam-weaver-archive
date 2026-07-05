@@ -24,8 +24,8 @@ def dump_text(pdf_path, label):
         print(f"Error reading PDF: {e}")
 
 if __name__ == "__main__":
-    q_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2020/해기사-2020-정기-2-3급기관사.pdf"
-    a_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2020/2020 3급기관답안.pdf"
+    q_path = "G:/내 드라이브/수업/시험자료 모음/2020/exam-2020-정기-2-3급기관사.pdf"
+    a_path = "G:/내 드라이브/수업/시험자료 모음/2020/2020 3급기관답안.pdf"
     
     # Dump enough to see the structure
     dump_text(q_path, "QUESTION PDF")

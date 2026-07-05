@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExamPDFParser:
-    """해기사 시험 PDF 파서"""
+    """시험 PDF 파서"""
     
     def __init__(self, work_dir: str = './data/extracted'):
         self.extractor = PDFExtractor(work_dir)
@@ -169,7 +169,7 @@ class ExamPDFParser:
         blocks = []
         for idx, page in enumerate(pages):
             match = re.search(
-                r'(20\d{2})\s*년\s*도?\s*정기\s*제\s*([1-4])\s*회\s*해기사시험',
+                r'(20\d{2})\s*년\s*도?\s*정기\s*제\s*([1-4])\s*회\s*(?:[가-힣A-Za-z]+)?시험',
                 page.text or '',
             )
             if not match:

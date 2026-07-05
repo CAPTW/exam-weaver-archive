@@ -22,10 +22,10 @@ PAGE_NUMBER = re.compile(r'^-\s*(\d+)\s*-', re.MULTILINE)
 # ============ 표지 관련 패턴 ============
 
 # 표지 정보 추출: 연도, 회차
-# 예: "2022년 제3회", "2022 1 해기사"
+# 예: "2022년 제3회", "2022 1 자격시험"
 COVER_INFO_LIST = [
     re.compile(r'(\d{4})\s*년\s*제?\s*(\d+)\s*회', re.DOTALL),
-    re.compile(r'(\d{4})\s+(\d+)\s+해기사', re.DOTALL),
+    re.compile(r'(\d{4})\s+([1-4])(?:\s+[가-힣A-Za-z]+)?(?:\s*시험)?', re.DOTALL),
     re.compile(r'(\d{4})\s*년.*?(\d+)\s*회', re.DOTALL)
 ]
 
@@ -41,7 +41,7 @@ COVER_INFO = COVER_INFO_LIST[0]
 EXAM_TYPE = EXAM_TYPE_LIST[0]
 
 # 표지 식별 키워드 (너무 일반적인 단어는 제외)
-COVER_INDICATORS = ['해기사', '문 제 지', '문  제  지', '기출']
+COVER_INDICATORS = ['문 제 지', '문  제  지', '자격시험', '정기시험', '기출']
 
 # ============ 정답지 관련 패턴 ============
 

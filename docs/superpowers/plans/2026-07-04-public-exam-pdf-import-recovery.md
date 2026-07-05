@@ -1,10 +1,10 @@
-# Gonggichul PDF Import Recovery Implementation Plan
+# public exam PDF Import Recovery Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reduce unresolved PDFs from `T:\내 드라이브\[공부] 시험자료` by turning recoverable `blocked_no_text`, `skipped_answer_secondary`, and `blocked_quality` cases into validated DB imports while preserving the existing Exam-Subject-Year-session duplicate gate.
 
-**Architecture:** Keep `scripts/import_gonggichul_pdf_folder.py` as the importer, but add a recovery audit layer and targeted parsers instead of relaxing quality gates globally. The recovery process first deduplicates inventory rows, classifies failure causes, then reprocesses only recoverable cohorts through improved extraction, answer pairing, and quality checks.
+**Architecture:** Keep `scripts/import_public_exam_pdf_folder.py` as the importer, but add a recovery audit layer and targeted parsers instead of relaxing quality gates globally. The recovery process first deduplicates inventory rows, classifies failure causes, then reprocesses only recoverable cohorts through improved extraction, answer pairing, and quality checks.
 
 **Tech Stack:** Python 3, PyMuPDF (`fitz`), SQLite, existing `ComcbtPdfParser`, existing `ComcbtImportService`, pytest.
 
@@ -12,18 +12,18 @@
 
 ## File Structure
 
-- Modify: `scripts/import_gonggichul_pdf_folder.py`
+- Modify: `scripts/import_public_exam_pdf_folder.py`
   - Add audit-friendly failure notes.
   - Improve `blocked_no_text` fallback extraction.
   - Improve answer-file pairing and answer-primary promotion.
   - Add targeted reprocess list support.
-- Create: `scripts/audit_gonggichul_import_blocks.py`
+- Create: `scripts/audit_public_exam_import_blocks.py`
   - Deduplicate `01_pdf_inventory.csv`.
   - Classify failure causes by root category, role, raw text availability, and review error.
   - Write phase CSVs for reprocessing.
-- Create: `tests/test_gonggichul_import_recovery.py`
+- Create: `tests/test_public_exam_import_recovery.py`
   - Unit tests for role detection, answer pairing, answer-primary promotion, and deduped inventory logic.
-- Output: `outputs/gonggichul_pdf_import_20260704_recovery/`
+- Output: `outputs/public_exam_pdf_import_20260704_recovery/`
   - Store audit CSVs, reprocess logs, and final summaries.
 
 ---
@@ -31,13 +31,13 @@
 ### Task 1: Build A Reliable Failure Audit
 
 **Files:**
-- Create: `scripts/audit_gonggichul_import_blocks.py`
-- Test: `tests/test_gonggichul_import_recovery.py`
+- Create: `scripts/audit_public_exam_import_blocks.py`
+- Test: `tests/test_public_exam_import_recovery.py`
 
 - [x] **Step 1: Write tests for deduped inventory and status grouping**
 
 ```python
-from scripts.audit_gonggichul_import_blocks import dedupe_inventory_rows, status_counts
+from scripts.audit_public_exam_import_blocks import dedupe_inventory_rows, status_counts
 
 
 def test_dedupe_inventory_rows_keeps_last_non_blank_status():
@@ -72,10 +72,10 @@ def test_status_counts_uses_deduped_rows():
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_gonggichul_import_recovery.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_public_exam_import_recovery.py -q
 ```
 
-Expected: FAIL because `scripts.audit_gonggichul_import_blocks` does not exist.
+Expected: FAIL because `scripts.audit_public_exam_import_blocks` does not exist.
 
 - [x] **Step 3: Implement the audit script**
 
@@ -104,10 +104,10 @@ def status_counts(rows):
 Add CLI:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\audit_gonggichul_import_blocks.py `
-  --inventory outputs\gonggichul_pdf_import_20260703\01_pdf_inventory.csv `
-  --review-dir outputs\gonggichul_pdf_import_20260703\review_payloads `
-  --output-dir outputs\gonggichul_pdf_import_20260704_recovery\audit
+.\.venv\Scripts\python.exe scripts\audit_public_exam_import_blocks.py `
+  --inventory outputs\public_exam_pdf_import_20260703\01_pdf_inventory.csv `
+  --review-dir outputs\public_exam_pdf_import_20260703\review_payloads `
+  --output-dir outputs\public_exam_pdf_import_20260704_recovery\audit
 ```
 
 Expected outputs:
@@ -129,14 +129,14 @@ Expected:
 ### Task 2: Split `blocked_no_text` Into Recoverable And OCR-Required
 
 **Files:**
-- Modify: `scripts/audit_gonggichul_import_blocks.py`
-- Modify: `scripts/import_gonggichul_pdf_folder.py`
-- Test: `tests/test_gonggichul_import_recovery.py`
+- Modify: `scripts/audit_public_exam_import_blocks.py`
+- Modify: `scripts/import_public_exam_pdf_folder.py`
+- Test: `tests/test_public_exam_import_recovery.py`
 
 - [x] **Step 1: Write tests for raw-text recoverability classification**
 
 ```python
-from scripts.audit_gonggichul_import_blocks import classify_no_text_case
+from scripts.audit_public_exam_import_blocks import classify_no_text_case
 
 
 def test_classify_no_text_case_marks_text_start_failure():
@@ -186,11 +186,11 @@ In `clean_pdf_text`, when `EXAM_START_RE` fails but raw page text has question m
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\import_gonggichul_pdf_folder.py `
+.\.venv\Scripts\python.exe scripts\import_public_exam_pdf_folder.py `
   "T:\내 드라이브\[공부] 시험자료" `
-  --output-dir outputs\gonggichul_pdf_import_20260704_recovery\phase1 `
+  --output-dir outputs\public_exam_pdf_import_20260704_recovery\phase1 `
   --apply --skip-backup `
-  --reprocess-list outputs\gonggichul_pdf_import_20260704_recovery\audit\reprocess_candidates_phase1.csv `
+  --reprocess-list outputs\public_exam_pdf_import_20260704_recovery\audit\reprocess_candidates_phase1.csv `
   --log-every 50
 ```
 
@@ -203,14 +203,14 @@ Expected:
 ### Task 3: Recover Primary-Missing Answer-Only Sets
 
 **Files:**
-- Modify: `scripts/import_gonggichul_pdf_folder.py`
-- Test: `tests/test_gonggichul_import_recovery.py`
+- Modify: `scripts/import_public_exam_pdf_folder.py`
+- Test: `tests/test_public_exam_import_recovery.py`
 
 - [x] **Step 1: Write tests for answer-only primary promotion**
 
 ```python
 from pathlib import Path
-from scripts.import_gonggichul_pdf_folder import should_promote_answer_pdf
+from scripts.import_public_exam_pdf_folder import should_promote_answer_pdf
 
 
 def test_promote_answer_pdf_when_no_matching_question_pdf_exists(tmp_path):
@@ -249,8 +249,8 @@ Expected:
 ### Task 4: Fix `blocked_quality` By Error Class
 
 **Files:**
-- Modify: `scripts/import_gonggichul_pdf_folder.py`
-- Test: `tests/test_gonggichul_import_recovery.py`
+- Modify: `scripts/import_public_exam_pdf_folder.py`
+- Test: `tests/test_public_exam_import_recovery.py`
 
 - [x] **Step 1: Summarize review payload errors**
 
@@ -284,13 +284,13 @@ Expected:
 ### Task 5: Strengthen Duplicate-Key Normalization
 
 **Files:**
-- Modify: `scripts/import_gonggichul_pdf_folder.py`
-- Test: `tests/test_gonggichul_import_recovery.py`
+- Modify: `scripts/import_public_exam_pdf_folder.py`
+- Test: `tests/test_public_exam_import_recovery.py`
 
 - [x] **Step 1: Write tests for common alias keys**
 
 ```python
-from scripts.import_gonggichul_pdf_folder import ExamKey, candidate_key_aliases
+from scripts.import_public_exam_pdf_folder import ExamKey, candidate_key_aliases
 
 
 def test_candidate_alias_for_haegyeong_1cha():
@@ -325,14 +325,14 @@ Progress on 2026-07-04 continuation:
 ### Task 6: Final Reprocess And Verification
 
 **Files:**
-- Output: `outputs/gonggichul_pdf_import_20260704_recovery/final_summary.json`
+- Output: `outputs/public_exam_pdf_import_20260704_recovery/final_summary.json`
 
 - [ ] **Step 1: Create DB backup**
 
 Run:
 
 ```powershell
-Copy-Item data\exam_bank.db outputs\gonggichul_pdf_import_20260704_recovery\db_backups\exam_bank.before_recovery.db
+Copy-Item data\exam_bank.db outputs\public_exam_pdf_import_20260704_recovery\db_backups\exam_bank.before_recovery.db
 ```
 
 - [ ] **Step 2: Run all targeted reprocess phases**
@@ -352,13 +352,13 @@ import sqlite3
 con = sqlite3.connect('data/exam_bank.db')
 cur = con.cursor()
 print(cur.execute('pragma integrity_check').fetchone()[0])
-print(cur.execute("select count(*) from questions q join question_sources s on q.source_id=s.id where s.provider='gonggichul_pdf'").fetchone()[0])
+print(cur.execute("select count(*) from questions q join question_sources s on q.source_id=s.id where s.provider='public_exam_pdf'").fetchone()[0])
 PY
 ```
 
 Expected:
 - `ok`
-- `gonggichul_pdf` question count remains `20`; no DB apply was performed because remaining candidates were duplicate/listing/image-answer/missing-answer-key limited.
+- `public_exam_pdf` question count remains `20`; no DB apply was performed because remaining candidates were duplicate/listing/image-answer/missing-answer-key limited.
 
 - [x] **Step 4: Run regression tests**
 
@@ -366,7 +366,7 @@ Run:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest `
-  tests\test_gonggichul_import_recovery.py `
+  tests\test_public_exam_import_recovery.py `
   tests\test_repository.py::test_save_questions_preserves_fifth_choice `
   tests\test_comcbt_pdf.py::test_tail_answer_key_parses_repeated_number_answer_row_pairs -q
 ```
@@ -381,18 +381,18 @@ Actual:
 ### Task 7: Continue Blocked/Skipped Triage
 
 **Files:**
-- Modified: `scripts/import_gonggichul_pdf_folder.py`
-- Modified: `tests/test_gonggichul_import_recovery.py`
+- Modified: `scripts/import_public_exam_pdf_folder.py`
+- Modified: `tests/test_public_exam_import_recovery.py`
 - Outputs:
-  - `outputs/gonggichul_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_preprobe_dryrun`
-  - `outputs/gonggichul_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_offset100_preprobe_dryrun`
-  - `outputs/gonggichul_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_offset200_preprobe_dryrun`
-  - `outputs/gonggichul_pdf_import_20260704_recovery/phase5_blocked_no_text_first500_preprobe_dryrun`
+  - `outputs/public_exam_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_preprobe_dryrun`
+  - `outputs/public_exam_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_offset100_preprobe_dryrun`
+  - `outputs/public_exam_pdf_import_20260704_recovery/phase5_no_text_classifier_probe100_offset200_preprobe_dryrun`
+  - `outputs/public_exam_pdf_import_20260704_recovery/phase5_blocked_no_text_first500_preprobe_dryrun`
 
 - [x] **Step 1: Split listing/non-exam pages out of `blocked_no_text`**
 
 Added conservative raw-text probe classification:
-- `skipped_non_exam_listing` for Gonggichul listing/search pages with no choice markers.
+- `skipped_non_exam_listing` for public exam listing/search pages with no choice markers.
 - `blocked_no_text` remains for OCR/empty/text-start-failure cases.
 
 - [x] **Step 2: Add fast pre-probe for high-volume listing pages**

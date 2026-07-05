@@ -22,7 +22,7 @@
 │     - 웹 서버 없이 CLI로 완전한 기능 제공                         │
 │                                                                  │
 │  2. 규칙 기반 파싱 (Rule-Based Parsing)                          │
-│     - 해기사 시험 PDF의 표준화된 형식 활용                        │
+│     - 자격시험 PDF의 표준화된 형식 활용                        │
 │     - 정규식 기반으로 90%+ 자동 파싱                             │
 │     - LLM은 Edge Case 처리에만 선택적 사용                       │
 │                                                                  │
@@ -74,7 +74,7 @@
 ## Step 0.1: PDF 파일 형식
 
 ### 발견 사항
-업로드된 해기사 시험 PDF는 **ZIP 아카이브** 형식으로, 내부에 다음 파일들이 포함:
+업로드된 자격시험 PDF는 **ZIP 아카이브** 형식으로, 내부에 다음 파일들이 포함:
 
 ```
 exam_pdf/
@@ -108,7 +108,7 @@ exam_pdf/
 ### 페이지 유형
 | 유형 | 식별 패턴 | 예시 |
 |-----|----------|------|
-| **표지** | `해기사 시험`, `문 제 지` 포함 | "2022 1 해기사 시험 년 정기 제 회" |
+| **표지** | `자격시험`, `문 제 지` 포함 | "2022 1 자격시험 년 정기 제 회" |
 | **문제 페이지** | `- {숫자} -` 로 시작 | "- 1 -" |
 | **빈 페이지** | 텍스트 없음 또는 최소 | - |
 
@@ -415,7 +415,7 @@ PAGE_NUMBER = re.compile(r'^-\s*(\d+)\s*-')
 
 # 표지 정보 추출: 연도, 회차
 COVER_INFO = re.compile(
-    r'(\d{4})\s*(\d)\s*해기사\s*시험.*?년\s*정기\s*제\s*회',
+    r'(\d{4})\s*(\d)\s*자격자\s*시험.*?년\s*정기\s*제\s*회',
     re.DOTALL
 )
 
@@ -423,7 +423,7 @@ COVER_INFO = re.compile(
 EXAM_TYPE = re.compile(r'(\d급\s*\w+사)')
 
 # 표지 식별 키워드
-COVER_INDICATORS = ['해기사 시험', '문 제 지', '기출', '응시자를 위해']
+COVER_INDICATORS = ['자격시험', '문 제 지', '기출', '응시자를 위해']
 
 # ============ 정답지 관련 패턴 ============
 
@@ -628,9 +628,9 @@ class ExamMetadataParser:
         # 연도, 회차 추출
         year, session = None, None
         
-        # 패턴 1: "2022 1 해기사 시험 년 정기 제 회"
+        # 패턴 1: "2022 1 자격시험 년 정기 제 회"
         import re
-        match = re.search(r'(\d{4})\s*(\d)\s*해기사', text)
+        match = re.search(r'(\d{4})\s*(\d)\s*자격자', text)
         if match:
             year = int(match.group(1))
             session = int(match.group(2))
@@ -735,7 +735,7 @@ class QuestionParser:
     
     def _is_cover_page(self, text: str) -> bool:
         """표지 페이지 판별"""
-        indicators = ['해기사 시험', '문 제 지', '기출']
+        indicators = ['자격시험', '문 제 지', '기출']
         return any(ind in text for ind in indicators)
     
     def _parse_page(self, text: str, page_num: int) -> List[Question]:
@@ -1050,7 +1050,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExamPDFParser:
-    """해기사 시험 PDF 파서"""
+    """자격시험 PDF 파서"""
     
     def __init__(self, work_dir: str = './data/extracted'):
         self.extractor = PDFExtractor(work_dir)
@@ -1177,7 +1177,7 @@ logging.basicConfig(
 @click.group()
 @click.version_option(version='2.1.0')
 def cli():
-    """해기사 문제은행 관리 시스템"""
+    """문제은행 관리 시스템"""
     pass
 
 

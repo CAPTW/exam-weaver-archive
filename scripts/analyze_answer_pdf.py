@@ -44,5 +44,5 @@ def analyze_answer_structure(pdf_path):
         traceback.print_exc()
 
 if __name__ == "__main__":
-    a_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2025/2025 정답 모음.pdf"
+    a_path = "G:/내 드라이브/수업/시험자료 모음/2025/2025 정답 모음.pdf"
     analyze_answer_structure(a_path)

@@ -22,8 +22,8 @@ def dump_text(pdf_path, pages_to_read=3):
 
 if __name__ == "__main__":
     # Use the paths provided by the user
-    q_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2020/해기사-2020-정기-2-3급기관사.pdf"
-    a_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2020/2020 3급기관답안.pdf"
+    q_path = "G:/내 드라이브/수업/시험자료 모음/2020/exam-2020-정기-2-3급기관사.pdf"
+    a_path = "G:/내 드라이브/수업/시험자료 모음/2020/2020 3급기관답안.pdf"
     
     dump_text(q_path)
     dump_text(a_path)

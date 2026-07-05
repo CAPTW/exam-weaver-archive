@@ -1,4 +1,4 @@
-"""Build question-level trend analysis outputs for RonPark police engineering PDFs."""
+"""Build question-level trend analysis outputs for offline police engineering PDFs."""
 
 from __future__ import annotations
 
@@ -275,7 +275,7 @@ def strip_noise(text: str) -> str:
         if not line:
             continue
         compact = re.sub(r"\s+", "", line)
-        if "론박" in compact or "RONPARK" in line.upper() or "합격코스" in compact:
+        if "합격코스" in compact or "커리큘럼" in compact or "동시학습" in compact:
             continue
         if "커리큘럼" in compact or "실전대비" in compact:
             continue
@@ -912,7 +912,7 @@ def write_strategy(output_dir: Path, priority_rows: list[dict], question_rows: l
 
 
 def main() -> int:
-    output_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("outputs/ronpark_police_engineering_20260702")
+    output_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("outputs/police_engineering_pdf_20260702")
     page_jsonl = output_dir / "extracted_text" / "pages.jsonl"
     inventory_csv = output_dir / "01_pdf_inventory.csv"
     page_records = load_jsonl(page_jsonl)

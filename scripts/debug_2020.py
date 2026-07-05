@@ -17,7 +17,7 @@ def debug_2020_parsing():
     print("DEBUGGING 2020 ANSWER PARSING")
     print('='*50)
     
-    answer_path = "G:/내 드라이브/수업/해기사 기출문제 모음/2020/2020 3급기관답안.pdf"
+    answer_path = "G:/내 드라이브/수업/시험자료 모음/2020/2020 3급기관답안.pdf"
     
     if not os.path.exists(answer_path):
         print("File does not exist.")

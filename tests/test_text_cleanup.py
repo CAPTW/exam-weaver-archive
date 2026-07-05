@@ -367,8 +367,8 @@ def test_repair_extracted_text_artifacts_rebuilds_latin_choice_fragments():
     assert repair_extracted_text_artifacts("선체의 종중심 단면과 형 표면- (Moulded과의 교선surface)") == (
         "선체의 종중심 단면과 형표면(Moulded surface)과의 교선"
     )
-    assert repair_extracted_text_artifacts("유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 해기사와 부원은 기초 승무자격증(Certificate of을 소지하여야 한다proficiency).") == (
-        "유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 해기사와 부원은 기초 승무자격증(Certificate of proficiency)을 소지하여야 한다."
+    assert repair_extracted_text_artifacts("유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 자격자와 부원은 기초 승무자격증(Certificate of을 소지하여야 한다proficiency).") == (
+        "유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 자격자와 부원은 기초 승무자격증(Certificate of proficiency)을 소지하여야 한다."
     )
     assert repair_extracted_text_artifacts("등이 있다Diaphone, Diaphragm horn.") == "Diaphone, Diaphragm horn 등이 있다."
     assert repair_extracted_text_artifacts("우리나라에서는 수중음신호(Submarine sound를 채용하고 있다signal).") == (

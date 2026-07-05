@@ -1,12 +1,12 @@
-"""Import locally saved Gonggichul-style exam PDFs into the question DB.
+"""Import locally saved public exam-style exam PDFs into the question DB.
 
 The PDFs in the shared study-material folder are often browser printouts of
-Gonggichul pages, not clean attachment PDFs. This importer removes site chrome,
+public exam pages, not clean attachment PDFs. This importer removes site chrome,
 pairs question PDFs with answer PDFs, blocks existing exam-subject-year-session
 keys, and then reuses the COMCBT parser/import quality gate.
 
 Example:
-    python scripts/import_gonggichul_pdf_folder.py "T:\\내 드라이브\\[공부] 시험자료" --apply
+    python scripts/import_public_exam_pdf_folder.py "T:\\내 드라이브\\[공부] 시험자료" --apply
 """
 
 from __future__ import annotations
@@ -55,14 +55,14 @@ from src.web_import.quality import evaluate_parsed_exam  # noqa: E402
 
 DEFAULT_ROOT = Path(r"T:\내 드라이브\[공부] 시험자료")
 DEFAULT_DB = ROOT / "data" / "exam_bank.db"
-DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "gonggichul_pdf_import_20260703"
+DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "public_exam_pdf_import_20260703"
 
 QUESTION_ROLE_MARKERS = {"자료", "문제", "문제지"}
 ANSWER_ROLE_MARKERS = {"정답", "답", "답안", "해설"}
 ROLE_MARKERS = QUESTION_ROLE_MARKERS | ANSWER_ROLE_MARKERS
 UNKNOWN_SUBJECT = "과목 구분 없음"
-PROVIDER = "gonggichul_pdf"
-BOUNDARY_MARKER = "__GONGGICHUL_QUESTION_BOUNDARY__"
+PROVIDER = "public_exam_pdf"
+BOUNDARY_MARKER = "__PUBLIC_EXAM_QUESTION_BOUNDARY__"
 
 EXAM_START_RE = re.compile(
     r"(\d{4}\s*년도?.{0,80}(?:시험|채용).{0,40}문\s*제\s*지|"

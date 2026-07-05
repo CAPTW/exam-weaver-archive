@@ -44,6 +44,26 @@ def test_question_source_registry_records_new_and_detects_existing(tmp_path: Pat
     assert existing.source_id == created.source_id
 
 
+def test_question_source_registry_detects_existing_across_provider_rename(tmp_path: Path):
+    registry = QuestionSourceRegistry(tmp_path / "exam.db")
+    source = QuestionSource(
+        provider="old_name",
+        source_url="file:///archive/exam.pdf",
+        document_id="exam-1",
+        attachment_url=None,
+        attachment_filename="exam.pdf",
+        content_hash="same-hash",
+        fetched_at="2026-06-29T00:00:00+00:00",
+    )
+
+    created = registry.register(source)
+    existing = registry.find_existing(replace(source, provider="new_name"))
+
+    assert existing is not None
+    assert existing.existing is True
+    assert existing.source_id == created.source_id
+
+
 def test_repository_ignores_comcbt_group_metadata_fields(tmp_path: Path):
     db_path = tmp_path / "exam.db"
     repo = ExamRepository(str(db_path))

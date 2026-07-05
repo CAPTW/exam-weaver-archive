@@ -1,4 +1,4 @@
-"""Audit unresolved Gonggichul PDF import rows and prepare recovery cohorts."""
+"""Audit unresolved public exam PDF import rows and prepare recovery cohorts."""
 
 from __future__ import annotations
 

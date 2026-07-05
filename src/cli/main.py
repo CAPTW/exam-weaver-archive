@@ -15,7 +15,7 @@ logging.basicConfig(
 @click.group()
 @click.version_option(version='2.1.0')
 def cli():
-    """해기사 문제은행 관리 시스템"""
+    """문제은행 관리 시스템"""
     pass
 
 

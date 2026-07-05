@@ -1,4 +1,4 @@
-"""Build question-level trend analysis outputs for RonPark maritime law PDFs."""
+"""Build question-level trend analysis outputs for offline maritime law PDFs."""
 
 from __future__ import annotations
 
@@ -300,7 +300,7 @@ def strip_noise(text: str) -> str:
         if not line:
             continue
         compact = re.sub(r"\s+", "", line)
-        if "론박" in compact or "RONPARK" in line.upper() or "합격코스" in compact:
+        if "합격코스" in compact or "커리큘럼" in compact or "동시학습" in compact:
             continue
         if "커리큘럼" in compact or "실전대비" in compact:
             continue
@@ -354,8 +354,8 @@ def classify_topic(raw_text: str, placeholder: bool = False) -> TopicResult:
          TopicResult("해상교통·항법", "선박교통관제법", "관제대상·관제통신·VTS", ["선박교통관제"], 0.90)),
         ([r"선박안전법", r"선박검사", r"임시승선자", r"만재흘수선", r"선박위치발신"],
          TopicResult("선박·선원", "선박안전법", "검사·설비·임시승선자", ["선박안전"], 0.92)),
-        ([r"선박직원법", r"해기사", r"승무기준", r"면허"],
-         TopicResult("선박·선원", "선박직원법", "해기사 면허·승무기준", ["선박직원", "해기사"], 0.92)),
+        ([r"선박직원법", r"자격", r"승무기준", r"면허"],
+         TopicResult("선박·선원", "선박직원법", "자격·면허·승무기준", ["선박직원", "자격"], 0.92)),
         ([r"선원법", r"선장", r"선원", r"해원", r"생리휴식", r"소년선원"],
          TopicResult("선박·선원", "선원법", "선장 권한·선원근로·승무", ["선원법"], 0.90)),
         ([r"선박법", r"선적항", r"한국선박", r"소형선박", r"선박국적"],
@@ -910,7 +910,7 @@ def write_strategy(output_dir: Path, priority_rows: list[dict], question_rows: l
 1. 해양경찰법·해양경비법: 직무, 해상검문검색, 장비·무기 사용, 경비수역.
 2. 해상교통안전법·선박입출항법: 항법, 출항통제, 우선피항선, 무역항 항행규칙.
 3. 수상구조법·수상레저안전법: 구조본부, 긴급피난, 조종면허, 안전의무.
-4. 선박안전법·선박직원법·선원법: 검사, 해기사, 선장 권한, 선원근로.
+4. 선박안전법·선박직원법·선원법: 검사, 자격·면허, 선장 권한, 선원근로.
 5. 어선법·어선안전조업법·수산업법·낚시관리법: 위치통지, 조업해역, 면허·허가, 낚시어선.
 
 ## 4주 루틴
@@ -928,7 +928,7 @@ def write_strategy(output_dir: Path, priority_rows: list[dict], question_rows: l
 
 
 def main() -> int:
-    output_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("outputs/ronpark_maritime_law_20260702")
+    output_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("outputs/maritime_law_pdf_20260702")
     page_jsonl = output_dir / "extracted_text" / "pages.jsonl"
     inventory_csv = output_dir / "01_pdf_inventory.csv"
     page_records = load_jsonl(page_jsonl)

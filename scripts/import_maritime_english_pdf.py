@@ -1,6 +1,6 @@
-"""Import RonPark maritime English PDF questions into the SQLite question bank.
+"""Import offline maritime English PDF questions into the SQLite question bank.
 
-The RonPark PDFs are OCR-heavy and the answer sheets use circled numerals inside
+The offline PDFs are OCR-heavy and the answer sheets use circled numerals inside
 image tables. This importer reuses the page cache and trend-analysis grouping
 logic, then applies a small image-table parser for answer keys.
 """
@@ -41,7 +41,7 @@ from src.parser.question import Choice, Question, QuestionParser  # noqa: E402
 from src.web_import.importer import QuestionSource, QuestionSourceRegistry, sha256_file, utc_timestamp  # noqa: E402
 
 
-DEFAULT_OUTPUT_DIR = Path("outputs/ronpark_maritime_english_20260701")
+DEFAULT_OUTPUT_DIR = Path("outputs/maritime_english_pdf_20260701")
 EXAM_CODE = "해양경찰 해사영어"
 SUBJECT_NAME = "해사영어"
 ANSWER_FILENAMES = {
@@ -530,7 +530,7 @@ def build_questions(
             topic = classify_topic(segment)
             topic_tags = [
                 "해양경찰",
-                "론박",
+                "외부자료",
                 f"G{group_index:03d}",
                 str(group.get("period") or "").strip(),
                 str(group.get("category") or "").strip(),
@@ -591,7 +591,7 @@ def build_questions(
 
 def backup_database(db_path: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = db_path.with_name(f"{db_path.stem}.before_ronpark_maritime_english_{stamp}{db_path.suffix}")
+    backup = db_path.with_name(f"{db_path.stem}.before_maritime_english_pdf_{stamp}{db_path.suffix}")
     shutil.copy2(db_path, backup)
     return backup
 
@@ -640,7 +640,7 @@ def make_source(item: ParsedQuestion) -> QuestionSource:
     else:
         content_hash = hashlib.sha256((item.source_filename + f":G{item.group_index:03d}").encode("utf-8")).hexdigest()
     return QuestionSource(
-        provider="ronpark_pdf",
+        provider="offline_pdf",
         source_url=str(source_path),
         document_id=f"G{item.group_index:03d}",
         attachment_url=None,
@@ -715,7 +715,7 @@ def load_page_records(output_dir: Path) -> list[dict]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input_dir", type=Path, help="Folder containing the RonPark maritime English PDFs.")
+    parser.add_argument("input_dir", type=Path, help="Folder containing the offline maritime English PDFs.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Folder containing extracted_text/pages.jsonl.")
     parser.add_argument("--db", type=Path, action="append", default=None, help="Target SQLite DB. Repeat for multiple DBs.")
     parser.add_argument("--apply", action="store_true", help="Write to DB. Without this flag, only validate and summarize.")

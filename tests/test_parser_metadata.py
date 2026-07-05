@@ -6,7 +6,7 @@ def test_metadata_parser_detects_old_cover_with_grade_split_from_role():
         '2021년 정기 제회1\n'
         '3\n'
         '문 제\n'
-        '해기사 시험\n'
+        '자격시험\n'
         '급기관사\n'
         '지'
     )
@@ -19,7 +19,7 @@ def test_metadata_parser_detects_old_cover_with_grade_split_from_role():
 
 
 def test_metadata_parser_detects_small_vessel_operator_cover():
-    text = '2024년 정기 제1회\n소형선박조종사\n문 제\n해기사 시험'
+    text = '2024년 정기 제1회\n소형선박조종사\n문 제\n자격시험'
 
     metadata = ExamMetadataParser().parse_cover(text)
 

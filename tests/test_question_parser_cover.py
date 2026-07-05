@@ -4,7 +4,7 @@ from src.parser.question import QuestionParser
 def test_question_page_with_exam_phrase_is_not_treated_as_cover():
     text = (
         "- 4 -\n"
-        "1. 해기사 시험 관련 규정에 대한 설명으로 옳은 것은?\n"
+        "1. 자격시험 관련 규정에 대한 설명으로 옳은 것은?\n"
         "㉮ 보기 A\n"
         "㉯ 보기 B\n"
         "㉴ 보기 C\n"
@@ -17,7 +17,7 @@ def test_question_page_with_exam_phrase_is_not_treated_as_cover():
 
 
 def test_explicit_cover_page_is_treated_as_cover():
-    text = "년 정기 제 회 2022 1 해기사 시험\n급항해사 상선3 ( )\n문  제  지"
+    text = "년 정기 제 회 2022 1 자격시험\n급항해사 상선3 ( )\n문  제  지"
 
     parser = QuestionParser("3급항해사(상선)")
 
