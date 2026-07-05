@@ -239,6 +239,7 @@ class MainWindow(FluentWindow):
 def main() -> int:
     _install_crash_logging()
     _set_windows_app_user_model_id()
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     if hasattr(Qt, "HighDpiScaleFactorRoundingPolicy"):

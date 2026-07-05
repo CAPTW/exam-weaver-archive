@@ -134,10 +134,12 @@ Codex SDK support is included through:
 - `openai_codex` and `codex_cli_bin` collection in `ExamGenerator.spec`
 - `src/gui/interface/codex_panel.py`
 
-The side panel renders Codex responses as safe rich text, including common
-LaTeX formulas such as `\sqrt{}`, `\frac{}{}`, `\overline{}`, inline
-`\( ... \)` / display `$$ ... $$` math, code blocks, and common mathematical
-symbols.
+The side panel renders Codex responses as safe rich text. When Qt WebEngine is
+available, it uses bundled MathJax to render LaTeX/TeX and MathML expressions
+such as `\( ... \)`, `\[ ... \]`, `$$ ... $$`, `\sqrt{}`, `\frac{}{}`,
+`\overline{}`, and HTML-style formula markup like `<sup>`, `<sub>`, and safe
+MathML tags. If WebEngine is unavailable, it falls back to the lightweight
+renderer for common formulas and symbols.
 
 Personal authentication is not included. Each user can open the app, use the
 Codex panel's **로그인** button, and connect their own account. Local Codex state
@@ -353,9 +355,12 @@ Codex SDK 연결은 다음 파일에 준비되어 있습니다.
 - `ExamGenerator.spec`의 `openai_codex`, `codex_cli_bin` 번들 설정
 - `src/gui/interface/codex_panel.py`
 
-Codex 사이드 패널은 응답을 안전한 rich text로 렌더링하며, `\sqrt{}`,
-`\frac{}{}`, `\overline{}`, inline `\( ... \)` / display `$$ ... $$` 수식,
-code block, 주요 수학 특수기호를 보기 좋게 표시합니다.
+Codex 사이드 패널은 응답을 안전한 rich text로 렌더링합니다. Qt WebEngine을
+사용할 수 있으면 bundled MathJax로 `\( ... \)`, `\[ ... \]`,
+`$$ ... $$`, `\sqrt{}`, `\frac{}{}`, `\overline{}` 같은 LaTeX/TeX 수식과
+`<sup>`, `<sub>`, 안전한 MathML tag 기반 HTML 스타일 수식을 표시합니다.
+WebEngine을 사용할 수 없는 환경에서는 주요 수식/특수기호용 lightweight
+renderer로 자동 fallback됩니다.
 
 개인 인증은 저장소에 포함하지 않습니다. 사용자는 앱의 Codex 패널에서
 **로그인** 버튼을 눌러 자기 계정으로 연결하면 됩니다. 로컬 Codex 상태는 아래

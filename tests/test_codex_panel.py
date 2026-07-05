@@ -1,14 +1,18 @@
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("EXAM_GENERATOR_DISABLE_WEBENGINE", "1")
 
 from PyQt5.QtWidgets import QApplication
 
 from src.gui.interface.codex_panel import (
     CodexInterface,
     apply_hidden_codex_process_patch,
+    find_mathjax_script_path,
+    mathjax_script_url,
     prepare_panel_codex_home,
     progress_message_for_event_method,
+    render_codex_chat_html,
     render_codex_inline_html,
     render_codex_text_to_html,
 )
@@ -93,6 +97,43 @@ def test_codex_renderer_formats_math_symbols_and_code():
     inline = render_codex_inline_html(r"`<tag>` and \(x<y\)")
     assert "<code>&lt;tag&gt;</code>" in inline
     assert "x&lt;y" in inline
+
+
+def test_codex_renderer_builds_mathjax_document_and_preserves_safe_formula_html(tmp_path):
+    script = tmp_path / "assets" / "mathjax" / "tex-mml-svg.js"
+    script.parent.mkdir(parents=True)
+    script.write_text("// mathjax", encoding="utf-8")
+
+    assert find_mathjax_script_path(tmp_path) == script
+    assert mathjax_script_url(tmp_path).startswith("file:///")
+
+    document = render_codex_chat_html(
+        [
+            {
+                "title": "Codex",
+                "text": r"H<sub>2</sub>O, \(x^2 + y^2\), <script>alert(1)</script>",
+            }
+        ],
+        math_mode="mathjax",
+        mathjax_script_url=mathjax_script_url(tmp_path),
+    )
+
+    assert "MathJax-script" in document
+    assert r"\(x^2 + y^2\)" in document
+    assert "H<sub>2</sub>O" in document
+    assert "<script>alert(1)</script>" not in document
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in document
+
+
+def test_codex_renderer_wraps_raw_latex_commands_for_mathjax():
+    html = render_codex_text_to_html(
+        r"\sqrt{GM}, \frac{1}{2}, \theta",
+        math_mode="mathjax",
+    )
+
+    assert r"\(\sqrt{GM}\)" in html
+    assert r"\(\frac{1}{2}\)" in html
+    assert r"\(\theta\)" in html
 
 
 def test_codex_panel_rerenders_split_streaming_math_delta(tmp_path):

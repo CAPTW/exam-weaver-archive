@@ -7,6 +7,8 @@ datas = [
     ('src\\database\\schema.sql', 'src\\database'),
     ('src\\database\\seed.sql', 'src\\database'),
     ('assets\\icons\\exam_generator_icon.ico', 'assets\\icons'),
+    ('assets\\mathjax\\tex-mml-svg.js', 'assets\\mathjax'),
+    ('assets\\mathjax\\LICENSE', 'assets\\mathjax'),
 ]
 binaries = []
 hiddenimports = []
@@ -14,6 +16,11 @@ tmp_ret = collect_all('qfluentwidgets')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('qframelesswindow')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+try:
+    tmp_ret = collect_all('PyQt5.QtWebEngineWidgets')
+    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+except Exception:
+    pass
 tmp_ret = collect_all('openai_codex')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('codex_cli_bin')
