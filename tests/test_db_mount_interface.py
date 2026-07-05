@@ -172,3 +172,22 @@ def test_db_mount_interface_exports_app_db_when_manifest_is_missing(tmp_path):
     assert [row["question_text"] for row in copied] == ["앱 DB 문제"]
     widget.deleteLater()
     APP.processEvents()
+
+
+def test_db_mount_interface_exports_package_and_imports_as_mount(tmp_path):
+    widget, manifest = _make_mount_interface(tmp_path)
+    package_path = tmp_path / "exports" / "first.examdb.zip"
+
+    package_result = widget._export_current_source_package(package_path)
+    imported = widget._import_database(package_result.path, "imported_first", "Imported First")
+
+    assert package_result.path.exists()
+    assert imported.mount.id == "imported_first"
+    assert imported.mount.path.exists()
+    saved = {mount.id for mount in load_manifest(manifest)}
+    assert "imported_first" in saved
+    imported_repo = ExamRepository(str(imported.mount.path))
+    copied = imported_repo.get_questions_with_choices(exam_code="첫시험", limit=None)
+    assert [row["question_text"] for row in copied] == ["첫 문제"]
+    widget.deleteLater()
+    APP.processEvents()

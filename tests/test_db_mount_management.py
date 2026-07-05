@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import sqlite3
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 from experiments.db_mount_prototype.db_management import (
     copy_exam_to_mount,
     create_empty_mount_database,
+    export_database_package,
     export_mount_database,
+    import_database_to_mount,
     rename_mount_database,
     rename_mount_label,
 )
 from experiments.db_mount_prototype.mount_repo import MountedDatabase, load_manifest, write_manifest
 from src.database.repository import ExamRepository
 from src.parser.question import Choice, Question
+
+PNG_1X1 = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe"
+    b"\x02\xfeA\xe2U\xcd\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _create_source_db(path):
@@ -170,3 +180,89 @@ def test_export_mount_database_writes_single_integrity_checked_db_file(tmp_path)
         assert conn.execute("SELECT COUNT(*) FROM exams WHERE code = '복사시험'").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM question_choices").fetchone()[0] == 4
+
+
+def test_export_database_package_includes_images_and_rewrites_package_refs(tmp_path):
+    manifest, source_db = _write_manifest(tmp_path)
+    question_image = tmp_path / "question.png"
+    choice_image = tmp_path / "choice.png"
+    question_image.write_bytes(PNG_1X1)
+    choice_image.write_bytes(PNG_1X1 + b"choice")
+    with sqlite3.connect(source_db) as conn:
+        question_id = conn.execute("SELECT id FROM questions LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE questions SET image_path = ?, has_image = 1 WHERE id = ?", (str(question_image), question_id))
+        conn.execute(
+            "UPDATE question_choices SET choice_image_path = ? WHERE question_id = ? AND choice_number = 1",
+            (str(choice_image), question_id),
+        )
+
+    package_path = tmp_path / "exports" / "source.examdb.zip"
+    result = export_database_package(source_db, package_path, repo_root=tmp_path)
+
+    assert result.path == package_path.resolve()
+    assert result.copied_images == 2
+    assert result.updated_image_refs == 2
+    with ZipFile(package_path) as archive:
+        names = set(archive.namelist())
+        assert "exam_bank.db" in names
+        assert "manifest.json" in names
+        assert len([name for name in names if name.startswith("images/")]) == 2
+        archive.extract("exam_bank.db", tmp_path / "package")
+
+    with sqlite3.connect(tmp_path / "package" / "exam_bank.db") as conn:
+        exported_question_path = conn.execute("SELECT image_path FROM questions LIMIT 1").fetchone()[0]
+        exported_choice_path = conn.execute(
+            "SELECT choice_image_path FROM question_choices WHERE choice_number = 1 LIMIT 1"
+        ).fetchone()[0]
+    assert exported_question_path.startswith("images/")
+    assert exported_choice_path.startswith("images/")
+
+
+def test_import_database_to_mount_accepts_package_and_rewrites_image_refs(tmp_path):
+    _manifest, source_db = _write_manifest(tmp_path)
+    image_path = tmp_path / "question.png"
+    image_path.write_bytes(PNG_1X1)
+    with sqlite3.connect(source_db) as conn:
+        conn.execute("UPDATE questions SET image_path = ?, has_image = 1", (str(image_path),))
+
+    package_path = tmp_path / "source.examdb.zip"
+    export_database_package(source_db, package_path, repo_root=tmp_path)
+
+    app_base = tmp_path / "app"
+    manifest = app_base / "data" / "domain_dbs" / "mount_manifest.json"
+    result = import_database_to_mount(
+        manifest,
+        package_path,
+        mount_id="imported",
+        label="Imported DB",
+        base_dir=app_base,
+    )
+
+    assert result.package is True
+    assert result.copied_images == 1
+    assert result.updated_image_refs == 1
+    assert result.mount.id == "imported"
+    assert result.imported_db_path.exists()
+    with sqlite3.connect(result.imported_db_path) as conn:
+        imported_image_path = conn.execute("SELECT image_path FROM questions LIMIT 1").fetchone()[0]
+        assert imported_image_path.startswith("data/domain_dbs/imported_images/")
+    assert (app_base / imported_image_path).exists()
+
+
+def test_import_database_to_mount_accepts_standalone_db(tmp_path):
+    _manifest, source_db = _write_manifest(tmp_path)
+    app_base = tmp_path / "app"
+    manifest = app_base / "data" / "domain_dbs" / "mount_manifest.json"
+
+    result = import_database_to_mount(
+        manifest,
+        source_db,
+        mount_id="standalone",
+        label="Standalone DB",
+        base_dir=app_base,
+    )
+
+    assert result.package is False
+    with sqlite3.connect(result.imported_db_path) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 1
