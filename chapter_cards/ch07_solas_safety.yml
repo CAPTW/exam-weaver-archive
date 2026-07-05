@@ -1,0 +1,70 @@
+chapter_id: ch07
+title: "SOLAS 안전 의무와 비상대응 준비"
+status: proposed
+part: "Part IV. 선박 안전과 수색구조"
+priority_band: core_medium_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "해상안전협약·비상절차"
+    topic_l2: "SOLAS"
+    topic_l3: "일반 안전규정"
+    observed_count: 18
+    priority_score: 0.7773
+  - topic_l1: "해상안전협약·비상절차"
+    topic_l2: "SOLAS"
+    topic_l3: "비상훈련·소집"
+linked_concepts:
+  - "muster and drill"
+  - "abandon ship and fire drill"
+  - "shipboard emergency organization"
+  - "navigation bridge visibility"
+  - "safety regulation applicability"
+linked_question_patterns:
+  - "SOLAS 조문 빈칸"
+  - "훈련 주기·요건 숫자 확인"
+  - "옳지 않은 설명 개수 세기"
+  - "역할·의무 매칭"
+prerequisite_foundations:
+  - "ch01 규정 영어"
+  - "ch06 선박 운용 용어"
+expected_page_weight:
+  percent_of_core_text: 9
+  pages_if_240pp: 22
+visual_plan_summary:
+  - "emergency organization chart"
+  - "muster/drill cadence table"
+  - "shipboard duty matrix"
+exercise_plan_summary:
+  concept_checks: 20
+  worked_examples: 7
+  original_practice_items: 40
+  item_types:
+    - "regulation clause completion"
+    - "duty matching"
+    - "numeric requirement check"
+reference_needs:
+  primary:
+    - "SOLAS Chapter III"
+    - "SOLAS Chapter V"
+  secondary:
+    - "IMO safety training summaries"
+misconception_notes:
+  - "passenger/crew drill 요건 혼동"
+  - "항해선교 시야와 일반 안전규정을 별개 암기로 처리"
+  - "숫자 규정의 단위와 조건 누락"
+original_practice_policy:
+  basis: "훈련·소집 요건을 새 선박 상황에 적용하는 original item"
+  copyright_guardrail: "기출 보기의 숫자 조합 재사용 금지"
+blueprint_evidence:
+  priority_rows:
+    - "SOLAS/일반 안전규정: total 18, recent 7, score 0.7773"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "IAMSAR 전 안전·비상 조직의 선수 장"
+review_gates:
+  - "domain review"
+  - "citation audit"
+  - "exam relevance review"
+

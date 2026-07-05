@@ -1,0 +1,41 @@
+appendix_id: app_exam_support
+title: "부록 및 비중 축소 주제"
+status: proposed
+purpose: "삭제하지 않고 낮은 page weight 또는 reference appendix로 이동할 주제 관리"
+appendix_page_weight:
+  percent_of_total_book: 6
+topics_moved_to_appendix:
+  - topic: "International Code of Signals / 국제신호서·신호기"
+    reason: "분류상 출현은 있으나 본문 단독 장을 만들 정도의 빈도는 낮음"
+    placement: "Appendix A 또는 ch04 box"
+  - topic: "SMCP 통신 철자·코드"
+    reason: "반복 학습은 필요하나 표준 표현 장의 보조 표로 충분"
+    placement: "Appendix A"
+  - topic: "UNCLOS 추적권"
+    reason: "중요 개념이나 영해·무해통항보다 우선순위 낮음"
+    placement: "ch09 endnote 또는 Appendix D"
+  - topic: "SOLAS 항해선교 시야·구명설비"
+    reason: "숫자 규정으로 출제 가능하나 핵심 축은 안전 의무와 훈련"
+    placement: "ch07 subsection 또는 Appendix D"
+  - topic: "MARPOL 폐기물 배출"
+    reason: "MARPOL 유류오염·정의보다 빈도 낮음"
+    placement: "ch10 box 또는 Appendix D"
+  - topic: "COLREG 제한시계·통항분리"
+    reason: "삭제 금지. ch02/ch03에서 핵심 설명 후 quick index로 보강"
+    placement: "ch02/ch03 subsection and Appendix D"
+  - topic: "법규·협약 숫자 quick index"
+    reason: "여러 장에 분산된 숫자 규정을 막판 복습용으로 통합"
+    placement: "Appendix B"
+  - topic: "bilingual glossary와 abbreviation master list"
+    reason: "교재 전체의 참조 장치"
+    placement: "Appendix C"
+topics_intentionally_not_promoted:
+  - topic: "일반영어·독해 대형 독립 part"
+    reason: "raw count는 높지만 최근성이 낮고 OCR/분류 검토 필요가 많아 기반 장과 장내 vocabulary box로 처리"
+  - topic: "정답 암기형 챕터"
+    reason: "교재 의도와 스킬 completion gate에 맞지 않음"
+review_required:
+  - "human_review_queue.csv의 검토 필요 row가 많은 일반영어·독해 cluster"
+  - "OCR로 깨진 오래된 스캔 문항에서 유래한 topic label"
+  - "ISPS/STCW/MARPOL 통합 장의 reference coverage"
+

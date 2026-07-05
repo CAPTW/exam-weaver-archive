@@ -1,0 +1,483 @@
+chapter_id: ch01
+title: "규정·정의·용어를 읽는 해사영어 기초"
+status:
+  stage: detailed_card_ready
+  prose_drafted: false
+  priority_band: A
+  intended_page_range: "25-35 pages"
+  canonical_file: "chapter_cards/ch01_rule_english_foundations.yml"
+  request_note: "User requested ch01. The prompt also mentioned chapter_cards/ch03.yml, but ch03 is already reserved for COLREG lights/shapes/sounds, so this canonical ch01 card was updated instead."
+  next_gate:
+    - "reference mining"
+    - "question pattern registry normalization"
+    - "source-backed outline review"
+
+part:
+  id: part_i
+  title: "규정 영어와 해사 용어의 기초"
+  role_in_book: "전 장의 협약 원문, 정의 비교, 약어, 빈칸형 문항을 읽기 위한 기반 장"
+
+exam_evidence:
+  source_outputs:
+    - "outputs/02_questions_master.csv"
+    - "outputs/03_topic_distribution.csv"
+    - "outputs/04_year_subject_topic_matrix.csv"
+    - "outputs/05_recent_weighted_priority.csv"
+    - "outputs/06_methodology.md"
+  dataset_scope:
+    subject: "해사영어"
+    years_covered: "2013-2025"
+    exam_sets: 30
+    total_question_rows: 600
+    classified_rows: 522
+    human_review_rows: 149
+    caveat: "문제 PDF가 OCR 기반이므로 오래된 스캔 문항의 번호·철자 오류가 일부 존재한다."
+  priority_topics:
+    - topic_key: "general_english.context_vocabulary"
+      topic_l1: "일반영어·독해"
+      topic_l2: "어휘·문법"
+      topic_l3: "문맥 빈칸·어휘"
+      observed_count: 66
+      percent_all_classified: 12.64
+      recent_3yr_count: 4
+      avg_confidence: 0.68
+      needs_review_count: 66
+      priority_score: 0.7795
+      interpretation: "빈도는 높지만 최근성·분류 신뢰도 한계가 있어 독립 대형 part가 아니라 기반 장으로 압축한다."
+    - topic_key: "maritime_terms.abbreviations"
+      topic_l1: "해사약어·용어"
+      topic_l2: "해사 약어"
+      topic_l3: "약어 의미"
+      observed_count: 17
+      percent_all_classified: 3.26
+      recent_3yr_count: 4
+      avg_confidence: 0.82
+      priority_score: 0.7075
+      interpretation: "전 범위에서 약어·용어 인식 실패가 오답을 만들므로 초반에 정리한다."
+  linked_question_pattern_ids:
+    registry_status: "question_pattern_registry.yml missing; IDs below are provisional chapter-local IDs."
+    provisional_patterns:
+      - pattern_id: P-CH01-001
+        name: "조문형 빈칸 완성"
+        cognitive_task: "규정 문장의 구조와 핵심 용어를 보고 누락 어구를 복원"
+        linked_topics:
+          - "어휘·문법/문맥 빈칸·어휘"
+          - "UNCLOS/SOLAS/COLREG/STCW/MARPOL 원문형 문항의 기반"
+      - pattern_id: P-CH01-002
+        name: "용어 정의 매칭"
+        cognitive_task: "영문 정의문을 읽고 해당 해사 용어를 식별"
+        linked_topics:
+          - "해사 약어/약어 의미"
+          - "선박운용 용어"
+      - pattern_id: P-CH01-003
+        name: "해석 오류·false friend 판별"
+        cognitive_task: "일반영어 뜻과 해사 맥락 뜻의 차이를 이용해 오역을 찾음"
+        linked_topics:
+          - "어휘·문법/문맥 빈칸·어휘"
+          - "SMCP 표준해사통신"
+      - pattern_id: P-CH01-004
+        name: "약어 확장과 기능 분류"
+        cognitive_task: "해사 약어의 full form, 기능, 사용 맥락을 연결"
+        linked_topics:
+          - "해사 약어/약어 의미"
+      - pattern_id: P-CH01-005
+        name: "문맥상 적절한 동사·명사 선택"
+        cognitive_task: "선박 운용·협약 문장 안에서 collocation과 의미역을 판별"
+        linked_topics:
+          - "어휘·문법/문맥 빈칸·어휘"
+          - "선박운용 용어"
+
+learning_design:
+  chapter_learning_goals:
+    - "규정 영어 문장에서 의무, 허용, 금지, 조건을 구분한다."
+    - "조약·규칙 정의문을 구조적으로 해석한다."
+    - "해사 약어와 용어를 단순 암기가 아니라 기능·상황과 연결한다."
+    - "빈출 문항 패턴을 풀기 전에 필요한 독해 절차를 세운다."
+  prerequisite_foundations:
+    - "기본 영문장 성분: 주어, 동사, 목적어, 보어, 수식어"
+    - "기본 조동사 의미"
+    - "선박·항해·통신 분야가 규정 언어로 출제된다는 메타인지"
+  target_concepts:
+    - concept_id: C-CH01-001
+      name: "규정상 의무 강도"
+      includes:
+        - "shall"
+        - "must"
+        - "may"
+        - "should"
+        - "is required to"
+        - "is prohibited from"
+    - concept_id: C-CH01-002
+      name: "정의문 구조"
+      includes:
+        - "means"
+        - "refers to"
+        - "is defined as"
+        - "a situation wherein"
+    - concept_id: C-CH01-003
+      name: "조건·예외·범위 신호"
+      includes:
+        - "where"
+        - "when"
+        - "unless"
+        - "except"
+        - "not less than"
+        - "within"
+    - concept_id: C-CH01-004
+      name: "해사 맥락 어휘"
+      includes:
+        - "passage"
+        - "underway"
+        - "make way"
+        - "muster"
+        - "drill"
+        - "datum"
+        - "traffic lane"
+    - concept_id: C-CH01-005
+      name: "약어와 코드"
+      includes:
+        - "ETA"
+        - "MMSI"
+        - "AIS"
+        - "EPIRB"
+        - "SART"
+        - "OSC"
+  pedagogy_sequence:
+    - "문장 기능을 먼저 구분한다."
+    - "정의문 구조를 시각적으로 분해한다."
+    - "약어·용어를 상황별로 묶는다."
+    - "기출 패턴을 원문 복제 없이 추상화한 worked example로 적용한다."
+    - "원문형·정의형·약어형 연습문제를 난도별로 푼다."
+
+source_evidence:
+  source_status: "reference mining required before drafting"
+  known_source_needs:
+    primary:
+      - source_need_id: SRC-CH01-001
+        need: "IMO Standard Marine Communication Phrases glossary and general principles"
+        purpose: "SMCP 표준 표현, message marker, ambiguity control의 기준 출처"
+      - source_need_id: SRC-CH01-002
+        need: "UNCLOS, COLREG, SOLAS, MARPOL, STCW, ISPS official texts or authorized extracts"
+        purpose: "shall/may/must, definition syntax, numeric condition examples의 source-backed 설명"
+      - source_need_id: SRC-CH01-003
+        need: "IAMSAR terminology references"
+        purpose: "datum, distress phase, OSC 등 SAR 용어 정의 검증"
+    secondary:
+      - source_need_id: SRC-CH01-004
+        need: "maritime English teaching references"
+        purpose: "규정 영어 독해법과 용어 학습 설계 보강"
+      - source_need_id: SRC-CH01-005
+        need: "bilingual maritime glossary"
+        purpose: "한국어 오역 방지 note와 용어 표준화"
+  source_use_policy:
+    - "공식 문구는 필요한 짧은 구절만 인용하고, 대부분은 paraphrase와 구조 설명으로 처리한다."
+    - "문항 원문, 보기 전체, 해설 전체를 복사하지 않는다."
+    - "모든 figure caption과 claim은 source_note_registry.yml 생성 후 연결한다."
+
+visual_plan:
+  visual_style_role: "conceptual explanation, not decorative"
+  planned_visuals:
+    - figure_id: FIG-CH01-001
+      title: "규정 영어 의무 강도 ladder"
+      learning_purpose: "shall/must/may/should/prohibited의 시험상 기능 차이를 한눈에 구분"
+      linked_concepts:
+        - C-CH01-001
+      linked_patterns:
+        - P-CH01-001
+      format: "infographic ladder"
+      alt_text_target: "의무, 허용, 권고, 금지 표현을 강도 순으로 배열한 도표"
+      source_basis: "official convention wording examples after reference mining"
+    - figure_id: FIG-CH01-002
+      title: "정의문 해부도"
+      learning_purpose: "means/refers to/is defined as 문장의 핵심어와 수식범위를 분해"
+      linked_concepts:
+        - C-CH01-002
+        - C-CH01-003
+      linked_patterns:
+        - P-CH01-002
+      format: "annotated sentence diagram"
+      alt_text_target: "정의문에서 용어, 정의부, 조건부, 예외부를 색으로 구분한 도식"
+      source_basis: "author-created examples based on abstracted treaty syntax"
+    - figure_id: FIG-CH01-003
+      title: "false friend map"
+      learning_purpose: "일반영어 의미와 해사 맥락 의미가 갈리는 단어를 비교"
+      linked_concepts:
+        - C-CH01-004
+      linked_patterns:
+        - P-CH01-003
+        - P-CH01-005
+      format: "two-column contrast map"
+      alt_text_target: "일반 의미와 해사 의미를 나란히 보여주는 비교표"
+      source_basis: "house glossary after validation"
+    - figure_id: FIG-CH01-004
+      title: "약어 기능별 패널"
+      learning_purpose: "통신, 위치, 장비, 구조, 보안 약어를 기능별로 묶어 암기 부담 축소"
+      linked_concepts:
+        - C-CH01-005
+      linked_patterns:
+        - P-CH01-004
+      format: "categorized card grid"
+      alt_text_target: "해사 약어를 기능 범주별로 분류한 카드형 표"
+      source_basis: "SMCP/IMO glossary and project glossary"
+
+chapter_structure:
+  sections:
+    - section_id: ch01_s01
+      title: "해사영어 시험 문장은 왜 규정문처럼 생겼는가"
+      purpose: "장 전체의 학습 이유와 시험 연결성을 설명"
+      target_page_span: "2-3"
+      linked_concepts:
+        - C-CH01-001
+        - C-CH01-002
+      linked_patterns:
+        - P-CH01-001
+        - P-CH01-002
+      exam_connection: "협약명 직접 제시 후 빈칸·정의·옳고 그름을 묻는 패턴의 공통 기반"
+      visual_slots:
+        - FIG-CH01-001
+      worked_example_targets:
+        - WE-CH01-001
+    - section_id: ch01_s02
+      title: "shall, may, must: 의무·허용·금지 읽기"
+      purpose: "조동사와 규정 표현의 기능을 오답 선택지와 연결"
+      target_page_span: "5-6"
+      linked_concepts:
+        - C-CH01-001
+        - C-CH01-003
+      linked_patterns:
+        - P-CH01-001
+        - P-CH01-003
+      exam_connection: "UNCLOS, SOLAS, COLREG 조문형 빈칸과 정오 판단에 반복 활용"
+      visual_slots:
+        - FIG-CH01-001
+      worked_example_targets:
+        - WE-CH01-002
+        - WE-CH01-003
+    - section_id: ch01_s03
+      title: "means, refers to: 정의문을 분해하는 법"
+      purpose: "정의형 문항에서 핵심 용어와 조건부를 분리"
+      target_page_span: "5-6"
+      linked_concepts:
+        - C-CH01-002
+        - C-CH01-003
+      linked_patterns:
+        - P-CH01-002
+        - P-CH01-005
+      exam_connection: "IAMSAR, MARPOL, COLREG, 선박운용 용어 정의 문항의 공통 해법"
+      visual_slots:
+        - FIG-CH01-002
+      worked_example_targets:
+        - WE-CH01-004
+        - WE-CH01-005
+    - section_id: ch01_s04
+      title: "해사 맥락에서 뜻이 바뀌는 단어"
+      purpose: "일반영어 독해를 해사 상황 독해로 전환"
+      target_page_span: "5-6"
+      linked_concepts:
+        - C-CH01-004
+      linked_patterns:
+        - P-CH01-003
+        - P-CH01-005
+      exam_connection: "해석 오류, 문맥 빈칸, 운용 용어 선택 문항 대응"
+      visual_slots:
+        - FIG-CH01-003
+      worked_example_targets:
+        - WE-CH01-006
+    - section_id: ch01_s05
+      title: "약어를 기능별로 묶어 읽기"
+      purpose: "약어를 단순 나열이 아니라 통신·장비·구조·보안 기능으로 학습"
+      target_page_span: "4-5"
+      linked_concepts:
+        - C-CH01-005
+      linked_patterns:
+        - P-CH01-004
+      exam_connection: "약어 의미, full form, 기능 분류 문항 대응"
+      visual_slots:
+        - FIG-CH01-004
+      worked_example_targets:
+        - WE-CH01-007
+    - section_id: ch01_s06
+      title: "기출 패턴 적용: 원문형·정의형·약어형"
+      purpose: "장 개념을 실제 풀이 절차로 통합하되 기출 원문은 복제하지 않음"
+      target_page_span: "6-8"
+      linked_concepts:
+        - C-CH01-001
+        - C-CH01-002
+        - C-CH01-003
+        - C-CH01-004
+        - C-CH01-005
+      linked_patterns:
+        - P-CH01-001
+        - P-CH01-002
+        - P-CH01-003
+        - P-CH01-004
+        - P-CH01-005
+      exam_connection: "chapter-end original practice set로 연결"
+      visual_slots: []
+      worked_example_targets:
+        - WE-CH01-008
+        - WE-CH01-009
+
+misconception_targets:
+  - misconception_id: M-CH01-001
+    target: "shall을 단순 미래시제로 해석"
+    correction_strategy: "규정문에서 shall은 의무·요건을 만드는 신호임을 ladder로 반복"
+    linked_sections:
+      - ch01_s02
+  - misconception_id: M-CH01-002
+    target: "may를 항상 허가로만 해석"
+    correction_strategy: "권한 부여, 가능성, 재량 표현을 문맥별로 분리"
+    linked_sections:
+      - ch01_s02
+  - misconception_id: M-CH01-003
+    target: "means 뒤 전체 정의부가 아니라 첫 명사만 보고 답 선택"
+    correction_strategy: "정의부의 수식어와 예외부를 bracket annotation으로 표시"
+    linked_sections:
+      - ch01_s03
+  - misconception_id: M-CH01-004
+    target: "general English 의미를 해사 맥락에 그대로 적용"
+    correction_strategy: "false friend map과 상황별 mini-context drill 제공"
+    linked_sections:
+      - ch01_s04
+  - misconception_id: M-CH01-005
+    target: "약어를 full form만 외우고 기능을 모름"
+    correction_strategy: "통신/장비/구조/보안 기능별 카드와 mixed classification drill"
+    linked_sections:
+      - ch01_s05
+
+worked_example_targets:
+  - example_id: WE-CH01-001
+    section_id: ch01_s01
+    type: "pattern diagnosis"
+    target_pattern: P-CH01-001
+    description: "협약명과 빈칸 위치만 보고 어떤 독해 도구를 쓸지 결정"
+  - example_id: WE-CH01-002
+    section_id: ch01_s02
+    type: "worked example"
+    target_pattern: P-CH01-001
+    description: "shall/may/must가 섞인 author-created 규정문 빈칸 풀이"
+  - example_id: WE-CH01-003
+    section_id: ch01_s02
+    type: "misconception repair"
+    target_pattern: P-CH01-003
+    description: "may를 권한 부여로 읽어야 하는 문장과 가능성으로 읽는 문장 비교"
+  - example_id: WE-CH01-004
+    section_id: ch01_s03
+    type: "worked example"
+    target_pattern: P-CH01-002
+    description: "means 정의문에서 핵심 용어와 조건절을 bracket으로 분해"
+  - example_id: WE-CH01-005
+    section_id: ch01_s03
+    type: "comparative example"
+    target_pattern: P-CH01-005
+    description: "where/when/unless/except가 답을 바꾸는 짧은 정의문 비교"
+  - example_id: WE-CH01-006
+    section_id: ch01_s04
+    type: "worked example"
+    target_pattern: P-CH01-003
+    description: "passage, underway, datum처럼 일반 의미와 해사 의미가 다른 단어 판별"
+  - example_id: WE-CH01-007
+    section_id: ch01_s05
+    type: "classification example"
+    target_pattern: P-CH01-004
+    description: "ETA/MMSI/AIS/EPIRB/SART/OSC를 기능 범주로 분류"
+  - example_id: WE-CH01-008
+    section_id: ch01_s06
+    type: "integrated worked example"
+    target_pattern: P-CH01-001
+    description: "규정문 빈칸을 의무 강도, 조건절, 정의어 단서 순으로 해결"
+  - example_id: WE-CH01-009
+    section_id: ch01_s06
+    type: "integrated worked example"
+    target_pattern: P-CH01-002
+    description: "정의문과 약어 단서가 결합된 original item 풀이"
+
+original_practice_item_targets:
+  policy:
+    all_items_original: true
+    not_superficial_rewrite: true
+    no_full_exam_text_reproduction: true
+    source_basis: "abstracted patterns, not copied stems"
+  by_difficulty:
+    easy:
+      count: 15
+      target_skills:
+        - "shall/may/must 구분"
+        - "기본 약어 full form"
+        - "짧은 definition matching"
+      pattern_ids:
+        - P-CH01-001
+        - P-CH01-002
+        - P-CH01-004
+    medium:
+      count: 15
+      target_skills:
+        - "조건·예외절 포함 조문 빈칸"
+        - "false friend 해석 오류"
+        - "문맥상 적절한 해사 용어 선택"
+      pattern_ids:
+        - P-CH01-001
+        - P-CH01-003
+        - P-CH01-005
+    hard:
+      count: 8
+      target_skills:
+        - "복수 정오 판단"
+        - "정의문과 약어가 결합된 mixed item"
+        - "협약형 문장 구조 분석"
+      pattern_ids:
+        - P-CH01-001
+        - P-CH01-002
+        - P-CH01-004
+  cumulative_review_items:
+    count: 6
+    placement: "chapter-end review set"
+    design_note: "이후 COLREG, SMCP, IAMSAR 장의 원문형 문제로 자연스럽게 넘어가도록 설계"
+
+missing_data:
+  required_exam_registry_files:
+    - file: "exam_frequency_map.yml"
+      status: missing
+      impact: "topic counts and priority scores were taken from outputs/*.csv instead of normalized registry IDs."
+    - file: "exam_concept_matrix.yml"
+      status: missing
+      impact: "concept IDs are provisional C-CH01-* and must be normalized later."
+    - file: "question_pattern_registry.yml"
+      status: missing
+      impact: "pattern IDs are provisional P-CH01-* and should be reconciled with a project-level registry."
+  missing_general_textbook_files:
+    - "book_spec.yml"
+    - "style_guide.md"
+    - "glossary.yml"
+    - "citation_policy.md"
+    - "visual_style_guide.md"
+    - "claim_ledger.yml"
+    - "source_note_registry.yml"
+    - "figure_registry.yml"
+  unresolved_user_inputs:
+    - "Target topics/concepts field contained placeholder examples rather than concrete project IDs."
+    - "Linked question pattern IDs field contained placeholder examples rather than actual IDs."
+    - "Intended page range field contained placeholder example; applied 25-35 pages from request example and priority band A."
+    - "Task requested chapter_cards/ch03.yml, but goal specifies ch01 and existing ch03 is assigned to COLREG lights/shapes/sounds."
+
+review_gates:
+  before_reference_mining:
+    - "confirm canonical filename and registry ID strategy"
+    - "confirm whether ch01 should remain 25-35 pages or be reduced to prior 17-page blueprint"
+  before_drafting:
+    - "reference mining complete"
+    - "source_note_registry.yml populated"
+    - "glossary.yml seeded with ch01 terms"
+    - "question_pattern_registry.yml populated or provisional IDs accepted"
+  completion_gate:
+    - "all core sections map to concepts and patterns"
+    - "all theory claims source-backed or marked author original"
+    - "all figures have purpose, caption, alt text, and source/pattern basis"
+    - "all practice items are original"
+    - "copyright/reuse risk review complete"
+
+recommended_next_step:
+  primary: "reference mining"
+  reason: "ch01 is concept-foundational and must cite official SMCP/convention terminology before prose drafting."
+  secondary: "create exam_frequency_map.yml, exam_concept_matrix.yml, and question_pattern_registry.yml from outputs CSVs"
+  drafting_status: "not_ready_until_reference_mining_and_registry_normalization"

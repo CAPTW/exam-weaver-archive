@@ -1,0 +1,27 @@
+template_id: exam_driven_chapter_card_v1
+purpose: "기출 빈도와 개념 학습을 연결하는 교재 장 설계 카드"
+required_fields:
+  - chapter_id
+  - title
+  - status
+  - part
+  - priority_band
+  - target_exam_scope
+  - primary_exam_topics
+  - linked_concepts
+  - linked_question_patterns
+  - prerequisite_foundations
+  - expected_page_weight
+  - visual_plan_summary
+  - exercise_plan_summary
+  - reference_needs
+  - misconception_notes
+  - original_practice_policy
+  - blueprint_evidence
+  - review_gates
+  - movement_note
+notes:
+  - "문항 원문을 장 카드에 길게 복사하지 않는다."
+  - "연습문제는 기출 패턴에서 추상화한 original item으로 작성한다."
+  - "reference_needs는 실제 집필 전 출처 확인 및 citation audit 대상이다."
+

@@ -1,0 +1,78 @@
+chapter_id: ch08
+title: "IAMSAR 비상 단계·현장조정·수색 패턴"
+status: proposed
+part: "Part IV. 선박 안전과 수색구조"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "수색구조"
+    topic_l2: "IAMSAR"
+    topic_l3: "수색구조 일반"
+    observed_count: 38
+    priority_score: 0.9037
+  - topic_l1: "수색구조"
+    topic_l2: "IAMSAR"
+    topic_l3: "수색 패턴"
+  - topic_l1: "수색구조"
+    topic_l2: "IAMSAR"
+    topic_l3: "비상 단계"
+  - topic_l1: "수색구조"
+    topic_l2: "IAMSAR"
+    topic_l3: "현장조정"
+linked_concepts:
+  - "uncertainty phase, alert phase, distress phase"
+  - "OSC and RCC/RSC"
+  - "datum and search area"
+  - "parallel track, sector search, expanding square"
+  - "rescue coordination communication"
+linked_question_patterns:
+  - "비상 단계 정의 매칭"
+  - "search pattern 상황 선택"
+  - "SAR 역할 비교"
+  - "절차 순서 배열"
+  - "IAMSAR 용어 옳고 그름 판단"
+prerequisite_foundations:
+  - "ch05 VHF/VTS communication"
+  - "ch07 SOLAS emergency readiness"
+expected_page_weight:
+  percent_of_core_text: 9
+  pages_if_240pp: 22
+visual_plan_summary:
+  - "SAR coordination map"
+  - "emergency phase ladder"
+  - "search pattern diagrams"
+  - "datum-to-search-area schematic"
+exercise_plan_summary:
+  concept_checks: 22
+  worked_examples: 8
+  original_practice_items: 45
+  item_types:
+    - "phase identification"
+    - "pattern-to-scenario"
+    - "full SAR case"
+reference_needs:
+  primary:
+    - "IAMSAR Manual"
+  secondary:
+    - "SMCP distress communication sections"
+    - "GMDSS overview references"
+misconception_notes:
+  - "uncertainty/alert/distress phase를 위험도 순서 없이 암기"
+  - "search와 rescue 정의를 뒤바꿈"
+  - "datum을 단순 좌표로만 이해"
+original_practice_policy:
+  basis: "새 조난 상황과 수색 조건으로 original case problem 작성"
+  copyright_guardrail: "기출 SAR scenario 직접 차용 금지"
+blueprint_evidence:
+  priority_rows:
+    - "IAMSAR/수색구조 일반: total 38, recent 12, score 0.9037"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "전체 우선순위 2위이며 도해 학습 효과가 큼"
+review_gates:
+  - "domain review"
+  - "visual review"
+  - "exam relevance review"
+

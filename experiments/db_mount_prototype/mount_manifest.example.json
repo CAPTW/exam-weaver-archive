@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "metadata": {
+    "purpose": "Example mount manifest. Generate a local manifest with scripts/db_mount_prototype.py manifest."
+  },
+  "mounts": [
+    {
+      "id": "main",
+      "label": "Main snapshot",
+      "domain": "all",
+      "path": "../../data/main_snapshots/exam_bank.main_snapshot_YYYYMMDD_HHMMSS.db",
+      "enabled": true,
+      "read_only": true
+    }
+  ]
+}
+

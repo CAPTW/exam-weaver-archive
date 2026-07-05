@@ -1,0 +1,73 @@
+chapter_id: ch03
+title: "COLREG 등화·형상물·음향신호"
+status: proposed
+part: "Part II. COLREG 항법 규칙과 시각·음향 신호"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "충돌예방·항법규칙"
+    topic_l2: "COLREG"
+    topic_l3: "등화·형상물"
+    observed_count: 24
+    priority_score: 0.8539
+  - topic_l1: "충돌예방·항법규칙"
+    topic_l2: "COLREG"
+    topic_l3: "음향신호"
+    observed_count: 8
+linked_concepts:
+  - "masthead light, sidelights, sternlight"
+  - "all-round lights and shapes"
+  - "visibility ranges by vessel length"
+  - "restricted visibility sound signals"
+  - "vessel at anchor, aground, towing, fishing"
+linked_question_patterns:
+  - "등화 묘사로 선박 상태 식별"
+  - "빈칸 숫자 합산"
+  - "음향신호 조건 매칭"
+  - "시각 신호와 선박 상태 비교"
+prerequisite_foundations:
+  - "ch02 COLREG 기본 조우 논리"
+  - "해사영어 숫자·거리 표현"
+expected_page_weight:
+  percent_of_core_text: 10
+  pages_if_240pp: 24
+visual_plan_summary:
+  - "night light atlas"
+  - "day shape atlas"
+  - "sound signal timing strip"
+  - "vessel length vs visibility range table"
+exercise_plan_summary:
+  concept_checks: 25
+  worked_examples: 8
+  original_practice_items: 45
+  item_types:
+    - "visual recognition"
+    - "numeric regulation"
+    - "signal condition matching"
+reference_needs:
+  primary:
+    - "COLREG Part C"
+    - "COLREG Part D"
+    - "COLREG Annex I"
+  secondary:
+    - "official or author-created schematic light diagrams"
+misconception_notes:
+  - "등화 색과 위치를 암기표로만 외워 실제 상태를 못 읽는 오류"
+  - "선박 길이 기준을 혼동하는 오류"
+  - "정박/좌초 음향신호 구분 실패"
+original_practice_policy:
+  basis: "새로운 등화 배열과 신호 조건으로 original item 제작"
+  copyright_guardrail: "기출 그림·배열 직접 복제 금지"
+blueprint_evidence:
+  priority_rows:
+    - "COLREG/등화·형상물: total 24, recent 11, score 0.8539"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "최근 3개년 반복 및 도해 학습 가치가 높음"
+review_gates:
+  - "domain review"
+  - "visual review"
+  - "exam relevance review"
+

@@ -1,0 +1,76 @@
+chapter_id: ch05
+title: "VHF·VTS·조타명령·항로지정 통신"
+status: proposed
+part: "Part III. SMCP/VHF 통신과 선박 운용 언어"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "해사통신·SMCP"
+    topic_l2: "SMCP/VHF"
+    topic_l3: "VHF·VTS·무선통신"
+    observed_count: 28
+    priority_score: 0.8536
+  - topic_l1: "해사통신·SMCP"
+    topic_l2: "SMCP/VHF"
+    topic_l3: "표준조타명령"
+  - topic_l1: "항로지정·해상교통"
+    topic_l2: "Routeing/VTS"
+    topic_l3: "항로지정·통항관리"
+    observed_count: 14
+linked_concepts:
+  - "VHF call structure"
+  - "VTS reporting"
+  - "helm order semantics"
+  - "course alteration and swing control"
+  - "routeing measure vocabulary"
+  - "reporting point and traffic lane"
+linked_question_patterns:
+  - "조타명령 의미 선택"
+  - "VHF 교신 빈칸"
+  - "금지/권장 통신행위 판별"
+  - "항로지정 정의 매칭"
+  - "교신 순서 배열"
+prerequisite_foundations:
+  - "ch02 COLREG 조우 상황"
+  - "ch04 SMCP 기본 표현"
+expected_page_weight:
+  percent_of_core_text: 10
+  pages_if_240pp: 24
+visual_plan_summary:
+  - "ship-VTS dialogue flow"
+  - "helm order wheel and rudder response graphic"
+  - "routeing/VTS reporting flow map"
+exercise_plan_summary:
+  concept_checks: 22
+  worked_examples: 8
+  original_practice_items: 45
+  item_types:
+    - "helm-order interpretation"
+    - "VHF exchange completion"
+    - "routeing term matching"
+reference_needs:
+  primary:
+    - "IMO SMCP wheel orders and VTS communication sections"
+    - "IALA/VTS terminology references"
+  secondary:
+    - "bridge procedure guide for communication flow"
+misconception_notes:
+  - "Nothing to port/starboard와 steady/meet her 혼동"
+  - "VHF에서 불필요 반복과 부적절 표현 허용으로 오해"
+  - "routeing measure와 VTS 보고절차를 분리 암기하는 오류"
+original_practice_policy:
+  basis: "새 교신 상황과 조타 상황으로 original dialogue item 작성"
+  copyright_guardrail: "기출 보기 조합 직접 사용 금지"
+blueprint_evidence:
+  priority_rows:
+    - "SMCP/VHF/VHF·VTS·무선통신: total 28, recent 9, score 0.8536"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "최근 출제 강도와 실무 맥락성이 높아 본문 장으로 유지"
+review_gates:
+  - "domain review"
+  - "visual review"
+  - "exam relevance review"
+

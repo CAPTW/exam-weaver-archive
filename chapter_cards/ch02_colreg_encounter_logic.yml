@@ -1,0 +1,77 @@
+chapter_id: ch02
+title: "COLREG 조우 상황과 피항 판단"
+status: proposed
+part: "Part II. COLREG 항법 규칙과 시각·음향 신호"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "충돌예방·항법규칙"
+    topic_l2: "COLREG"
+    topic_l3: "일반 항법규정"
+    observed_count: 31
+    priority_score: 0.8986
+  - topic_l1: "충돌예방·항법규칙"
+    topic_l2: "COLREG"
+    topic_l3: "항법·피항동작"
+    observed_count: 16
+    priority_score: 0.6803
+linked_concepts:
+  - "look-out"
+  - "safe speed"
+  - "risk of collision"
+  - "action to avoid collision"
+  - "stand-on vessel / give-way vessel"
+  - "head-on, crossing, overtaking"
+  - "vessel not under command and restricted ability to manoeuvre"
+linked_question_patterns:
+  - "규칙 원문 빈칸"
+  - "상황을 규칙으로 매핑"
+  - "옳은/옳지 않은 설명 개수 세기"
+  - "피항동작 선택"
+  - "선박 상태 정의 비교"
+prerequisite_foundations:
+  - "ch01 규정 영어"
+  - "기본 방위·각도 표현"
+expected_page_weight:
+  percent_of_core_text: 12
+  pages_if_240pp: 29
+visual_plan_summary:
+  - "조우상황 decision tree"
+  - "stand-on/give-way 관계도"
+  - "선박 상태 matrix"
+  - "22.5도 abaft beam 개념 그림"
+exercise_plan_summary:
+  concept_checks: 25
+  worked_examples: 8
+  original_practice_items: 45
+  item_types:
+    - "scenario-to-rule"
+    - "rule clause blank"
+    - "comparative true/false"
+reference_needs:
+  primary:
+    - "COLREG Rules 2-8"
+    - "COLREG Rules 13-18"
+  secondary:
+    - "navigation rule commentary for teaching explanation"
+misconception_notes:
+  - "추월/횡단/마주침 조건을 각도 없이 감으로 판단"
+  - "stand-on vessel도 아무 조치를 하지 않는다고 오해"
+  - "restricted ability와 not under command 혼동"
+original_practice_policy:
+  basis: "상황 구조와 규칙 적용 절차를 새 시나리오로 제작"
+  copyright_guardrail: "기출 상황문 재사용 금지"
+blueprint_evidence:
+  priority_rows:
+    - "COLREG/일반 항법규정: total 31, recent 13, score 0.8986"
+    - "COLREG/항법·피항동작: total 16, recent 4, score 0.6803"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "COLREG는 고빈도이며 이후 SMCP/VHF와 SAR 상황 판단의 선수 개념"
+review_gates:
+  - "domain review"
+  - "exam relevance review"
+  - "visual review"
+

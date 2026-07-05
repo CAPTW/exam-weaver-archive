@@ -1,0 +1,73 @@
+chapter_id: ch09
+title: "UNCLOS 해역·영해·무해통항"
+status: proposed
+part: "Part V. 해양법과 컴플라이언스"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "국제해양법"
+    topic_l2: "UNCLOS"
+    topic_l3: "영해"
+    observed_count: 24
+    priority_score: 0.8426
+  - topic_l1: "국제해양법"
+    topic_l2: "UNCLOS"
+    topic_l3: "무해통항"
+  - topic_l1: "국제해양법"
+    topic_l2: "UNCLOS"
+    topic_l3: "일반 조항"
+linked_concepts:
+  - "baseline and territorial sea"
+  - "contiguous zone and EEZ overview"
+  - "innocent passage"
+  - "coastal State powers"
+  - "traffic separation schemes under coastal State control"
+linked_question_patterns:
+  - "UNCLOS 조문 빈칸"
+  - "숫자·해역 범위 계산"
+  - "무해통항 활동 판별"
+  - "연안국 권한 설명의 옳고 그름"
+prerequisite_foundations:
+  - "ch01 규정 영어"
+  - "기본 해역·거리 단위 이해"
+expected_page_weight:
+  percent_of_core_text: 9
+  pages_if_240pp: 22
+visual_plan_summary:
+  - "maritime zones map"
+  - "innocent passage decision tree"
+  - "coastal State right/power comparison table"
+exercise_plan_summary:
+  concept_checks: 20
+  worked_examples: 8
+  original_practice_items: 40
+  item_types:
+    - "clause blank"
+    - "legality scenario"
+    - "zone definition matching"
+reference_needs:
+  primary:
+    - "UNCLOS Part II"
+    - "UNCLOS articles on innocent passage"
+  secondary:
+    - "law of the sea teaching references for zone diagrams"
+misconception_notes:
+  - "영해/접속수역/EEZ 권한을 동일하게 보는 오류"
+  - "innocent passage의 금지 활동을 단순 선박 유형 문제로 오해"
+  - "traffic separation schemes를 COLREG만으로 처리"
+original_practice_policy:
+  basis: "새로운 연안국/외국선박 상황으로 legal judgment item 작성"
+  copyright_guardrail: "기출 조문 보기 전체 복제 금지"
+blueprint_evidence:
+  priority_rows:
+    - "UNCLOS/영해: total 24, recent 10, score 0.8426"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "최근 3개년 강도가 높고 조문형 학습 가치가 큼"
+review_gates:
+  - "domain review"
+  - "citation audit"
+  - "exam relevance review"
+

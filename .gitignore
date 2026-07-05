@@ -1,0 +1,30 @@
+# Runtime data and question-bank databases
+data/
+outputs/
+logs/
+tmp/
+_branches/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.duckdb
+*.mdb
+*.accdb
+*.parquet
+
+# Local Python/runtime artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build/package artifacts
+build/
+dist/
+*.spec.bak
+
+# Generated exam documents
+*.docx
+*.pdf

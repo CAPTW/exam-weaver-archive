@@ -1,0 +1,812 @@
+chapter_id: "ch01"
+chapter_title: "규정·정의·용어를 읽는 해사영어 기초"
+chapter_card: "chapter_cards/ch01_rule_english_foundations.yml"
+mining_date: "2026-06-30"
+skill: "reference-mining"
+
+zotero:
+  status: "unavailable"
+  checked_by: "tool_search"
+  note: "Zotero MCP tools(server_status, search_items, get_item, get_notes, get_pdf_content, search_fulltext)는 현재 세션에 노출되지 않았음. 모든 zotero_item_key는 TODO_ZOTERO_UNAVAILABLE로 표시한다."
+
+project_context:
+  available_chapter_card: "chapter_cards/ch01_rule_english_foundations.yml"
+  missing_reference_policy_files:
+    - "citation_policy.md"
+    - "book_spec.yml"
+    - "source_note_registry.yml"
+  missing_exam_registry_files:
+    - "exam_frequency_map.yml"
+    - "exam_concept_matrix.yml"
+    - "question_pattern_registry.yml"
+  request_mismatch_note: "요청문은 chapter_cards/ch03.yml를 언급했으나, 실제 ch03은 COLREG lights/shapes/sounds 장이다. ch01의 정식 장 카드인 chapter_cards/ch01_rule_english_foundations.yml를 기준으로 채굴했다."
+
+source_evidence_needs:
+  SRC-CH01-001:
+    need: "IMO Standard Marine Communication Phrases glossary and general principles"
+    coverage_status: "covered_primary"
+    source_note_ids:
+      - "ch01_src_001"
+      - "ch01_src_002"
+      - "ch01_src_016"
+  SRC-CH01-002:
+    need: "UNCLOS, COLREG, SOLAS, MARPOL, STCW, ISPS official texts or authorized extracts"
+    coverage_status: "partially_covered"
+    source_note_ids:
+      - "ch01_src_003"
+      - "ch01_src_004"
+      - "ch01_src_005"
+      - "ch01_src_006"
+      - "ch01_src_007"
+      - "ch01_src_008"
+      - "ch01_src_013"
+      - "ch01_src_014"
+      - "ch01_src_015"
+    gap_note: "SOLAS/MARPOL/STCW/ISPS의 최신 통합판 본문 전체와 정확한 조문 페이지는 별도 수집 필요. 공개 IMO 개요 페이지와 일부 공식 결의·규칙으로만 기반을 잡았다."
+  SRC-CH01-003:
+    need: "IAMSAR terminology references"
+    coverage_status: "partially_covered"
+    source_note_ids:
+      - "ch01_src_012"
+    gap_note: "현재 확보한 것은 IAMSAR 개정 회람과 Mobile Facilities 관련 발췌다. 최신 IAMSAR Manual 정식 권별 판본과 exact locator는 추가 확보 필요."
+  SRC-CH01-004:
+    need: "maritime English teaching references"
+    coverage_status: "covered_secondary"
+    source_note_ids:
+      - "ch01_src_001"
+      - "ch01_src_002"
+      - "ch01_src_017"
+      - "ch01_src_018"
+  SRC-CH01-005:
+    need: "bilingual maritime glossary"
+    coverage_status: "partially_covered"
+    source_note_ids:
+      - "ch01_src_009"
+      - "ch01_src_016"
+      - "ch01_src_017"
+    gap_note: "IMO KOREA 해양수산 용어사전 PDF는 검색으로 확인되었으나 본 세션 fetch가 실패했다. 정식 용어집 또는 프로젝트 glossary.yml 수집이 필요하다."
+
+source_notes:
+  - source_note_id: "ch01_src_001"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "standard"
+    title: "IMO Standard Marine Communication Phrases, Resolution A.918(22)"
+    authors:
+      - "International Maritime Organization"
+    year: 2001
+    edition: "Resolution A.918(22), adopted 29 November 2001"
+    url: "https://wwwcdn.imo.org/localresources/en/OurWork/Safety/Documents/A.918%2822%29.pdf"
+    locator:
+      page_start: 11
+      page_end: 47
+      section: "Introduction; Organization; Maritime Education and Training; Basic communicative features; General 3 Message Markers; A1/6 VTS Standard Phrases"
+    relevant_idea: "SMCP는 해상 안전 관련 음성통신에서 언어 장벽과 오해를 줄이기 위해 단순화된 Maritime English와 표준 구조를 사용한다. Part A/B 구분, message marker, 응답 방식, 약어·용어 학습 설계의 1차 기준이다."
+    paraphrase_candidate: "ch01에서는 SMCP를 문구 암기 목록이 아니라 송신 의도, 법적/권고적 힘, 질문·응답 구조를 분명히 하는 ambiguity-control 체계로 설명한다."
+    quote_candidate:
+      - text: "Instruction, Advice, Warning, Information, Question, Answer, Request, Intention"
+        reason: "message marker 이름은 정확한 표기 자체가 학습 대상이다."
+      - text: null
+        reason: "본문 설명은 대부분 paraphrase로 처리한다."
+    recommended_use: "cite"
+    copyright_risk: "medium"
+    risk_flags:
+      - "Do not reproduce SMCP tables, phrase lists, or examples at length."
+      - "Author-create worked examples from abstracted patterns."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-001"
+      - "SRC-CH01-004"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s01"
+      - "ch01_s02"
+      - "ch01_s05"
+      - "ch01_s06"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-003"
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-003"
+      - "P-CH01-004"
+    visual_targets:
+      - "FIG-CH01-001"
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_002"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "official_webpage"
+    title: "IMO Standard Marine Communication Phrases"
+    authors:
+      - "International Maritime Organization"
+    year: null
+    edition: null
+    url: "https://www.imo.org/en/ourwork/safety/pages/standardmarinecommunicationphrases.aspx"
+    locator:
+      page_start: null
+      page_end: null
+      section: "IMO public information page"
+    relevant_idea: "SMCP는 ship-to-shore, shore-to-ship, ship-to-ship, on-board communication의 주요 안전 관련 상황을 다루며, STCW상 항해당직사관의 이해·사용 능력 요건과 연결된다."
+    paraphrase_candidate: "장 도입부에서 표준해사통신이 시험용 암기 항목이 아니라 실제 안전통신과 자격 요건에서 나온 표준 언어라는 배경을 설명하는 데 사용한다."
+    quote_candidate:
+      - text: null
+        reason: "공개 개요의 문구는 짧은 사실 확인용으로만 활용하고 장 본문은 자체 설명으로 작성한다."
+    recommended_use: "background"
+    copyright_risk: "low"
+    risk_flags:
+      - "Use as accessible public-facing confirmation; cite A.918(22) for technical detail."
+    missing_metadata:
+      - "page last updated date"
+    source_need_ids:
+      - "SRC-CH01-001"
+      - "SRC-CH01-004"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s01"
+    linked_concepts:
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-004"
+    visual_targets: []
+
+  - source_note_id: "ch01_src_003"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "legal_drafting_guidance"
+    title: "Legistics - Present Indicative"
+    authors:
+      - "Department of Justice Canada"
+    year: 2022
+    edition: "web article"
+    url: "https://www.justice.gc.ca/eng/rp-pr/csj-sjc/legis-redact/legistics/p2p3.html"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Modal verbs and legislative drafting practice"
+    relevant_idea: "법령 작성 관행에서 shall/must는 의무, may는 권한 부여를 만드는 데 쓰인다는 일반 원칙을 제시한다."
+    paraphrase_candidate: "시험에서 shall을 단순 미래로 읽으면 오답이 되기 쉽다. 규정문에서는 행위자에게 요구되는 조치, 권한 또는 요건을 만드는 기능을 먼저 확인해야 한다."
+    quote_candidate:
+      - text: "shall and must to create obligations and may to confer powers"
+        reason: "shall/must/may ladder의 핵심 구분 문구로 짧게 인용 가능하다."
+    recommended_use: "cite"
+    copyright_risk: "low"
+    risk_flags:
+      - "This is Canadian drafting guidance; do not claim it overrides IMO convention wording."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+    linked_concepts:
+      - "C-CH01-001"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-003"
+    visual_targets:
+      - "FIG-CH01-001"
+
+  - source_note_id: "ch01_src_004"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "legal_drafting_guidance"
+    title: "Legistics - Expressing Obligations and Prohibitions"
+    authors:
+      - "Department of Justice Canada"
+    year: 2022
+    edition: "web article"
+    url: "https://www.justice.gc.ca/eng/rp-pr/csj-sjc/legis-redact/legistics/p1p8.html"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Direction"
+    relevant_idea: "현대 법령문 작성에서는 의무에 must, 금지에 must not/prohibited를 권장하며, shall은 다의성과 법률문체성 때문에 주의가 필요하다고 설명한다."
+    paraphrase_candidate: "의무 강도 도표에서는 must/must not/prohibited를 현대적 명시 표현으로, shall을 조약·규정 원문에서 자주 만나는 전통적 의무 신호로 분리한다."
+    quote_candidate:
+      - text: null
+        reason: "직접 인용보다 오해 방지 note로 paraphrase하는 편이 안전하다."
+    recommended_use: "compare"
+    copyright_risk: "low"
+    risk_flags:
+      - "Use to explain drafting-language caution, not to reinterpret a specific maritime convention."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+    linked_concepts:
+      - "C-CH01-001"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-003"
+    visual_targets:
+      - "FIG-CH01-001"
+
+  - source_note_id: "ch01_src_005"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "legal_drafting_guidance"
+    title: "Legistics - Definitions"
+    authors:
+      - "Department of Justice Canada"
+    year: 2024
+    edition: "web article"
+    url: "https://www.justice.gc.ca/eng/rp-pr/csj-sjc/legis-redact/legistics/p1p5.html"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Definitions in federal legislative texts"
+    relevant_idea: "정의 조항은 문서 전체에서 특정 용어의 의미를 통제한다. 따라서 means/includes/refers to 뒤의 정의부 전체를 읽어야 한다."
+    paraphrase_candidate: "정의문 풀이에서는 head term만 보고 답을 고르지 말고, 정의부, 포함·제외 조건, 범위 제한어를 괄호로 나누어 읽는 절차를 가르친다."
+    quote_candidate:
+      - text: null
+        reason: "정의 조항의 기능은 짧은 paraphrase로 충분하다."
+    recommended_use: "cite"
+    copyright_risk: "low"
+    risk_flags: []
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s03"
+      - "ch01_s06"
+    linked_concepts:
+      - "C-CH01-002"
+      - "C-CH01-003"
+    linked_patterns:
+      - "P-CH01-002"
+      - "P-CH01-005"
+    visual_targets:
+      - "FIG-CH01-002"
+
+  - source_note_id: "ch01_src_006"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "treaty"
+    title: "Vienna Convention on the Law of Treaties"
+    authors:
+      - "United Nations International Law Commission"
+      - "United Nations"
+    year: 1969
+    edition: "official English convention text"
+    url: "https://legal.un.org/ilc/texts/instruments/english/conventions/1_1_1969.pdf"
+    locator:
+      page_start: 11
+      page_end: 12
+      section: "Article 31 General rule of interpretation; Article 32 Supplementary means"
+    relevant_idea: "조약 해석은 용어의 보통 의미, 문맥, 목적을 함께 보는 작업이다. 이는 해사 협약 원문형 문제에서 단어 하나만 떼어 암기하지 말아야 하는 이론적 근거다."
+    paraphrase_candidate: "협약형 빈칸·정의 문제는 단어 뜻, 조문 내 문맥, 조약 목적을 함께 읽는 훈련으로 설계한다."
+    quote_candidate:
+      - text: "ordinary meaning ... context ... object and purpose"
+        reason: "조약 해석 원칙의 핵심어는 정확한 용어가 중요하다."
+    recommended_use: "cite"
+    copyright_risk: "low"
+    risk_flags:
+      - "Quote only the short Article 31 keywords; paraphrase the explanation."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s01"
+      - "ch01_s03"
+    linked_concepts:
+      - "C-CH01-002"
+      - "C-CH01-003"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-002"
+    visual_targets:
+      - "FIG-CH01-002"
+
+  - source_note_id: "ch01_src_007"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "treaty"
+    title: "United Nations Convention on the Law of the Sea"
+    authors:
+      - "United Nations"
+    year: 1982
+    edition: "official English convention text"
+    url: "https://www.un.org/depts/los/convention_agreements/texts/unclos/unclos_e.pdf"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Part II, Territorial Sea and Contiguous Zone; Articles 17-26"
+    relevant_idea: "UNCLOS의 innocent passage 조문은 passage, coastal State, shall/may, prejudice, conformity 같은 핵심어가 결합된 규정문 독해 사례를 제공한다."
+    paraphrase_candidate: "passage는 일반적인 '통과'보다 해양법상 특정 권리와 조건이 붙은 행위로 읽어야 하며, innocent passage 문항은 정의부와 행위 제한을 함께 묻는 경향이 있다."
+    quote_candidate:
+      - text: null
+        reason: "UN PDF는 web fetch가 제한되어 exact page locator를 아직 검증하지 못했으므로 직접 인용은 보류한다."
+    recommended_use: "cite"
+    copyright_risk: "low"
+    risk_flags:
+      - "Need exact article/page verification before any direct quote."
+    missing_metadata:
+      - "exact PDF page locator"
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+      - "ch01_s03"
+      - "ch01_s04"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-002"
+      - "C-CH01-003"
+      - "C-CH01-004"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-002"
+      - "P-CH01-003"
+    visual_targets:
+      - "FIG-CH01-001"
+      - "FIG-CH01-003"
+
+  - source_note_id: "ch01_src_008"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "official_rules"
+    title: "USCG Amalgamated Navigation Rules: International and U.S. Inland"
+    authors:
+      - "United States Coast Guard Navigation Center"
+    year: 2023
+    edition: "amended June 12, 2023 webpage"
+    url: "https://www.navcen.uscg.gov/navigation-rules-amalgamated"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Rule 3 General Definitions; Rule 5 Look-out; Rule 20 Application; Rule 21 Definitions"
+    relevant_idea: "COLREG 계열 문장은 definition pattern, shall obligation, except/context clauses, numeric/arc conditions의 대표 사례다. underway는 움직임 자체가 아니라 anchor/shore/aground 여부로 정의된다."
+    paraphrase_candidate: "underway 같은 단어는 일반영어 직관과 다르게 규정 정의를 우선한다. 학생용 note에서는 '항해 중=항상 움직이는 상태'라는 오해를 바로잡는다."
+    quote_candidate:
+      - text: "not at anchor, or made fast to the shore, or aground"
+        reason: "underway 정의의 핵심 조건은 정확한 wording이 중요하다."
+    recommended_use: "cite"
+    copyright_risk: "low"
+    risk_flags:
+      - "USCG text is an accessible official presentation; check original COLREG/IMO text for publication-grade treaty citation."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+      - "ch01_s03"
+      - "ch01_s04"
+      - "ch01_s06"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-002"
+      - "C-CH01-003"
+      - "C-CH01-004"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-002"
+      - "P-CH01-003"
+      - "P-CH01-005"
+    visual_targets:
+      - "FIG-CH01-001"
+      - "FIG-CH01-002"
+      - "FIG-CH01-003"
+
+  - source_note_id: "ch01_src_009"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "korean_treaty_translation"
+    title: "1972년 국제해상충돌예방규칙 협약"
+    authors:
+      - "국가법령정보센터"
+      - "대한민국 법제처"
+    year: 1977
+    edition: "조약 제602호, 국문/영문"
+    url: "https://www.law.go.kr/trtyMInfoP.do?trtySeq=2338"
+    locator:
+      page_start: null
+      page_end: null
+      section: "COLREG treaty record and Korean translation"
+    relevant_idea: "한국어 번역어와 영문 조약명을 함께 확인할 수 있어 false friend, 용어 표준화, 한영 병기 표기를 검토하는 데 유용하다."
+    paraphrase_candidate: "한국어 설명에서는 번역어를 단정하기 전 법제처 조약 번역과 영문 원어를 병기하고, 시험 풀이에서는 영문 규정의 정의 구조를 우선한다."
+    quote_candidate:
+      - text: null
+        reason: "번역문은 장기 복제하지 말고 용어 검증용으로만 사용한다."
+    recommended_use: "compare"
+    copyright_risk: "low"
+    risk_flags:
+      - "Do not rely on Korean translation alone for English exam wording."
+    missing_metadata:
+      - "exact attachment file metadata"
+    source_need_ids:
+      - "SRC-CH01-002"
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s04"
+    linked_concepts:
+      - "C-CH01-004"
+    linked_patterns:
+      - "P-CH01-003"
+      - "P-CH01-005"
+    visual_targets:
+      - "FIG-CH01-003"
+
+  - source_note_id: "ch01_src_010"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "standard"
+    title: "Resolution MSC.496(105): Amendments to SOLAS Chapter IV"
+    authors:
+      - "International Maritime Organization Maritime Safety Committee"
+    year: 2022
+    edition: "adopted 28 April 2022"
+    url: "https://wwwcdn.imo.org/localresources/en/KnowledgeCentre/IndexofIMOResolutions/MSCResolutions/MSC.496%28105%29.pdf"
+    locator:
+      page_start: 3
+      page_end: 3
+      section: "Terms and definitions"
+    relevant_idea: "AIS-SART, bridge-to-bridge communications, continuous radio watch 등 GMDSS/SOLAS 통신 용어의 definition syntax와 약어 의미를 공식 문장으로 확인할 수 있다."
+    paraphrase_candidate: "약어 학습에서는 full form만 외우지 말고 어떤 장비·통신 기능을 수행하는지까지 묶어 설명한다."
+    quote_candidate:
+      - text: "AIS-SART means an automatic identification system search and rescue transmitter"
+        reason: "AIS-SART definition은 exact term expansion이 중요하다."
+    recommended_use: "cite"
+    copyright_risk: "medium"
+    risk_flags:
+      - "Use only short definition fragments; do not reproduce full definition table."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-002"
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s03"
+      - "ch01_s05"
+    linked_concepts:
+      - "C-CH01-002"
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-002"
+      - "P-CH01-004"
+    visual_targets:
+      - "FIG-CH01-002"
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_011"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "technical_recommendation"
+    title: "Recommendation ITU-R M.585-8: Assignment and use of identities in the maritime mobile service"
+    authors:
+      - "International Telecommunication Union Radiocommunication Sector"
+    year: 2019
+    edition: "M.585-8"
+    url: "https://www.itu.int/dms_pubrec/itu-r/rec/m/R-REC-M.585-8-201910-I%21%21PDF-E.pdf"
+    locator:
+      page_start: 2
+      page_end: 4
+      section: "Scope; Annex 1; List of abbreviations/glossary"
+    relevant_idea: "MMSI는 해상이동업무 식별자 체계이며, AIS, EPIRB, GMDSS, RCC, SART 등 시험 빈출 약어를 공식 통신 체계 안에서 연결해 준다."
+    paraphrase_candidate: "MMSI·AIS·EPIRB·SART는 서로 독립된 단어장이 아니라 자동화 통신, 조난 경보, 구조 위치표시 기능의 네트워크로 묶어 가르친다."
+    quote_candidate:
+      - text: null
+        reason: "약어 expansion은 표기만 검증하고 설명은 자체 paraphrase로 처리한다."
+    recommended_use: "cite"
+    copyright_risk: "medium"
+    risk_flags:
+      - "ITU recommendations are technical standards; avoid copying annex formats or tables."
+    missing_metadata: []
+    source_need_ids:
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s05"
+    linked_concepts:
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-004"
+    visual_targets:
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_012"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "standard"
+    title: "MSC.1/Circ.1594: Amendments to the IAMSAR Manual"
+    authors:
+      - "International Maritime Organization Maritime Safety Committee"
+    year: 2018
+    edition: "MSC.1/Circ.1594"
+    url: "https://wwwcdn.imo.org/localresources/en/OurWork/Safety/Documents/Documents%20relevant%20to%20SAR/MSC.1-CIRC.1594%20Amendments%20to%20IAMSAR%20Manual.pdf"
+    locator:
+      page_start: 61
+      page_end: 252
+      section: "Glossary; emergency phases; SAR coordination; on-scene coordinator; datum search planning"
+    relevant_idea: "IAMSAR 계열 용어는 uncertainty/alert/distress phase, SMC/RCC/OSC, datum search planning처럼 단계·역할·기준점 구조로 묶어 읽어야 한다."
+    paraphrase_candidate: "SAR 용어는 단어 뜻보다 절차상 위치가 중요하다. datum은 수색구역을 잡는 지리적 기준점이고, OSC는 현장 조정 역할로 설명한다."
+    quote_candidate:
+      - text: null
+        reason: "정식 IAMSAR 판본 확인 전 exact quote는 보류한다."
+    recommended_use: "cite"
+    copyright_risk: "medium"
+    risk_flags:
+      - "This is an amendment circular, not the complete current IAMSAR Manual."
+      - "Do not copy IAMSAR figures/search-pattern tables."
+    missing_metadata:
+      - "current IAMSAR Manual edition"
+      - "exact term definitions in full manual"
+    source_need_ids:
+      - "SRC-CH01-003"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s03"
+      - "ch01_s04"
+      - "ch01_s05"
+    linked_concepts:
+      - "C-CH01-002"
+      - "C-CH01-004"
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-002"
+      - "P-CH01-004"
+      - "P-CH01-005"
+    visual_targets:
+      - "FIG-CH01-003"
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_013"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "official_webpage"
+    title: "International Convention for the Safety of Life at Sea (SOLAS), 1974"
+    authors:
+      - "International Maritime Organization"
+    year: null
+    edition: "SOLAS 1974 as amended, IMO overview page"
+    url: "https://www.imo.org/en/about/conventions/pages/international-convention-for-the-safety-of-life-at-sea-%28solas%29%2C-1974.aspx"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Objective; technical provisions; Chapter IV Radiocommunications; Chapter III LSA"
+    relevant_idea: "SOLAS는 선박 안전의 최소 기준, 장비·운항 요건, GMDSS 장비(EPIRB/SART 등)를 설명하는 공식 배경 출처다."
+    paraphrase_candidate: "SOLAS 원문형 문제는 안전 장비명과 의무 표현이 결합되므로, 약어를 장비 기능과 협약 목적에 연결해 학습한다."
+    quote_candidate:
+      - text: null
+        reason: "개요 페이지는 배경 요약용; exact regulation wording은 통합판 확인 후 인용한다."
+    recommended_use: "background"
+    copyright_risk: "low"
+    risk_flags:
+      - "Need consolidated SOLAS text for exact regulation quotes."
+    missing_metadata:
+      - "current consolidated edition page locator"
+    source_need_ids:
+      - "SRC-CH01-002"
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s01"
+      - "ch01_s05"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-004"
+    visual_targets:
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_014"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "official_webpage"
+    title: "International Convention for the Prevention of Pollution from Ships (MARPOL)"
+    authors:
+      - "International Maritime Organization"
+    year: null
+    edition: "IMO overview page"
+    url: "https://www.imo.org/en/about/conventions/pages/international-convention-for-the-prevention-of-pollution-from-ships-%28marpol%29.aspx"
+    locator:
+      page_start: null
+      page_end: null
+      section: "Convention overview; six technical Annexes"
+    relevant_idea: "MARPOL은 Annex별 대상 물질·오염 유형 분류와 거리/조건형 표현이 결합되는 협약 독해 사례다."
+    paraphrase_candidate: "MARPOL 관련 정의·조건 문제는 Annex 분류, prohibited/except/within/not less than 같은 조건 표현을 함께 묻는 방식으로 연습문제를 설계한다."
+    quote_candidate:
+      - text: null
+        reason: "개요 페이지의 annex 설명은 paraphrase로 충분하다."
+    recommended_use: "background"
+    copyright_risk: "low"
+    risk_flags:
+      - "Need official consolidated MARPOL text before exact regulatory wording."
+    missing_metadata:
+      - "current consolidated edition page locator"
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+      - "ch01_s03"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-002"
+      - "C-CH01-003"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-002"
+    visual_targets:
+      - "FIG-CH01-001"
+      - "FIG-CH01-002"
+
+  - source_note_id: "ch01_src_015"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "official_webpage"
+    title: "SOLAS XI-2 and the ISPS Code"
+    authors:
+      - "International Maritime Organization"
+    year: null
+    edition: "IMO overview page"
+    url: "https://www.imo.org/en/ourwork/security/pages/solas-xi-2%20isps%20code.aspx"
+    locator:
+      page_start: null
+      page_end: null
+      section: "ISPS Code Part A and Part B; objectives"
+    relevant_idea: "ISPS Code는 mandatory Part A와 recommendatory Part B 구분을 보여 주어 mandatory/recommendatory, must/should/advice의 기능 차이를 설명하는 데 적합하다."
+    paraphrase_candidate: "보안 분야 예시는 Part A는 의무 요건, Part B는 권고 지침이라는 구조로 제시하여 시험에서 mandatory/recommendatory를 구분하게 한다."
+    quote_candidate:
+      - text: null
+        reason: "개요 설명은 paraphrase로 처리한다."
+    recommended_use: "background"
+    copyright_risk: "low"
+    risk_flags:
+      - "Need ISPS Code text for exact clause-level citation."
+    missing_metadata:
+      - "current code edition page locator"
+    source_need_ids:
+      - "SRC-CH01-002"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+    linked_concepts:
+      - "C-CH01-001"
+    linked_patterns:
+      - "P-CH01-001"
+      - "P-CH01-003"
+    visual_targets:
+      - "FIG-CH01-001"
+
+  - source_note_id: "ch01_src_016"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "training_report"
+    title: "SAR 상황별 해사영어"
+    authors:
+      - "대한민국 정부 공개자료"
+    year: 2004
+    edition: "PDF training material"
+    url: "https://m.korea.kr/expertWeb/resources/files/data/document_file/2004/SAR%20%EC%83%81%ED%99%A9%EB%B3%84%20%ED%95%B4%EC%82%AC%EC%98%81%EC%96%B4.pdf"
+    locator:
+      page_start: null
+      page_end: null
+      section: "VTS Standard phrases; Message Markers Korean explanations; exact pages require local verification before citation"
+    relevant_idea: "SMCP/VTS message marker를 한국어로 설명한 교육 자료로, Instruction/Advice/Warning/Information/Question/Answer 등의 한국어 대응과 학습자 오역 위험을 점검하는 데 보조적으로 유용하다."
+    paraphrase_candidate: "한국어판 설명은 학습자 note에서 '지시/권고/경고/통보'의 차이를 설명하는 보조 근거로만 사용하고, 표준 기능은 IMO A.918(22)를 우선한다."
+    quote_candidate:
+      - text: null
+        reason: "교육자료 문장을 그대로 옮기지 말고 한국어 설명 설계의 참고로만 활용한다."
+    recommended_use: "compare"
+    copyright_risk: "medium"
+    risk_flags:
+      - "Do not copy examples or long bilingual phrase blocks."
+      - "Validate against IMO A.918(22)."
+    missing_metadata:
+      - "issuing agency details"
+      - "exact page locator"
+      - "license terms"
+    source_need_ids:
+      - "SRC-CH01-001"
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s02"
+      - "ch01_s05"
+    linked_concepts:
+      - "C-CH01-001"
+      - "C-CH01-005"
+    linked_patterns:
+      - "P-CH01-003"
+      - "P-CH01-004"
+    visual_targets:
+      - "FIG-CH01-001"
+      - "FIG-CH01-004"
+
+  - source_note_id: "ch01_src_017"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "paper"
+    title: "Sentence Transformer LaBSE 모델을 활용한 표준해사통신문구(SMCP) 언어 간 의미 유사도 분석"
+    authors:
+      - "설진기"
+      - "박영수"
+      - "정수진"
+    year: 2025
+    edition: "한국항해항만학회지 49(3), 292-299"
+    url: "https://www.kci.go.kr/kciportal/landing/article.kci?arti_id=ART003221660"
+    locator:
+      page_start: 292
+      page_end: 299
+      section: "Abstract and metadata"
+    relevant_idea: "SMCP의 한국어·영어·중국어 표현 사이에서 의미 유사도 차이가 발생할 수 있으며, 낮은 유사도는 개념 차이, 관습 용어, 언어 고유 표현, 관용구 차이와 관련될 수 있다."
+    paraphrase_candidate: "false friend map은 단순 단어 번역표가 아니라 다국어 의미 차이와 관습적 해사 표현 차이를 줄이는 장치로 설계한다."
+    quote_candidate:
+      - text: null
+        reason: "학술 초록은 직접 인용 없이 연구 취지와 한계를 요약한다."
+    recommended_use: "cite"
+    copyright_risk: "medium"
+    risk_flags:
+      - "Use only abstract-level claims unless full paper is collected."
+      - "Do not reproduce tables, figures, or examples."
+    missing_metadata:
+      - "DOI not available in KCI metadata"
+      - "full text locator not collected"
+    source_need_ids:
+      - "SRC-CH01-004"
+      - "SRC-CH01-005"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s04"
+    linked_concepts:
+      - "C-CH01-004"
+    linked_patterns:
+      - "P-CH01-003"
+      - "P-CH01-005"
+    visual_targets:
+      - "FIG-CH01-003"
+
+  - source_note_id: "ch01_src_018"
+    zotero_item_key: "TODO_ZOTERO_UNAVAILABLE"
+    source_type: "report"
+    title: "Miscommunication in Maritime Contexts: Insights from Phase 1 and 2"
+    authors:
+      - "Nicole Ziegler"
+    year: 2024
+    edition: "Prince William Sound Regional Citizens' Advisory Council commissioned report"
+    url: "https://www.pwsrcac.org/wp-content/uploads/Miscommunication-in-Maritime-Contexts-Insights-from-Phase-1-and-2.pdf"
+    locator:
+      page_start: 1
+      page_end: 20
+      section: "Abstract; executive summary; maritime English training; findings"
+    relevant_idea: "해사 의사소통 실패는 언어 숙련도뿐 아니라 의도 전달, 권력 거리, 공손성/간접성, 문화 차이, plain language 사용과도 관련된다."
+    paraphrase_candidate: "ch01의 misconception note는 단어 뜻만 틀리는 문제를 넘어, speaker intention과 message marker를 명확히 읽지 못하는 위험까지 다룬다."
+    quote_candidate:
+      - text: null
+        reason: "보고서는 보조 연구 근거로 사용하고 수치·사례는 추가 검증 전 직접 인용하지 않는다."
+    recommended_use: "background"
+    copyright_risk: "medium"
+    risk_flags:
+      - "Commissioned report; use as secondary support, not as primary standard."
+      - "Do not copy accident summaries or interview excerpts."
+    missing_metadata:
+      - "peer-review status"
+    source_need_ids:
+      - "SRC-CH01-004"
+    chapter_target: "chapter_cards/ch01_rule_english_foundations.yml"
+    section_target:
+      - "ch01_s01"
+      - "ch01_s04"
+    linked_concepts:
+      - "C-CH01-004"
+    linked_patterns:
+      - "P-CH01-003"
+    visual_targets:
+      - "FIG-CH01-003"
+
+unsupported_claims_todo:
+  - claim_id: "TODO-CH01-001"
+    claim: "해경 해사영어 기출에서 shall/may/must 유형이 특정 연도에 몇 회 출제되었는지"
+    reason: "exam_frequency_map.yml와 question_pattern_registry.yml가 없어 pattern-level 정량 근거를 아직 연결할 수 없다."
+    needed_source: "project-level question_pattern_registry.yml and exam_frequency_map.yml"
+  - claim_id: "TODO-CH01-002"
+    claim: "SOLAS/MARPOL/STCW/ISPS의 정확한 조문별 최신 wording"
+    reason: "공개 개요와 일부 결의문만 확보했다. 통합판/공식 발췌의 exact locator가 필요하다."
+    needed_source: "current consolidated convention/code texts or authorized extracts"
+  - claim_id: "TODO-CH01-003"
+    claim: "IAMSAR distress phase, alert phase, uncertainty phase, OSC, datum의 최종 authoritative wording"
+    reason: "개정 회람과 Mobile Facilities 관련 발췌는 확보했으나 최신 정식 IAMSAR Manual 권별 원문 확인이 필요하다."
+    needed_source: "current IAMSAR Manual Vol. I/II/III"
+  - claim_id: "TODO-CH01-004"
+    claim: "한국어 해사 용어 표준 번역의 최종 권장어"
+    reason: "법제처 COLREG 번역과 정부 교육자료는 확보했으나 범용 해양수산 용어사전 PDF는 fetch 실패, 프로젝트 glossary.yml도 없다."
+    needed_source: "IMO KOREA maritime terminology dictionary or project glossary.yml"
+  - claim_id: "TODO-CH01-005"
+    claim: "Maritime English 오답률/오답위험을 수치화한 국내 해경 수험생 데이터"
+    reason: "현재 근거는 기출 빈도와 일반 연구이며, 수험생 오답률 데이터는 없다."
+    needed_source: "local class diagnostics, mock test results, or item analysis"

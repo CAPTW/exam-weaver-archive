@@ -1,0 +1,82 @@
+chapter_id: ch06
+title: "선박 운용 상황 속 용어: 투묘·접안·선체·기관"
+status: proposed
+part: "Part III. SMCP/VHF 통신과 선박 운용 언어"
+priority_band: supporting_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "선박운용·해사실무"
+    topic_l2: "선박운용 용어"
+    topic_l3: "선체·조종 용어"
+    observed_count: 21
+    priority_score: 0.7095
+  - topic_l1: "선박운용·해사실무"
+    topic_l2: "선박운용 용어"
+    topic_l3: "투묘·양묘"
+    observed_count: 18
+    priority_score: 0.7728
+  - topic_l1: "선박운용·해사실무"
+    topic_l2: "선박운용 용어"
+    topic_l3: "입출항·접안"
+    observed_count: 17
+    priority_score: 0.6747
+  - topic_l1: "선박운용·해사실무"
+    topic_l2: "선박운용 용어"
+    topic_l3: "기관 용어"
+linked_concepts:
+  - "draft, trim, keel, course made good"
+  - "anchor dragging, dredging, shackles"
+  - "berthing, tug assistance, pilot boarding"
+  - "engine order and basic machinery terms"
+  - "operation sequence language"
+linked_question_patterns:
+  - "용어 정의 매칭"
+  - "작업 순서 배열"
+  - "문맥 빈칸"
+  - "상황 설명 용어 선택"
+prerequisite_foundations:
+  - "ch01 용어 독해"
+  - "ch05 조타·통신 맥락"
+expected_page_weight:
+  percent_of_core_text: 8
+  pages_if_240pp: 19
+visual_plan_summary:
+  - "labeled ship diagram"
+  - "anchoring sequence strip"
+  - "berthing storyboard"
+  - "engine/bridge term link chart"
+exercise_plan_summary:
+  concept_checks: 20
+  worked_examples: 6
+  original_practice_items: 40
+  item_types:
+    - "definition matching"
+    - "sequence ordering"
+    - "contextual blank"
+reference_needs:
+  primary:
+    - "seamanship glossary"
+    - "SMCP operational phrase sections"
+  secondary:
+    - "basic shiphandling manuals for diagrams"
+misconception_notes:
+  - "anchor dragging/dredging/slipping 혼동"
+  - "draft/trim/keel을 한국어식 번역으로만 암기"
+  - "기관 약어를 항해 상황과 분리해 암기"
+original_practice_policy:
+  basis: "작업 절차와 장비 관계를 바꾼 original operational vocabulary item"
+  copyright_guardrail: "기출 설명문 직접 재사용 금지"
+blueprint_evidence:
+  priority_rows:
+    - "선박운용 용어/투묘·양묘: total 18, recent 7, score 0.7728"
+    - "선박운용 용어/선체·조종 용어: total 21, recent 3, score 0.7095"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "빈도는 높으나 범위가 분산되어 통합 장으로 구성"
+review_gates:
+  - "domain review"
+  - "pedagogy review"
+  - "visual review"
+

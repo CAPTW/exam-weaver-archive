@@ -1,0 +1,73 @@
+chapter_id: ch04
+title: "SMCP 표준 표현과 Message Marker"
+status: proposed
+part: "Part III. SMCP/VHF 통신과 선박 운용 언어"
+priority_band: core_high
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "해사통신·SMCP"
+    topic_l2: "SMCP/VHF"
+    topic_l3: "표준해사통신"
+    observed_count: 37
+    priority_score: 0.9067
+  - topic_l1: "해사통신·SMCP"
+    topic_l2: "SMCP/VHF"
+    topic_l3: "Message Marker"
+    observed_count: 13
+    priority_score: 0.6753
+linked_concepts:
+  - "standard phrase block"
+  - "message marker intent"
+  - "ambiguity control"
+  - "readback and confirmation"
+  - "plain English vs SMCP"
+linked_question_patterns:
+  - "표준 표현 빈칸"
+  - "message marker 선택"
+  - "비표준 표현 고르기"
+  - "대화 순서 배열"
+  - "일반영어를 SMCP로 치환"
+prerequisite_foundations:
+  - "ch01 규정 영어와 해사 용어"
+expected_page_weight:
+  percent_of_core_text: 12
+  pages_if_240pp: 29
+visual_plan_summary:
+  - "communication stack infographic"
+  - "Message Marker intent matrix"
+  - "plain-English to SMCP rewrite panels"
+  - "closed-loop communication flow"
+exercise_plan_summary:
+  concept_checks: 25
+  worked_examples: 10
+  original_practice_items: 50
+  item_types:
+    - "phrase completion"
+    - "dialogue repair"
+    - "marker selection"
+reference_needs:
+  primary:
+    - "IMO Standard Marine Communication Phrases"
+  secondary:
+    - "bridge resource management communication references"
+misconception_notes:
+  - "WARNING/ADVICE/INFORMATION 기능 혼동"
+  - "자연스러운 일반영어가 항상 안전한 표현이라고 오해"
+  - "readback 생략"
+original_practice_policy:
+  basis: "기출의 통신 기능만 추출해 새 선박명·상황·표현으로 제작"
+  copyright_guardrail: "기출 대화문 직접 재작성 금지"
+blueprint_evidence:
+  priority_rows:
+    - "SMCP/VHF/표준해사통신: total 37, recent 13, score 0.9067"
+    - "SMCP/VHF/Message Marker: total 13, recent 5, score 0.6753"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "전체 우선순위 1위 주제"
+review_gates:
+  - "domain review"
+  - "exam relevance review"
+  - "copyright/reuse risk review"
+

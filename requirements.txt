@@ -1,0 +1,15 @@
+click
+pytest
+pypdf
+PyMuPDF
+Pillow
+PyQt5
+PyQt-Fluent-Widgets
+python-docx
+openai-codex
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections
+winrt-Windows.Globalization
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Media.Ocr
+winrt-Windows.Storage.Streams

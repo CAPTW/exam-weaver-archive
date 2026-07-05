@@ -1,0 +1,79 @@
+chapter_id: ch10
+title: "ISPS·STCW·MARPOL 컴플라이언스"
+status: proposed
+part: "Part V. 해양법과 컴플라이언스"
+priority_band: supporting_medium
+target_exam_scope:
+  subject: "해사영어"
+  years_covered: "2013-2025"
+primary_exam_topics:
+  - topic_l1: "선박보안"
+    topic_l2: "ISPS Code"
+    topic_l3: "보안등급·보안조치"
+    observed_count: 12
+    priority_score: 0.6886
+  - topic_l1: "선원자격·당직"
+    topic_l2: "STCW"
+    topic_l3: "훈련·자격·당직"
+  - topic_l1: "해양오염방지"
+    topic_l2: "MARPOL"
+    topic_l3: "유류오염"
+  - topic_l1: "해양오염방지"
+    topic_l2: "MARPOL"
+    topic_l3: "오염방지 일반"
+linked_concepts:
+  - "ISPS security levels"
+  - "ship security incident and protective measures"
+  - "STCW competency and watchkeeping"
+  - "MARPOL oil/oily mixture/slop tank definitions"
+  - "code scope comparison"
+linked_question_patterns:
+  - "보안등급 정의 선택"
+  - "협약 적용범위 비교"
+  - "용어 정의 불일치 찾기"
+  - "오염방지 의무 빈칸"
+  - "cross-code objective matching"
+prerequisite_foundations:
+  - "ch01 규정 영어"
+  - "ch07 SOLAS safety duties"
+expected_page_weight:
+  percent_of_core_text: 8
+  pages_if_240pp: 19
+visual_plan_summary:
+  - "cross-code compliance matrix"
+  - "ISPS security escalation strip"
+  - "MARPOL oil pollution definition chart"
+  - "STCW competence/watchkeeping map"
+exercise_plan_summary:
+  concept_checks: 18
+  worked_examples: 6
+  original_practice_items: 35
+  item_types:
+    - "scope comparison"
+    - "definition mismatch"
+    - "security level scenario"
+reference_needs:
+  primary:
+    - "ISPS Code"
+    - "STCW Convention and Code"
+    - "MARPOL Annex I basics"
+  secondary:
+    - "IMO security and pollution prevention summaries"
+misconception_notes:
+  - "security level 2와 3의 시간·위험도 조건 혼동"
+  - "MARPOL 용어를 일반 영어 뜻으로 해석"
+  - "STCW를 자격증 암기 문제로만 보고 당직 개념을 놓침"
+original_practice_policy:
+  basis: "각 code의 목적과 적용 범위를 비교하는 새 item 제작"
+  copyright_guardrail: "기출 정의문 전체 복제 금지"
+blueprint_evidence:
+  priority_rows:
+    - "ISPS Code/보안등급·보안조치: total 12, recent 8, score 0.6886"
+movement_note:
+  preserved_or_created: "created"
+  rationale: "ISPS는 최근성이 높고 STCW/MARPOL은 저빈도지만 협약 비교 학습상 유지"
+review_gates:
+  - "domain review"
+  - "citation audit"
+  - "exam relevance review"
+
