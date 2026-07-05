@@ -26,6 +26,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 APP_TITLE = "기출문제 문제은행 관리자"
 APP_ICON_FILENAME = "exam_generator_icon.ico"
+APP_USER_MODEL_ID = "CAPTW.ExamWeaverArchive.QuestionBankManager"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 
 
@@ -87,6 +88,18 @@ def get_app_icon_path() -> str:
 
 def get_app_icon() -> QIcon:
     return QIcon(get_app_icon_path())
+
+
+def _set_windows_app_user_model_id() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        return True
+    except Exception:
+        return False
 
 
 class MainWindow(FluentWindow):
@@ -225,6 +238,7 @@ class MainWindow(FluentWindow):
 
 def main() -> int:
     _install_crash_logging()
+    _set_windows_app_user_model_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     if hasattr(Qt, "HighDpiScaleFactorRoundingPolicy"):

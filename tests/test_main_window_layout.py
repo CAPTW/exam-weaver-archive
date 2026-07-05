@@ -16,9 +16,17 @@ def test_app_icon_asset_is_declared_and_available():
     icon_path = Path(gui_main.get_app_icon_path())
 
     assert gui_main.APP_ICON_FILENAME == "exam_generator_icon.ico"
+    assert gui_main.APP_USER_MODEL_ID == "CAPTW.ExamWeaverArchive.QuestionBankManager"
     assert icon_path.exists()
     assert icon_path.suffix == ".ico"
     assert icon_path.read_bytes()[:4] == b"\x00\x00\x01\x00"
+
+
+def test_windows_taskbar_app_id_is_declared_before_qapplication():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert "SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)" in source
+    assert source.index("_set_windows_app_user_model_id()") < source.index("QApplication(sys.argv)")
 
 
 def test_codex_panel_is_attached_as_sidecar():
