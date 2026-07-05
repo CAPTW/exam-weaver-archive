@@ -80,7 +80,7 @@ class MainWindow(FluentWindow):
         self.practice_interface = PracticeInterface(self.db_path, self)
         self.export_interface = ExportInterface(self.db_path, self)
         self.import_interface = ImportInterface(self.db_path, self)
-        self.db_mount_interface = DbMountInterface(BASE_DIR, self)
+        self.db_mount_interface = DbMountInterface(BASE_DIR, self, db_path=self.db_path)
         self.codex_interface = CodexInterface(BASE_DIR, self, side_panel=True)
         self.codex_sidecar_expanded = True
 

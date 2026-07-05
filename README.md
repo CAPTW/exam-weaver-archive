@@ -121,7 +121,8 @@ Primary screens:
 - Practice: generate and take mock exams with grading modes.
 - Exam Export: sample questions and export DOCX exam sheets.
 - Import: parse question/answer PDFs into the local database.
-- DB Mount: prototype UI for split/domain database management.
+- DB Mount: prototype UI for split/domain database management, including
+  exporting a selected mounted DB as one standalone SQLite file.
 - Codex: embedded Codex side panel for code assistance inside the app.
 
 ### Codex Integration
@@ -333,7 +334,8 @@ DB가 포함되어 있지 않습니다.
 - 문제 풀이: 조건별 문제 선택과 모의고사 풀이.
 - 시험지 출력: 조건별 문제 샘플링 후 DOCX 생성.
 - 문제 가져오기: 문제 PDF/정답 PDF parsing 후 DB 저장.
-- DB Mount: domain DB 분리/이동 prototype UI.
+- DB Mount: domain DB 분리/이동 prototype UI. 선택한 mounted DB를 단일 SQLite
+  파일로 내보낼 수 있습니다.
 - Codex: 앱 내부에서 사용할 수 있는 Codex 사이드 패널.
 
 ### Codex 연동

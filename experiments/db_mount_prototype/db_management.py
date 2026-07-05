@@ -128,6 +128,61 @@ def copy_exam_to_mount(
     return apply_exam_copy(source.path, target.path, exam_code, backup=backup)
 
 
+def export_mount_database(
+    manifest_path: str | Path,
+    *,
+    mount_id: str,
+    output_path: str | Path,
+) -> Path:
+    """Export one mounted SQLite DB into a single standalone .db file."""
+    manifest = Path(manifest_path).resolve()
+    payload = _read_manifest_payload(manifest)
+    source_mount = MountedDatabase.from_manifest_row(
+        _find_manifest_row(payload, mount_id),
+        manifest.parent,
+    )
+    source_path = source_mount.path.resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"mounted database not found: {source_path}")
+
+    return export_sqlite_database(source_path, output_path)
+
+
+def export_sqlite_database(source_path: str | Path, output_path: str | Path) -> Path:
+    """Copy a SQLite database through the backup API into one standalone file."""
+    source_path = Path(source_path).expanduser().resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"source database not found: {source_path}")
+
+    target_path = Path(output_path).expanduser().resolve()
+    if source_path == target_path:
+        raise ValueError("export path must be different from the source database")
+    if target_path.exists() and target_path.is_dir():
+        raise IsADirectoryError(f"export path is a directory: {target_path}")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    _remove_sqlite_sidecars(target_path)
+    if target_path.exists():
+        target_path.unlink()
+
+    try:
+        with sqlite3.connect(str(source_path)) as source_conn:
+            with sqlite3.connect(str(target_path)) as target_conn:
+                source_conn.backup(target_conn)
+                target_conn.commit()
+                integrity = target_conn.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise sqlite3.IntegrityError(f"integrity_check failed: {integrity}")
+    except Exception:
+        if target_path.exists():
+            target_path.unlink()
+        _remove_sqlite_sidecars(target_path)
+        raise
+
+    _remove_sqlite_sidecars(target_path)
+    return target_path
+
+
 def _create_schema_only_database(db_path: Path) -> None:
     schema_path = Path(__file__).resolve().parents[2] / "src" / "database" / "schema.sql"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,6 +234,13 @@ def _rename_path_with_retry(source: Path, target: Path, attempts: int = 8) -> No
             time.sleep(0.15)
     if last_error:
         raise last_error
+
+
+def _remove_sqlite_sidecars(db_path: Path) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = db_path.with_name(f"{db_path.name}{suffix}")
+        if sidecar.exists():
+            sidecar.unlink()
 
 
 def _database_filename_from_label(label: str) -> str:

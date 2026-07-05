@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from experiments.db_mount_prototype.db_management import (
     copy_exam_to_mount,
     create_empty_mount_database,
+    export_mount_database,
     rename_mount_database,
     rename_mount_label,
 )
@@ -141,6 +142,29 @@ def test_copy_exam_to_mount_builds_user_db_without_deleting_source(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM exams WHERE code = '복사시험'").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 1
     with sqlite3.connect(target.path) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("SELECT COUNT(*) FROM exams WHERE code = '복사시험'").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM question_choices").fetchone()[0] == 4
+
+
+def test_export_mount_database_writes_single_integrity_checked_db_file(tmp_path):
+    manifest, source_db = _write_manifest(tmp_path)
+    output_path = tmp_path / "exports" / "source-export.db"
+
+    exported = export_mount_database(
+        manifest,
+        mount_id="source",
+        output_path=output_path,
+    )
+
+    assert exported == output_path.resolve()
+    assert exported.exists()
+    assert not exported.with_name(f"{exported.name}-wal").exists()
+    assert not exported.with_name(f"{exported.name}-shm").exists()
+    assert source_db.exists()
+    with sqlite3.connect(exported) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert conn.execute("SELECT COUNT(*) FROM exams WHERE code = '복사시험'").fetchone()[0] == 1

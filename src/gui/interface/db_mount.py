@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
@@ -9,6 +11,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QTextEdit,
     QMessageBox,
+    QFileDialog,
     QListWidget,
     QListWidgetItem,
     QInputDialog,
@@ -32,15 +35,18 @@ from experiments.db_mount_prototype.exam_move import (
 from experiments.db_mount_prototype.db_management import (
     copy_exam_to_mount,
     create_empty_mount_database,
+    export_mount_database,
+    export_sqlite_database,
     rename_mount_database,
 )
-from experiments.db_mount_prototype.mount_repo import load_manifest
+from experiments.db_mount_prototype.mount_repo import MountedDatabase, load_manifest
 
 
 class DbMountInterface(QWidget):
-    def __init__(self, base_dir, parent=None):
+    def __init__(self, base_dir, parent=None, db_path=None):
         super().__init__(parent)
         self.base_dir = Path(base_dir)
+        self.db_path = Path(db_path).resolve() if db_path else self.base_dir / "data" / "exam_bank.db"
         self.manifest_path = self.base_dir / "data" / "domain_dbs" / "mount_manifest.json"
         self.mounts = []
         self.active_mounts = []
@@ -97,6 +103,7 @@ class DbMountInterface(QWidget):
         self.saveMountBtn = PushButton("Mount 설정 저장", self)
         self.renameDbBtn = PushButton("Source DB 이름/파일명 변경", self)
         self.createDbBtn = PushButton("새 DB 만들기", self)
+        self.exportDbBtn = PushButton("Source DB 내보내기", self)
         self.copyExamBtn = PrimaryPushButton("Exam 사본 만들기", self)
         self.dryRunBtn = PrimaryPushButton("Dry-run", self)
         self.applyBtn = PrimaryPushButton("이동 저장", self)
@@ -105,6 +112,7 @@ class DbMountInterface(QWidget):
         self.saveMountBtn.clicked.connect(self.save_mount_selection)
         self.renameDbBtn.clicked.connect(self.rename_current_source_mount)
         self.createDbBtn.clicked.connect(self.create_user_database_from_prompt)
+        self.exportDbBtn.clicked.connect(self.export_current_source_database)
         self.copyExamBtn.clicked.connect(self.copy_current_exam_to_target)
         self.dryRunBtn.clicked.connect(self.run_dry_run)
         self.applyBtn.clicked.connect(self.apply_move)
@@ -112,6 +120,7 @@ class DbMountInterface(QWidget):
         self.actionLayout.addWidget(self.saveMountBtn)
         self.actionLayout.addWidget(self.renameDbBtn)
         self.actionLayout.addWidget(self.createDbBtn)
+        self.actionLayout.addWidget(self.exportDbBtn)
         self.actionLayout.addWidget(self.copyExamBtn)
         self.actionLayout.addWidget(self.dryRunBtn)
         self.actionLayout.addWidget(self.applyBtn)
@@ -138,13 +147,7 @@ class DbMountInterface(QWidget):
         self.applyBtn.setEnabled(False)
 
         if not self.manifest_path.exists():
-            self.mountList.blockSignals(False)
-            self.sourceDbCombo.blockSignals(False)
-            self.targetDbCombo.blockSignals(False)
-            self.log(
-                f"Mount manifest가 없습니다: {self.manifest_path}\n"
-                "먼저 data/domain_dbs/mount_manifest.json을 생성하세요."
-            )
+            self._load_fallback_app_database()
             return
 
         try:
@@ -245,6 +248,44 @@ class DbMountInterface(QWidget):
             return
         self.log(f"새 DB 생성 완료: {created.label} ({created.id}) -> {created.path}")
         InfoBar.success(title="생성 완료", content="새 DB를 생성하고 mount에 추가했습니다.", parent=self)
+
+    def export_current_source_database(self):
+        source = self._current_source_mount()
+        if not source:
+            InfoBar.error(title="선택 필요", content="내보낼 Source DB를 선택하세요.", parent=self)
+            return
+
+        default_path = self._default_export_path(source)
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Source DB 내보내기",
+            str(default_path),
+            "SQLite Database (*.db);;All Files (*)",
+        )
+        if not file_path:
+            return
+        if not Path(file_path).suffix:
+            file_path = f"{file_path}.db"
+
+        try:
+            exported = self._export_current_source_db(file_path)
+        except Exception as exc:
+            self.log(f"DB 내보내기 실패: {exc}")
+            InfoBar.error(title="내보내기 실패", content=str(exc), parent=self)
+            return
+
+        size_mb = exported.stat().st_size / (1024 * 1024)
+        self.log(
+            "DB 내보내기 완료\n"
+            f"source: {source.label} ({source.id})\n"
+            f"output: {exported}\n"
+            f"size: {size_mb:.2f} MB"
+        )
+        InfoBar.success(
+            title="내보내기 완료",
+            content="선택한 Source DB를 단일 SQLite 파일로 저장했습니다.",
+            parent=self,
+        )
 
     def copy_current_exam_to_target(self):
         answer = QMessageBox.question(
@@ -385,6 +426,62 @@ class DbMountInterface(QWidget):
             exam_code=exam_code,
             backup=backup,
         )
+
+    def _export_current_source_db(self, output_path):
+        source = self._current_source_mount()
+        if not source:
+            raise ValueError("내보낼 Source DB를 선택하세요.")
+        if self.manifest_path.exists():
+            return export_mount_database(
+                self.manifest_path,
+                mount_id=source.id,
+                output_path=output_path,
+            )
+        return export_sqlite_database(source.path, output_path)
+
+    def _default_export_path(self, mount):
+        export_dir = self.base_dir / "data" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        safe_label = re.sub(r"\s+", "_", str(mount.label or mount.id).strip())
+        safe_label = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", safe_label)
+        safe_label = re.sub(r"_+", "_", safe_label).strip(" ._") or "database"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return export_dir / f"exam_bank.{safe_label}.{timestamp}.db"
+
+    def _load_fallback_app_database(self):
+        if not self.db_path.exists():
+            self.mountList.blockSignals(False)
+            self.sourceDbCombo.blockSignals(False)
+            self.targetDbCombo.blockSignals(False)
+            self.log(
+                f"Mount manifest가 없습니다: {self.manifest_path}\n"
+                "먼저 data/domain_dbs/mount_manifest.json을 생성하세요."
+            )
+            return
+
+        fallback = MountedDatabase(
+            id="app",
+            label="현재 앱 DB",
+            domain="app",
+            path=self.db_path,
+            enabled=True,
+            read_only=False,
+        )
+        self.mounts = [fallback]
+        item = QListWidgetItem(self._mount_label(fallback))
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
+        self.mountList.addItem(item)
+        self._rebuild_active_mounts()
+        self._rebuild_source_target_combos()
+        self.mountList.blockSignals(False)
+        self.sourceDbCombo.blockSignals(False)
+        self.targetDbCombo.blockSignals(False)
+        self.log(
+            f"Mount manifest가 없습니다: {self.manifest_path}\n"
+            "현재 앱 DB를 Source로 불러왔습니다. DB 내보내기는 사용할 수 있습니다."
+        )
+        self.on_source_changed()
 
     def _rebuild_active_mounts(self):
         self.active_mounts = [

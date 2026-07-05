@@ -138,3 +138,37 @@ def test_db_mount_interface_renames_creates_and_copies_to_user_db(tmp_path):
     assert source_repo.get_questions_with_choices(exam_code="첫시험", limit=None)
     widget.deleteLater()
     APP.processEvents()
+
+
+def test_db_mount_interface_exports_selected_source_db_to_single_file(tmp_path):
+    widget, _manifest = _make_mount_interface(tmp_path)
+    output_path = tmp_path / "exports" / "selected-source.db"
+
+    exported = widget._export_current_source_db(output_path)
+
+    assert exported == output_path.resolve()
+    assert exported.exists()
+    exported_repo = ExamRepository(str(exported))
+    copied = exported_repo.get_questions_with_choices(exam_code="첫시험", limit=None)
+    assert [row["question_text"] for row in copied] == ["첫 문제"]
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_db_mount_interface_exports_app_db_when_manifest_is_missing(tmp_path):
+    app_db = tmp_path / "data" / "exam_bank.db"
+    app_db.parent.mkdir(parents=True)
+    _create_db(app_db, "앱시험", "앱과목", "앱 DB 문제")
+
+    widget = DbMountInterface(tmp_path, db_path=app_db)
+    output_path = tmp_path / "exports" / "app-export.db"
+
+    assert widget.sourceDbCombo.count() == 1
+    assert widget._current_source_mount().id == "app"
+    exported = widget._export_current_source_db(output_path)
+
+    exported_repo = ExamRepository(str(exported))
+    copied = exported_repo.get_questions_with_choices(exam_code="앱시험", limit=None)
+    assert [row["question_text"] for row in copied] == ["앱 DB 문제"]
+    widget.deleteLater()
+    APP.processEvents()
