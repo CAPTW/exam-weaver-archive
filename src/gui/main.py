@@ -25,6 +25,7 @@ os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 APP_TITLE = "기출문제 문제은행 관리자"
+APP_ICON_FILENAME = "exam_generator_icon.ico"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 
 
@@ -47,6 +48,7 @@ if __package__ is None or __package__ == "":
     __package__ = "src.gui"
 from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QIcon
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, NavigationAvatarWidget,
     FluentTranslator, SplashScreen, PushButton
@@ -60,6 +62,32 @@ from .interface.practice import PracticeInterface
 from .interface.import_view import ImportInterface
 from .interface.db_mount import DbMountInterface
 from .interface.codex_panel import CodexInterface
+
+
+def get_app_icon_path() -> str:
+    candidates = [
+        os.path.join(BASE_DIR, "assets", "icons", APP_ICON_FILENAME),
+        os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets", "icons", APP_ICON_FILENAME),
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "assets",
+                "icons",
+                APP_ICON_FILENAME,
+            )
+        ),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+def get_app_icon() -> QIcon:
+    return QIcon(get_app_icon_path())
+
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -91,6 +119,7 @@ class MainWindow(FluentWindow):
     def init_window(self):
         self.resize(*DEFAULT_WINDOW_SIZE)
         self.setWindowTitle(APP_TITLE)
+        self.setWindowIcon(get_app_icon())
         self.move(100, 100)
 
     def _disable_frameless_screen_refresh(self):
@@ -204,6 +233,7 @@ def main() -> int:
         )
 
     app = QApplication(sys.argv)
+    app.setWindowIcon(get_app_icon())
     w = MainWindow()
     w.show()
     return app.exec()

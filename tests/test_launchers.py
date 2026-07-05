@@ -51,6 +51,15 @@ def test_github_portable_launcher_builds_no_db_zip():
     assert "without a question DB" in content
 
 
+def test_pyinstaller_spec_declares_app_icon_asset():
+    spec = ROOT / "ExamGenerator.spec"
+
+    content = spec.read_text(encoding="utf-8")
+
+    assert r"assets\\icons\\exam_generator_icon.ico" in content
+    assert r"icon='assets\\icons\\exam_generator_icon.ico'" in content
+
+
 def test_run_readme_explains_both_non_programmer_paths():
     readme = ROOT / "README_APP_RUN.txt"
 

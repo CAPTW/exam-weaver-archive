@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ('src\\database\\schema.sql', 'src\\database'),
     ('src\\database\\seed.sql', 'src\\database'),
+    ('assets\\icons\\exam_generator_icon.ico', 'assets\\icons'),
 ]
 binaries = []
 hiddenimports = []
@@ -50,6 +51,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets\\icons\\exam_generator_icon.ico',
 )
 coll = COLLECT(
     exe,
