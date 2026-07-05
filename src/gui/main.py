@@ -24,6 +24,7 @@ os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+APP_TITLE = "기출문제 문제은행 관리자"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 
 
@@ -89,7 +90,7 @@ class MainWindow(FluentWindow):
 
     def init_window(self):
         self.resize(*DEFAULT_WINDOW_SIZE)
-        self.setWindowTitle('Exam Generator - 관리자 모드')
+        self.setWindowTitle(APP_TITLE)
         self.move(100, 100)
 
     def _disable_frameless_screen_refresh(self):

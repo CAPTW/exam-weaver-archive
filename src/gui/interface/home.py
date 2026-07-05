@@ -22,7 +22,7 @@ class HomeInterface(ScrollArea):
         self.vBoxLayout.setSpacing(20)
 
         # Welcome
-        self.titleLabel = TitleLabel("해기사 문제은행 관리자", self)
+        self.titleLabel = TitleLabel("기출문제 문제은행 관리자", self)
         self.vBoxLayout.addWidget(self.titleLabel)
 
         self.subtitleLabel = BodyLabel("시험 문제를 관리하고 모의고사 시험지를 생성할 수 있습니다.", self)

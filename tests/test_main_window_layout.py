@@ -6,6 +6,10 @@ def test_main_window_default_size_leaves_room_for_export_controls():
     assert gui_main.DEFAULT_WINDOW_SIZE[1] >= 860
 
 
+def test_app_title_is_declared_for_exam_bank_admin():
+    assert gui_main.APP_TITLE == "기출문제 문제은행 관리자"
+
+
 def test_codex_panel_is_attached_as_sidecar():
     assert hasattr(gui_main.MainWindow, "init_codex_sidecar")
     assert hasattr(gui_main.MainWindow, "toggle_codex_sidecar")
@@ -22,3 +26,4 @@ def test_codex_toggle_navigation_is_declared():
     assert "CodexToggle" in source
     assert "codex_sidecar_container" in source
     assert "Codex 패널 펼치기" in source
+    assert "기출문제 문제은행 관리자" in source
