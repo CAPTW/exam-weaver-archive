@@ -117,7 +117,8 @@ The main window title is:
 Primary screens:
 
 - Home: overview landing screen.
-- Question Management: browse, filter, validate, edit, explain, and delete.
+- Question Management: browse, filter, validate, edit, manually add
+  user-authored questions, explain, and delete.
 - Practice: generate and take mock exams with grading modes.
 - Exam Export: sample questions and export DOCX exam sheets.
 - Import: parse question/answer PDFs into the local database.
@@ -338,7 +339,8 @@ DB가 포함되어 있지 않습니다.
 주요 화면:
 
 - 홈: 앱 시작 화면.
-- 문제 관리: 문제 검색, 필터링, 검증, 수정, 해설 작성, 삭제.
+- 문제 관리: 문제 검색, 필터링, 검증, 수정, 개인 제작 문제 수동 추가,
+  해설 작성, 삭제.
 - 문제 풀이: 조건별 문제 선택과 모의고사 풀이.
 - 시험지 출력: 조건별 문제 샘플링 후 DOCX 생성.
 - 문제 가져오기: 문제 PDF/정답 PDF parsing 후 DB 저장.

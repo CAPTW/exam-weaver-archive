@@ -9,7 +9,9 @@ from PyQt5.QtWidgets import QApplication, QDialog
 from PyQt5.QtGui import QImage
 
 from src.gui.interface.browser import BrowserInterface
+import src.gui.interface.browser as browser_module
 from src.gui.interface.editor import QuestionEditor
+from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
 
 
 APP = QApplication.instance() or QApplication([])
@@ -146,6 +148,69 @@ def test_browser_interface_marks_grouped_rows_in_info_and_preview():
     assert interface._format_question_preview(grouped_question) == '[공통] 공통지문 하위 문제'
     assert interface._format_info(standalone_question) == '2024-1 기관1 3번'
     assert interface._format_question_preview(standalone_question) == '공통지문 하위 문제'
+
+
+def test_question_editor_supports_create_mode_for_manual_questions(repo):
+    editor = QuestionEditor(
+        question_data=repo.get_manual_question_template(),
+        subject_options=repo.get_manual_subject_options(),
+        create_mode=True,
+    )
+
+    assert editor.windowTitle() == "개인 제작 문제 추가"
+    assert editor.titleLabel.text() == "개인 제작 문제 추가"
+    assert editor.btnImage.text() == "이미지 추가"
+    assert editor.get_data()['exam_code'] == MANUAL_EXAM_CODE
+    assert editor.get_data()['subject_code'] == MANUAL_SUBJECT_CODE
+
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
+    class FakeManualQuestionDialog:
+        captured_question_data = None
+        captured_subject_options = None
+
+        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+            self.captured_question_data = question_data
+            self.captured_subject_options = subject_options
+            self.create_mode = create_mode
+            FakeManualQuestionDialog.captured_question_data = question_data
+            FakeManualQuestionDialog.captured_subject_options = subject_options
+
+        def exec(self):
+            return True
+
+        def get_data(self):
+            data = dict(self.captured_question_data)
+            data.update({
+                'question_text': '개인 수동 추가 문제',
+                'correct_answer': 1,
+                'choices': [
+                    {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': '정답'},
+                    {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': '오답 1'},
+                    {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': '오답 2'},
+                    {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': '오답 3'},
+                ],
+            })
+            return data
+
+    monkeypatch.setattr(browser_module, "QuestionEditor", FakeManualQuestionDialog)
+    widget = BrowserInterface(repo.db_path)
+
+    assert widget.btnAddManual.text() == "문제 추가"
+    widget.add_manual_question()
+
+    saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)
+    assert len(saved) == 1
+    assert saved[0]['question_text'] == '개인 수동 추가 문제'
+    assert widget.examFilter.currentData() == MANUAL_EXAM_CODE
+    assert widget.subjectFilter.currentData() == MANUAL_SUBJECT_CODE
+    assert FakeManualQuestionDialog.captured_subject_options == repo.get_manual_subject_options()
+
+    widget.deleteLater()
+    APP.processEvents()
 
 
 def test_question_editor_pastes_clipboard_images_to_question_and_choice(tmp_path, monkeypatch):

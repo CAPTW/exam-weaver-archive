@@ -2,6 +2,7 @@ import sqlite3
 import logging
 import hashlib
 import re
+from datetime import date
 from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -11,6 +12,11 @@ from ..utils.tagger import build_tags
 logger = logging.getLogger(__name__)
 
 VALID_CHOICE_NUMBERS = (1, 2, 3, 4, 5)
+MANUAL_EXAM_CODE = "personal_questions"
+MANUAL_EXAM_NAME = "개인 제작 문제"
+MANUAL_SUBJECT_CODE = "manual_general"
+MANUAL_SUBJECT_NAME = "개인 문제"
+MANUAL_TAG = "#개인제작"
 
 
 def _tag_query_tokens(tag_query: str) -> List[str]:
@@ -861,6 +867,165 @@ class ExamRepository:
                 ORDER BY s.name_ko ASC
             """)
             return [{'code': r[0], 'name_ko': r[1]} for r in cursor.fetchall()]
+
+    def get_manual_question_template(self) -> Dict[str, Any]:
+        """Return default values for a user-authored, non-imported question."""
+        self._ensure_initialized()
+        year = date.today().year
+        session = 1
+        return {
+            'year': year,
+            'session': session,
+            'question_number': self.next_manual_question_number(year, session),
+            'exam_code': MANUAL_EXAM_CODE,
+            'exam_name': MANUAL_EXAM_NAME,
+            'subject_code': MANUAL_SUBJECT_CODE,
+            'subject_name': MANUAL_SUBJECT_NAME,
+            'question_text': '',
+            'correct_answer': 1,
+            'tags': MANUAL_TAG,
+            'choices': [],
+        }
+
+    def get_manual_subject_options(self) -> List[Dict[str, str]]:
+        return [{'code': MANUAL_SUBJECT_CODE, 'name_ko': MANUAL_SUBJECT_NAME}]
+
+    def next_manual_question_number(self, year: int, session: int) -> int:
+        self._ensure_initialized()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COALESCE(MAX(q.question_number), 0) + 1
+                FROM questions q
+                JOIN exam_subjects es ON q.exam_subject_id = es.id
+                JOIN exams e ON es.exam_id = e.id
+                JOIN subjects s ON es.subject_id = s.id
+                WHERE e.code = ?
+                  AND s.code = ?
+                  AND q.year = ?
+                  AND q.session = ?
+            """, (MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE, int(year), int(session)))
+            return int(cursor.fetchone()[0] or 1)
+
+    def create_manual_question(self, data: Dict[str, Any]) -> Optional[int]:
+        """Insert a user-authored question under the manual question bucket."""
+        self._ensure_initialized()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                exam_subject_id = self._ensure_exam_subject(
+                    cursor,
+                    exam_code=data.get('exam_code') or MANUAL_EXAM_CODE,
+                    exam_name=data.get('exam_name') or MANUAL_EXAM_NAME,
+                    subject_code=data.get('subject_code') or MANUAL_SUBJECT_CODE,
+                    subject_name=data.get('subject_name') or MANUAL_SUBJECT_NAME,
+                )
+                tags = self._manual_tags(data.get('tags'))
+                image_path = data.get('image_path')
+                cursor.execute("""
+                    INSERT INTO questions (
+                        exam_subject_id, year, session, question_number,
+                        question_text, question_format_json, explanation,
+                        has_image, image_path, correct_answer, tags
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    exam_subject_id,
+                    int(data.get('year') or date.today().year),
+                    int(data.get('session') or 1),
+                    int(data.get('question_number') or 1),
+                    str(data.get('question_text') or '').strip(),
+                    data.get('question_format_json'),
+                    data.get('explanation'),
+                    1 if image_path else 0,
+                    image_path,
+                    int(data.get('correct_answer') or 1),
+                    tags,
+                ))
+                question_id = cursor.lastrowid
+                choice_rows = []
+                for choice in data.get('choices', []):
+                    try:
+                        choice_number = int(choice.get('choice_number') or choice.get('number'))
+                    except (TypeError, ValueError):
+                        continue
+                    if choice_number not in VALID_CHOICE_NUMBERS:
+                        continue
+                    choice_rows.append((
+                        question_id,
+                        choice_number,
+                        choice.get('choice_symbol') or choice.get('symbol') or '',
+                        choice.get('choice_text') or choice.get('text') or '',
+                        self._choice_format_json(choice),
+                        self._choice_image_path(choice),
+                    ))
+                cursor.executemany("""
+                    INSERT INTO question_choices (
+                        question_id, choice_number, choice_symbol, choice_text,
+                        choice_format_json, choice_image_path
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                """, choice_rows)
+                conn.commit()
+                return int(question_id)
+        except Exception as e:
+            logger.error("Failed to create manual question: %s", e)
+            return None
+
+    def _ensure_exam_subject(
+        self,
+        cursor: sqlite3.Cursor,
+        exam_code: str,
+        exam_name: str,
+        subject_code: str,
+        subject_name: str,
+    ) -> int:
+        cursor.execute(
+            "INSERT OR IGNORE INTO exams (code, name) VALUES (?, ?)",
+            (exam_code, exam_name),
+        )
+        cursor.execute(
+            "UPDATE exams SET name = ? WHERE code = ?",
+            (exam_name, exam_code),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO subjects (code, name_ko) VALUES (?, ?)",
+            (subject_code, subject_name),
+        )
+        cursor.execute(
+            "UPDATE subjects SET name_ko = ? WHERE code = ?",
+            (subject_name, subject_code),
+        )
+        cursor.execute("SELECT id FROM exams WHERE code = ?", (exam_code,))
+        exam_id = cursor.fetchone()[0]
+        cursor.execute("SELECT id FROM subjects WHERE code = ?", (subject_code,))
+        subject_id = cursor.fetchone()[0]
+        cursor.execute("""
+            SELECT id
+            FROM exam_subjects
+            WHERE exam_id = ? AND subject_id = ?
+        """, (exam_id, subject_id))
+        row = cursor.fetchone()
+        if row:
+            return int(row[0])
+
+        cursor.execute(
+            "SELECT COALESCE(MAX(display_order), 0) + 1 FROM exam_subjects WHERE exam_id = ?",
+            (exam_id,),
+        )
+        display_order = int(cursor.fetchone()[0] or 1)
+        cursor.execute("""
+            INSERT INTO exam_subjects (exam_id, subject_id, display_order, questions_count)
+            VALUES (?, ?, ?, ?)
+        """, (exam_id, subject_id, display_order, 25))
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _manual_tags(tags: Optional[str]) -> str:
+        raw = str(tags or '').strip()
+        tokens = [token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()]
+        normalized = {token.lower().lstrip("#") for token in tokens}
+        if MANUAL_TAG.lower().lstrip("#") not in normalized:
+            tokens.append(MANUAL_TAG)
+        return ", ".join(tokens)
 
     def update_question(self, question_id: int, data: Dict) -> bool:
         """Update question data"""

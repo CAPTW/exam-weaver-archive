@@ -3,6 +3,7 @@ import json
 
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
+from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
 from src.database.repository import ExamRepository
 from src.web_import.importer import ComcbtImportService, QuestionSource
 from src.web_import.models import ComcbtParsedExam, ComcbtQuestionGroup
@@ -596,6 +597,45 @@ def test_update_question_persists_text_choices_answer_tags_and_image(repo, sampl
         (3, '㉴', '수정 선지 3'),
         (4, '㉵', '수정 선지 4'),
     ]
+
+
+def test_create_manual_question_inserts_personal_exam_subject_and_choices(repo):
+    template = repo.get_manual_question_template()
+    template.update({
+        'question_text': '개인이 만든 안전관리 문제',
+        'correct_answer': 2,
+        'explanation': '사용자 작성 해설',
+        'tags': '#안전관리',
+        'choices': [
+            {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': '오답 A'},
+            {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': '정답 B'},
+            {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': '오답 C'},
+            {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': '오답 D'},
+        ],
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)[0]
+    assert saved['id'] == question_id
+    assert saved['exam_name'] == '개인 제작 문제'
+    assert saved['subject_name'] == '개인 문제'
+    assert saved['question_text'] == '개인이 만든 안전관리 문제'
+    assert saved['correct_answer'] == 2
+    assert '#안전관리' in saved['tags']
+    assert '#개인제작' in saved['tags']
+    assert [choice['choice_text'] for choice in saved['choices']] == [
+        '오답 A',
+        '정답 B',
+        '오답 C',
+        '오답 D',
+    ]
+
+    next_template = repo.get_manual_question_template()
+    assert next_template['exam_code'] == MANUAL_EXAM_CODE
+    assert next_template['subject_code'] == MANUAL_SUBJECT_CODE
+    assert next_template['question_number'] == template['question_number'] + 1
 
 
 def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadata, sample_question):

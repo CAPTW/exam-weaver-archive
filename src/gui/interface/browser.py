@@ -64,6 +64,10 @@ class BrowserInterface(QWidget):
         self.btnRefresh = PrimaryPushButton("조회", self)
         self.btnRefresh.clicked.connect(self.load_data)
 
+        self.btnAddManual = PrimaryPushButton("문제 추가", self)
+        self.btnAddManual.setToolTip("개인이 만든 문제를 수동으로 추가")
+        self.btnAddManual.clicked.connect(self.add_manual_question)
+
         self.btnValidate = PrimaryPushButton("오류 검사", self)
         self.btnValidate.clicked.connect(self.load_validation_results)
 
@@ -77,6 +81,7 @@ class BrowserInterface(QWidget):
         self.headerLayout.addWidget(self.subjectFilterLabel)
         self.headerLayout.addWidget(self.subjectFilter)
         self.headerLayout.addWidget(self.searchBox)
+        self.headerLayout.addWidget(self.btnAddManual)
         self.headerLayout.addWidget(self.btnRefresh)
         self.headerLayout.addWidget(self.btnValidate)
         self.headerLayout.addWidget(self.btnDeleteSelected)
@@ -349,6 +354,48 @@ class BrowserInterface(QWidget):
                     content="DB 업데이트 실패",
                     parent=self
                 )
+
+    def add_manual_question(self):
+        dialog = QuestionEditor(
+            self.window(),
+            self.repo.get_manual_question_template(),
+            subject_options=self.repo.get_manual_subject_options(),
+            create_mode=True,
+        )
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        question_id = self.repo.create_manual_question(data)
+        if question_id:
+            InfoBar.success(
+                title='추가 완료',
+                content=f"개인 제작 문제 ID {question_id}번을 추가했습니다.",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self
+            )
+            self._load_exam_filters()
+            self._select_filter_value(self.examFilter, data.get('exam_code'))
+            self._load_subject_filters()
+            self._select_filter_value(self.subjectFilter, data.get('subject_code'))
+            self.load_data()
+        else:
+            InfoBar.error(
+                title='추가 실패',
+                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                parent=self
+            )
+
+    @staticmethod
+    def _select_filter_value(combo, value):
+        if value is None:
+            return
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
 
     def _format_info(self, question):
         prefix = "공통 " if question.get('group_id') is not None else ""

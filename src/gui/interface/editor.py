@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QScrollArea,
-    QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QTextCharFormat, QTextCursor
@@ -26,9 +26,10 @@ from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 class QuestionEditor(QDialog):
     """문제 전체 수정 다이얼로그"""
     
-    def __init__(self, parent=None, question_data=None, subject_options=None):
+    def __init__(self, parent=None, question_data=None, subject_options=None, create_mode=False):
         super().__init__(parent)
-        self.setWindowTitle("문제 수정")
+        self.create_mode = bool(create_mode)
+        self.setWindowTitle("개인 제작 문제 추가" if self.create_mode else "문제 수정")
         self.setModal(True)
         self.question_data = question_data or {}
         self.subject_options = subject_options or []
@@ -38,7 +39,10 @@ class QuestionEditor(QDialog):
             self.question_data.get('shared_passage')
             or self.question_data.get('group_shared_text')
         )
-        self.titleLabel = SubtitleLabel("문제 수정", self)
+        self.titleLabel = SubtitleLabel(
+            "개인 제작 문제 추가" if self.create_mode else "문제 수정",
+            self,
+        )
 
         self.rootLayout = QVBoxLayout(self)
         self.rootLayout.setContentsMargins(18, 16, 18, 14)
@@ -168,7 +172,7 @@ class QuestionEditor(QDialog):
         self.imageLabel.setScaledContents(True)
         self.imageStatusLabel = BodyLabel("", self)
         self.imageStatusLabel.setWordWrap(True)
-        self.btnImage = PushButton("이미지 변경", self)
+        self.btnImage = PushButton("이미지 추가" if self.create_mode else "이미지 변경", self)
         self._apply_input_height(self.btnImage)
         self.btnImage.setFixedWidth(140)
         self.btnImage.clicked.connect(self._select_image)
@@ -252,6 +256,29 @@ class QuestionEditor(QDialog):
 
         self.setMinimumSize(960, 780)
         self.resize(1060, 820)
+
+    def accept(self):
+        data = self.get_data()
+        if not str(data.get('question_text') or '').strip():
+            QMessageBox.warning(self, "입력 필요", "발문을 입력하세요.")
+            return
+        if not data.get('subject_code'):
+            QMessageBox.warning(self, "입력 필요", "과목을 선택하세요.")
+            return
+        missing_choices = [
+            str(choice.get('choice_number'))
+            for choice in data.get('choices', [])
+            if not str(choice.get('choice_text') or '').strip()
+            and not choice.get('choice_image_path')
+        ]
+        if missing_choices:
+            QMessageBox.warning(
+                self,
+                "입력 필요",
+                f"{', '.join(missing_choices)}번 선지를 입력하거나 이미지를 지정하세요.",
+            )
+            return
+        super().accept()
 
     def _init_explanation_sidecar(self):
         self.explanationDock = QWidget(self)
