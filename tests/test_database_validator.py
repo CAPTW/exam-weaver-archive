@@ -86,6 +86,36 @@ def test_question_validator_accepts_clean_question(repo, sample_metadata, sample
     assert QuestionValidator(repo).scan() == []
 
 
+def test_question_validator_accepts_descriptive_question_with_model_answer(repo):
+    template = repo.get_manual_descriptive_question_template()
+    template.update({
+        'question_text': '해양오염 방지 절차를 설명하시오.',
+        'model_answer': '오염원을 차단하고 보고 절차에 따라 신속히 조치한다.',
+    })
+    question_id = repo.create_manual_question(template)
+
+    validator = QuestionValidator(repo)
+    question = repo.get_question(question_id)
+
+    assert validator.scan() == []
+    assert validator.is_random_eligible(question) is False
+
+
+def test_question_validator_flags_descriptive_question_missing_model_answer(repo):
+    template = repo.get_manual_descriptive_question_template()
+    template.update({
+        'question_text': '응급조치 절차를 설명하시오.',
+        'model_answer': '',
+    })
+    repo.create_manual_question(template)
+
+    findings = QuestionValidator(repo).scan()
+
+    assert len(findings) == 1
+    issue_codes = {issue['code'] for issue in findings[0]['issues']}
+    assert issue_codes == {'missing_model_answer'}
+
+
 def test_question_validator_accepts_choice_image_without_question_image_path(
     repo,
     sample_metadata,

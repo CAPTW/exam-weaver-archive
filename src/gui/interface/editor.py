@@ -25,6 +25,8 @@ from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 
 MIN_CHOICE_COUNT = 4
 MAX_CHOICE_COUNT = 10
+QUESTION_TYPE_MULTIPLE_CHOICE = "multiple_choice"
+QUESTION_TYPE_DESCRIPTIVE = "descriptive"
 
 
 class QuestionEditor(QDialog):
@@ -88,10 +90,17 @@ class QuestionEditor(QDialog):
         self.subjectCombo = ComboBox(self)
         self._apply_input_height(self.subjectCombo)
         self._init_subjects()
+        self.questionTypeCombo = ComboBox(self)
+        self._apply_input_height(self.questionTypeCombo)
+        self._init_question_types()
+        self.questionTypeCombo.currentIndexChanged.connect(
+            lambda *_: self._apply_question_type_visibility()
+        )
         self._add_metadata_field("연도", self.yearInput, 0, 0)
         self._add_metadata_field("회차", self.sessionInput, 0, 1)
         self._add_metadata_field("문제번호", self.questionNumberInput, 0, 2)
         self._add_metadata_field("과목", self.subjectCombo, 0, 3, stretch=2)
+        self._add_metadata_field("유형", self.questionTypeCombo, 0, 4)
 
         self.sharedPassageText = None
         if self.sharedPassage:
@@ -172,6 +181,15 @@ class QuestionEditor(QDialog):
         choiceControlLayout.addWidget(self.btnRemoveChoice)
         self.choiceLayout.addWidget(self.choiceControlWidget)
         self._update_choice_control_state()
+
+        self.modelAnswerText = TextEdit(self)
+        self.modelAnswerText.setPlaceholderText("모범답안")
+        self.modelAnswerText.setPlainText(
+            self._display_text(self.question_data.get('model_answer', ''))
+        )
+        self.modelAnswerText.setMinimumHeight(128)
+        self.modelAnswerText.setMaximumHeight(180)
+        self.modelAnswerText.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         self.tagsInput = LineEdit(self)
         self.tagsInput.setPlaceholderText("태그 (콤마로 구분)")
@@ -226,17 +244,26 @@ class QuestionEditor(QDialog):
         if self.sharedPassageText:
             self.viewLayout.addWidget(BodyLabel("공통지문", self))
             self.viewLayout.addWidget(self.sharedPassageText)
-        self.viewLayout.addWidget(BodyLabel("발문", self))
+        self.questionSectionLabel = BodyLabel("발문", self)
+        self.choiceSectionLabel = BodyLabel("선지", self)
+        self.answerSectionLabel = BodyLabel("정답", self)
+        self.modelAnswerSectionLabel = BodyLabel("모범답안", self)
+        self.tagsSectionLabel = BodyLabel("태그", self)
+        self.imageSectionLabel = BodyLabel("이미지", self)
+
+        self.viewLayout.addWidget(self.questionSectionLabel)
         self.viewLayout.addWidget(self.questionToolbar)
         self.viewLayout.addWidget(self.questionText)
-        self.viewLayout.addWidget(BodyLabel("선지", self))
+        self.viewLayout.addWidget(self.choiceSectionLabel)
         self.viewLayout.addWidget(self.choiceWidget)
-        self.viewLayout.addWidget(BodyLabel("정답", self))
+        self.viewLayout.addWidget(self.answerSectionLabel)
         self._apply_input_height(self.answerCombo)
         self.viewLayout.addWidget(self.answerCombo)
-        self.viewLayout.addWidget(BodyLabel("태그", self))
+        self.viewLayout.addWidget(self.modelAnswerSectionLabel)
+        self.viewLayout.addWidget(self.modelAnswerText)
+        self.viewLayout.addWidget(self.tagsSectionLabel)
         self.viewLayout.addWidget(self.tagsInput)
-        self.viewLayout.addWidget(BodyLabel("이미지", self))
+        self.viewLayout.addWidget(self.imageSectionLabel)
         self.viewLayout.addWidget(self.imageWidget)
         self.viewLayout.addStretch(1)
 
@@ -271,6 +298,7 @@ class QuestionEditor(QDialog):
         self.cancelButton.clicked.connect(self.reject)
         self.rootLayout.addWidget(self.buttonBar, 0)
 
+        self._apply_question_type_visibility()
         self.setMinimumSize(960, 780)
         self.resize(1060, 820)
 
@@ -282,6 +310,13 @@ class QuestionEditor(QDialog):
         if not data.get('subject_code'):
             QMessageBox.warning(self, "입력 필요", "과목을 선택하세요.")
             return
+        if data.get('question_type') == QUESTION_TYPE_DESCRIPTIVE:
+            if not str(data.get('model_answer') or '').strip():
+                QMessageBox.warning(self, "입력 필요", "모범답안을 입력하세요.")
+                return
+            super().accept()
+            return
+
         choices = data.get('choices', [])
         if len(choices) < MIN_CHOICE_COUNT:
             QMessageBox.warning(
@@ -555,6 +590,35 @@ class QuestionEditor(QDialog):
         index = self.subjectCombo.findData(current_subject)
         if index >= 0:
             self.subjectCombo.setCurrentIndex(index)
+
+    def _init_question_types(self):
+        self.questionTypeCombo.addItem("객관식", userData=QUESTION_TYPE_MULTIPLE_CHOICE)
+        self.questionTypeCombo.addItem("서술형", userData=QUESTION_TYPE_DESCRIPTIVE)
+        index = self.questionTypeCombo.findData(self._initial_question_type())
+        self.questionTypeCombo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _initial_question_type(self):
+        raw = str(self.question_data.get('question_type') or '').strip().lower()
+        if raw in {QUESTION_TYPE_DESCRIPTIVE, 'subjective', 'essay', 'written'}:
+            return QUESTION_TYPE_DESCRIPTIVE
+        if self.question_data.get('model_answer') and not (self.question_data.get('choices') or []):
+            return QUESTION_TYPE_DESCRIPTIVE
+        return QUESTION_TYPE_MULTIPLE_CHOICE
+
+    def _current_question_type(self):
+        return self.questionTypeCombo.currentData() or QUESTION_TYPE_MULTIPLE_CHOICE
+
+    def _apply_question_type_visibility(self):
+        is_descriptive = self._current_question_type() == QUESTION_TYPE_DESCRIPTIVE
+        for widget in (
+            self.choiceSectionLabel,
+            self.choiceWidget,
+            self.answerSectionLabel,
+            self.answerCombo,
+        ):
+            widget.setVisible(not is_descriptive)
+        self.modelAnswerSectionLabel.setVisible(is_descriptive)
+        self.modelAnswerText.setVisible(is_descriptive)
 
     def _choice_text(self, number):
         for choice in self.question_data.get('choices') or []:
@@ -863,16 +927,18 @@ class QuestionEditor(QDialog):
 
     def get_data(self):
         question_text, question_format_json = self._question_text_and_format_json()
+        question_type = self._current_question_type()
         choices = []
-        for number in self._choice_numbers():
-            choice_text, choice_format_json = self._choice_text_and_format_json(number)
-            choices.append({
-                'choice_number': number,
-                'choice_symbol': self._choice_symbol(number),
-                'choice_text': choice_text,
-                'choice_format_json': choice_format_json,
-                'choice_image_path': self.choiceImagePaths.get(number),
-            })
+        if question_type != QUESTION_TYPE_DESCRIPTIVE:
+            for number in self._choice_numbers():
+                choice_text, choice_format_json = self._choice_text_and_format_json(number)
+                choices.append({
+                    'choice_number': number,
+                    'choice_symbol': self._choice_symbol(number),
+                    'choice_text': choice_text,
+                    'choice_format_json': choice_format_json,
+                    'choice_image_path': self.choiceImagePaths.get(number),
+                })
 
         return {
             'year': self.yearInput.value(),
@@ -882,7 +948,9 @@ class QuestionEditor(QDialog):
             'subject_code': self.subjectCombo.currentData() or self.question_data.get('subject_code'),
             'question_text': question_text,
             'question_format_json': question_format_json,
-            'correct_answer': self.answerCombo.currentData(),
+            'question_type': question_type,
+            'model_answer': self.modelAnswerText.toPlainText().strip() if question_type == QUESTION_TYPE_DESCRIPTIVE else None,
+            'correct_answer': 0 if question_type == QUESTION_TYPE_DESCRIPTIVE else self.answerCombo.currentData(),
             'tags': self.tagsInput.text(),
             'explanation': self.explanationEditor.toPlainText().strip() or None,
             'image_path': self.imagePath,

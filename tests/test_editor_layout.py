@@ -11,7 +11,7 @@ from PyQt5.QtGui import QImage
 from src.gui.interface.browser import BrowserInterface
 import src.gui.interface.browser as browser_module
 from src.gui.interface.editor import QuestionEditor
-from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
+from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE, QUESTION_TYPE_DESCRIPTIVE
 from src.parser.question import Choice, Question
 
 
@@ -206,6 +206,31 @@ def test_question_editor_can_add_more_than_five_choices():
     APP.processEvents()
 
 
+def test_question_editor_supports_descriptive_mode(repo):
+    editor = QuestionEditor(
+        question_data=repo.get_manual_descriptive_question_template(),
+        subject_options=repo.get_manual_subject_options(),
+        create_mode=True,
+    )
+
+    editor.questionText.setPlainText('복원성의 의미를 서술하시오.')
+    editor.modelAnswerText.setPlainText('기울어진 선박이 원위치로 돌아가려는 성질이다.')
+    data = editor.get_data()
+
+    assert editor.windowTitle() == "서술형 문제 추가"
+    assert editor.questionTypeCombo.currentData() == QUESTION_TYPE_DESCRIPTIVE
+    assert editor.choiceWidget.isHidden() is True
+    assert editor.answerCombo.isHidden() is True
+    assert editor.modelAnswerText.isHidden() is False
+    assert data['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert data['model_answer'] == '기울어진 선박이 원위치로 돌아가려는 성질이다.'
+    assert data['correct_answer'] == 0
+    assert data['choices'] == []
+
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
     class FakeManualQuestionDialog:
         captured_question_data = None
@@ -314,6 +339,51 @@ def test_browser_clone_button_creates_customized_personal_question(repo, monkeyp
     assert widget.subjectFilter.currentData() == MANUAL_SUBJECT_CODE
     assert FakeCloneQuestionDialog.captured_question_data['editor_title'] == '기존 문제 복제'
     assert FakeCloneQuestionDialog.captured_subject_options == repo.get_manual_subject_options()
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_descriptive_add_button_creates_model_answer_question(repo, monkeypatch):
+    class FakeDescriptiveQuestionDialog:
+        captured_question_data = None
+        captured_subject_options = None
+
+        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+            self.captured_question_data = question_data
+            self.captured_subject_options = subject_options
+            self.create_mode = create_mode
+            FakeDescriptiveQuestionDialog.captured_question_data = question_data
+            FakeDescriptiveQuestionDialog.captured_subject_options = subject_options
+
+        def exec(self):
+            return True
+
+        def get_data(self):
+            data = dict(self.captured_question_data)
+            data.update({
+                'question_text': '서술형 수동 추가 문제',
+                'question_type': QUESTION_TYPE_DESCRIPTIVE,
+                'model_answer': '서술형 모범답안',
+                'correct_answer': 0,
+                'choices': [],
+            })
+            return data
+
+    monkeypatch.setattr(browser_module, "QuestionEditor", FakeDescriptiveQuestionDialog)
+    widget = BrowserInterface(repo.db_path)
+
+    assert widget.btnAddDescriptive.text() == "서술형 추가"
+    widget.add_descriptive_question()
+
+    saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)
+    assert len(saved) == 1
+    assert saved[0]['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert saved[0]['model_answer'] == '서술형 모범답안'
+    assert saved[0]['choices'] == []
+    assert widget.examFilter.currentData() == MANUAL_EXAM_CODE
+    assert widget.subjectFilter.currentData() == MANUAL_SUBJECT_CODE
+    assert FakeDescriptiveQuestionDialog.captured_subject_options == repo.get_manual_subject_options()
 
     widget.deleteLater()
     APP.processEvents()

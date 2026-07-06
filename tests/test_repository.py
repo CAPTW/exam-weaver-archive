@@ -3,7 +3,12 @@ import json
 
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
-from src.database.repository import CLONED_MANUAL_TAG, MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
+from src.database.repository import (
+    CLONED_MANUAL_TAG,
+    MANUAL_EXAM_CODE,
+    MANUAL_SUBJECT_CODE,
+    QUESTION_TYPE_DESCRIPTIVE,
+)
 from src.database.repository import ExamRepository
 from src.web_import.importer import ComcbtImportService, QuestionSource
 from src.web_import.models import ComcbtParsedExam, ComcbtQuestionGroup
@@ -663,6 +668,31 @@ def test_create_manual_question_accepts_more_than_five_choices(repo):
     assert saved['choices'][-1]['choice_text'] == 'F'
 
 
+def test_create_manual_descriptive_question_stores_model_answer_without_choices(repo):
+    template = repo.get_manual_descriptive_question_template()
+    template.update({
+        'question_text': '선박 복원성의 의미를 설명하시오.',
+        'model_answer': '외력으로 기울어진 선박이 원래 자세로 돌아가려는 성질이다.',
+        'tags': '#복원성',
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_question(question_id)
+    assert saved['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert saved['question_text'] == '선박 복원성의 의미를 설명하시오.'
+    assert saved['model_answer'] == '외력으로 기울어진 선박이 원래 자세로 돌아가려는 성질이다.'
+    assert saved['correct_answer'] == 0
+    assert saved['choices'] == []
+    assert '#복원성' in saved['tags']
+    assert '#서술형' in saved['tags']
+    assert '#개인제작' in saved['tags']
+
+    searched = repo.get_questions_with_choices(search_text='원래 자세', limit=1)
+    assert searched[0]['id'] == question_id
+
+
 def test_manual_clone_template_copies_existing_question_for_customization(repo, sample_metadata):
     question = Question(
         number=8,
@@ -720,6 +750,26 @@ def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadat
 
     assert repo.update_question_explanation(question['id'], "   ") is True
     assert repo.get_question(question['id'])['explanation'] is None
+
+
+def test_update_question_can_convert_to_descriptive_and_clear_choices(repo, sample_metadata, sample_question):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+
+    assert repo.update_question(question['id'], {
+        'question_text': '압축 공기 계통 점검 절차를 서술하시오.',
+        'question_type': QUESTION_TYPE_DESCRIPTIVE,
+        'model_answer': '드레인 배출, 압력 확인, 누설 점검 순서로 확인한다.',
+        'tags': '#서술형',
+        'image_path': None,
+        'choices': question['choices'],
+    }) is True
+
+    updated = repo.get_question(question['id'])
+    assert updated['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert updated['model_answer'] == '드레인 배출, 압력 확인, 누설 점검 순서로 확인한다.'
+    assert updated['correct_answer'] == 0
+    assert updated['choices'] == []
 
 
 def test_choice_image_paths_are_saved_updated_and_exposed(repo, sample_metadata):

@@ -92,9 +92,9 @@ Related high-volume import helpers are included under `scripts/`, especially:
 
 The app uses SQLite. `src/database/schema.sql` defines exams, subjects,
 exam-subject mappings, question sources, grouped passages, questions, choices,
-mock exams, and results. `ExamRepository` applies migrations on startup, seeds
-reference metadata, saves parsed questions, exposes search/filter APIs, updates
-editor changes, and deletes question records safely.
+descriptive model answers, mock exams, and results. `ExamRepository` applies
+migrations on startup, seeds reference metadata, saves parsed questions, exposes
+search/filter APIs, updates editor changes, and deletes question records safely.
 
 The default source-mode writable database path is:
 
@@ -119,7 +119,8 @@ Primary screens:
 - Home: overview landing screen.
 - Question Management: browse, filter, validate, edit, manually add
   user-authored questions, clone existing questions into customizable personal
-  copies, support 4-10 multiple-choice options, explain, and delete.
+  copies, support 4-10 multiple-choice options, store descriptive
+  question/model-answer pairs, explain, and delete.
 - Practice: generate and take mock exams with grading modes.
 - Exam Export: sample questions and export DOCX exam sheets.
 - Import: parse question/answer PDFs into the local database.
@@ -314,10 +315,10 @@ PDF parser의 핵심은 `src/parser`입니다.
 ### 데이터베이스
 
 앱은 SQLite를 사용합니다. `src/database/schema.sql`에는 시험, 과목, 시험-과목
-관계, 문제 출처, 공통 지문/그룹, 문제, 선지, 모의고사, 풀이 결과 테이블이
-정의되어 있습니다. `ExamRepository`는 앱 시작 시 schema/migration을 적용하고,
-reference metadata를 seed하며, parsing된 문제 저장, 검색/필터, 수정, 삭제
-기능을 제공합니다.
+관계, 문제 출처, 공통 지문/그룹, 문제, 선지, 서술형 모범답안, 모의고사,
+풀이 결과 테이블이 정의되어 있습니다. `ExamRepository`는 앱 시작 시
+schema/migration을 적용하고, reference metadata를 seed하며, parsing된 문제
+저장, 검색/필터, 수정, 삭제 기능을 제공합니다.
 
 기본 source 실행 DB 경로:
 
@@ -342,7 +343,7 @@ DB가 포함되어 있지 않습니다.
 - 홈: 앱 시작 화면.
 - 문제 관리: 문제 검색, 필터링, 검증, 수정, 개인 제작 문제 수동 추가,
   기존 문제를 개인 제작 문제로 복제해 커스터마이징, 4-10개 객관식 선지,
-  해설 작성, 삭제.
+  서술형 문제/모범답안 저장, 해설 작성, 삭제.
 - 문제 풀이: 조건별 문제 선택과 모의고사 풀이.
 - 시험지 출력: 조건별 문제 샘플링 후 DOCX 생성.
 - 문제 가져오기: 문제 PDF/정답 PDF parsing 후 DB 저장.

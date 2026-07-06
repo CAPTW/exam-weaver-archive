@@ -68,6 +68,10 @@ class BrowserInterface(QWidget):
         self.btnAddManual.setToolTip("개인이 만든 문제를 수동으로 추가")
         self.btnAddManual.clicked.connect(self.add_manual_question)
 
+        self.btnAddDescriptive = PushButton("서술형 추가", self)
+        self.btnAddDescriptive.setToolTip("문제와 모범답안으로 구성된 서술형 문제 추가")
+        self.btnAddDescriptive.clicked.connect(self.add_descriptive_question)
+
         self.btnValidate = PrimaryPushButton("오류 검사", self)
         self.btnValidate.clicked.connect(self.load_validation_results)
 
@@ -82,6 +86,7 @@ class BrowserInterface(QWidget):
         self.headerLayout.addWidget(self.subjectFilter)
         self.headerLayout.addWidget(self.searchBox)
         self.headerLayout.addWidget(self.btnAddManual)
+        self.headerLayout.addWidget(self.btnAddDescriptive)
         self.headerLayout.addWidget(self.btnRefresh)
         self.headerLayout.addWidget(self.btnValidate)
         self.headerLayout.addWidget(self.btnDeleteSelected)
@@ -389,6 +394,40 @@ class BrowserInterface(QWidget):
                 parent=self
             )
 
+    def add_descriptive_question(self):
+        dialog = QuestionEditor(
+            self.window(),
+            self.repo.get_manual_descriptive_question_template(),
+            subject_options=self.repo.get_manual_subject_options(),
+            create_mode=True,
+        )
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        question_id = self.repo.create_manual_question(data)
+        if question_id:
+            InfoBar.success(
+                title='추가 완료',
+                content=f"서술형 문제 ID {question_id}번을 추가했습니다.",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self
+            )
+            self._load_exam_filters()
+            self._select_filter_value(self.examFilter, data.get('exam_code'))
+            self._load_subject_filters()
+            self._select_filter_value(self.subjectFilter, data.get('subject_code'))
+            self.load_data()
+        else:
+            InfoBar.error(
+                title='추가 실패',
+                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                parent=self
+            )
+
     def clone_question(self, question_id):
         template = self.repo.get_manual_question_clone_template(question_id)
         if not template:
@@ -442,15 +481,21 @@ class BrowserInterface(QWidget):
 
     def _format_info(self, question):
         prefix = "공통 " if question.get('group_id') is not None else ""
+        type_prefix = "서술형 " if question.get('question_type') == 'descriptive' else ""
         return (
-            f"{prefix}{question['year']}-{question['session']} "
+            f"{prefix}{type_prefix}{question['year']}-{question['session']} "
             f"{question['subject_name']} {question['question_number']}번"
         )
 
     def _format_question_preview(self, question):
         question_text = question.get('question_text') or ''
         text = question_text[:50] + "..." if len(question_text) > 50 else question_text
-        return f"[공통] {text}" if question.get('group_id') is not None else text
+        prefixes = []
+        if question.get('group_id') is not None:
+            prefixes.append("[공통]")
+        if question.get('question_type') == 'descriptive':
+            prefixes.append("[서술형]")
+        return f"{' '.join(prefixes)} {text}".strip() if prefixes else text
 
     def _make_action_widget(self, question_id):
         widget = QWidget(self)

@@ -41,6 +41,27 @@ def _math_texts(element):
     return element.xpath(".//m:t/text()", namespaces=MATH_NS)
 
 
+def test_export_renders_descriptive_question_with_model_answer(tmp_path):
+    output_path = tmp_path / "descriptive.docx"
+    questions = [
+        {
+            "question_text": "복원성을 설명하시오.",
+            "question_type": "descriptive",
+            "model_answer": "기울어진 선박이 원래 자세로 돌아가려는 성질이다.",
+            "choices": [],
+            "correct_answer": 0,
+        }
+    ]
+
+    DocxExporter().export("서술형 테스트", questions, str(output_path))
+
+    document_xml = _read_document_xml(output_path)
+    paragraph_texts = [_paragraph_text(p) for p in _paragraphs(document_xml)]
+
+    assert "1. 복원성을 설명하시오." in paragraph_texts
+    assert "모범답안: 기울어진 선박이 원래 자세로 돌아가려는 성질이다." in paragraph_texts
+
+
 def test_export_renders_grouped_subject_sections_for_multi_subject_mock(tmp_path):
     output_path = tmp_path / "multi-subject.docx"
     sections = [
