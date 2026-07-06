@@ -11,12 +11,13 @@ from ..utils.tagger import build_tags
 
 logger = logging.getLogger(__name__)
 
-VALID_CHOICE_NUMBERS = (1, 2, 3, 4, 5)
+VALID_CHOICE_NUMBERS = tuple(range(1, 11))
 MANUAL_EXAM_CODE = "personal_questions"
 MANUAL_EXAM_NAME = "개인 제작 문제"
 MANUAL_SUBJECT_CODE = "manual_general"
 MANUAL_SUBJECT_NAME = "개인 문제"
 MANUAL_TAG = "#개인제작"
+CLONED_MANUAL_TAG = "#복제수정"
 
 
 def _tag_query_tokens(tag_query: str) -> List[str]:
@@ -886,6 +887,48 @@ class ExamRepository:
             'tags': MANUAL_TAG,
             'choices': [],
         }
+
+    def get_manual_question_clone_template(self, question_id: int) -> Optional[Dict[str, Any]]:
+        """Return editable manual-question defaults copied from an existing question."""
+        source = self.get_question(question_id)
+        if not source:
+            return None
+
+        template = self.get_manual_question_template()
+        shared_passage = source.get('shared_passage') or source.get('group_shared_text')
+        question_text = source.get('question_text') or ''
+        question_format_json = source.get('question_format_json')
+        if shared_passage:
+            question_text = f"[공통지문]\n{shared_passage}\n\n{question_text}"
+            question_format_json = None
+
+        choices = []
+        for choice in source.get('choices') or []:
+            try:
+                choice_number = int(choice.get('choice_number') or choice.get('number'))
+            except (TypeError, ValueError):
+                continue
+            if choice_number not in VALID_CHOICE_NUMBERS:
+                continue
+            choices.append({
+                'choice_number': choice_number,
+                'choice_symbol': choice.get('choice_symbol') or choice.get('symbol') or str(choice_number),
+                'choice_text': choice.get('choice_text') or choice.get('text') or '',
+                'choice_format_json': self._choice_format_json(choice),
+                'choice_image_path': self._choice_image_path(choice),
+            })
+
+        template.update({
+            'editor_title': '기존 문제 복제',
+            'question_text': question_text,
+            'question_format_json': question_format_json,
+            'correct_answer': source.get('correct_answer') or 1,
+            'tags': self._manual_tags(f"{source.get('tags') or ''} {CLONED_MANUAL_TAG}"),
+            'explanation': source.get('explanation'),
+            'image_path': source.get('image_path'),
+            'choices': choices,
+        })
+        return template
 
     def get_manual_subject_options(self) -> List[Dict[str, str]]:
         return [{'code': MANUAL_SUBJECT_CODE, 'name_ko': MANUAL_SUBJECT_NAME}]

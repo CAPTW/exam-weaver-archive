@@ -12,6 +12,7 @@ from src.gui.interface.browser import BrowserInterface
 import src.gui.interface.browser as browser_module
 from src.gui.interface.editor import QuestionEditor
 from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
+from src.parser.question import Choice, Question
 
 
 APP = QApplication.instance() or QApplication([])
@@ -167,6 +168,44 @@ def test_question_editor_supports_create_mode_for_manual_questions(repo):
     APP.processEvents()
 
 
+def test_question_editor_can_add_more_than_five_choices():
+    editor = QuestionEditor(
+        question_data={
+            'year': 2024,
+            'session': 1,
+            'question_number': 1,
+            'subject_code': 'manual_general',
+            'exam_code': MANUAL_EXAM_CODE,
+            'question_text': '6지선다로 바꿀 문제',
+            'correct_answer': 1,
+            'choices': [
+                {'choice_number': 1, 'choice_text': 'A'},
+                {'choice_number': 2, 'choice_text': 'B'},
+                {'choice_number': 3, 'choice_text': 'C'},
+                {'choice_number': 4, 'choice_text': 'D'},
+            ],
+        },
+        subject_options=[{'code': MANUAL_SUBJECT_CODE, 'name_ko': '개인 문제'}],
+        create_mode=True,
+    )
+
+    editor.btnAddChoice.click()
+    editor.btnAddChoice.click()
+    editor.choiceInputs[5].setText('E')
+    editor.choiceInputs[6].setText('F')
+    editor.answerCombo.setCurrentIndex(editor.answerCombo.findData(6))
+
+    data = editor.get_data()
+    assert len(data['choices']) == 6
+    assert data['correct_answer'] == 6
+    assert data['choices'][4]['choice_symbol'] == '⑤'
+    assert data['choices'][5]['choice_symbol'] == '6'
+    assert data['choices'][5]['choice_text'] == 'F'
+
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
     class FakeManualQuestionDialog:
         captured_question_data = None
@@ -208,6 +247,73 @@ def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
     assert widget.examFilter.currentData() == MANUAL_EXAM_CODE
     assert widget.subjectFilter.currentData() == MANUAL_SUBJECT_CODE
     assert FakeManualQuestionDialog.captured_subject_options == repo.get_manual_subject_options()
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_clone_button_creates_customized_personal_question(repo, monkeypatch):
+    source_question = Question(
+        number=1,
+        text='기존 기출문제 원본',
+        choices=[
+            Choice(number=1, symbol='㉮', text='A'),
+            Choice(number=2, symbol='㉯', text='B'),
+            Choice(number=3, symbol='㉴', text='C'),
+            Choice(number=4, symbol='㉵', text='D'),
+        ],
+        correct_answer=2,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    metadata = type('Metadata', (), {'year': 2024, 'session': 1, 'exam_type': '3급기관사'})()
+    repo.save_questions([source_question], metadata)
+    source = repo.get_questions_with_choices(exam_code='3급기관사', limit=1)[0]
+
+    class FakeCloneQuestionDialog:
+        captured_question_data = None
+        captured_subject_options = None
+
+        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+            self.captured_question_data = question_data
+            self.captured_subject_options = subject_options
+            self.create_mode = create_mode
+            FakeCloneQuestionDialog.captured_question_data = question_data
+            FakeCloneQuestionDialog.captured_subject_options = subject_options
+
+        def exec(self):
+            return True
+
+        def get_data(self):
+            data = dict(self.captured_question_data)
+            data.update({
+                'question_text': '복제 후 커스터마이징한 문제',
+                'correct_answer': 5,
+                'choices': [
+                    {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': 'A'},
+                    {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': 'B'},
+                    {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': 'C'},
+                    {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': 'D'},
+                    {'choice_number': 5, 'choice_symbol': '⑤', 'choice_text': 'E'},
+                ],
+            })
+            return data
+
+    monkeypatch.setattr(browser_module, "QuestionEditor", FakeCloneQuestionDialog)
+    widget = BrowserInterface(repo.db_path)
+    widget.clone_question(source['id'])
+
+    saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)
+    assert len(saved) == 1
+    assert saved[0]['question_text'] == '복제 후 커스터마이징한 문제'
+    assert saved[0]['correct_answer'] == 5
+    assert [choice['choice_number'] for choice in saved[0]['choices']] == [1, 2, 3, 4, 5]
+    assert widget.examFilter.currentData() == MANUAL_EXAM_CODE
+    assert widget.subjectFilter.currentData() == MANUAL_SUBJECT_CODE
+    assert FakeCloneQuestionDialog.captured_question_data['editor_title'] == '기존 문제 복제'
+    assert FakeCloneQuestionDialog.captured_subject_options == repo.get_manual_subject_options()
 
     widget.deleteLater()
     APP.processEvents()

@@ -13,7 +13,9 @@ class QuestionValidator:
     MAX_SESSION = 99
     MIN_QUESTION_NUMBER = 1
     MAX_QUESTION_NUMBER = 500
-    VALID_ANSWERS = set(range(1, 6))
+    MIN_CHOICE_COUNT = 4
+    MAX_CHOICE_COUNT = 10
+    VALID_ANSWERS = set(range(1, MAX_CHOICE_COUNT + 1))
     IMAGE_HINT_PATTERN = re.compile(
         r'(그림|사진|그래프|(?<!해)도표|'
         r'다음과\s*같은|다음\s*(?:그림|회로|선도|기호|도표|파형|진리표|타임차트)|'
@@ -111,7 +113,11 @@ class QuestionValidator:
 
     def _validate_choices(self, choices: List[Dict], issues: List[Dict], image_state: Dict):
         numbers = [choice.get('choice_number') for choice in choices]
-        if len(numbers) not in (4, 5) or sorted(numbers) != list(range(1, len(numbers) + 1)):
+        if (
+            len(numbers) < self.MIN_CHOICE_COUNT
+            or len(numbers) > self.MAX_CHOICE_COUNT
+            or sorted(numbers) != list(range(1, len(numbers) + 1))
+        ):
             issues.append(self._issue('choice_count', '선지 번호/개수 이상', 'error'))
 
         for choice in choices:

@@ -3,7 +3,7 @@ import json
 
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
-from src.database.repository import MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
+from src.database.repository import CLONED_MANUAL_TAG, MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE
 from src.database.repository import ExamRepository
 from src.web_import.importer import ComcbtImportService, QuestionSource
 from src.web_import.models import ComcbtParsedExam, ComcbtQuestionGroup
@@ -636,6 +636,67 @@ def test_create_manual_question_inserts_personal_exam_subject_and_choices(repo):
     assert next_template['exam_code'] == MANUAL_EXAM_CODE
     assert next_template['subject_code'] == MANUAL_SUBJECT_CODE
     assert next_template['question_number'] == template['question_number'] + 1
+
+
+def test_create_manual_question_accepts_more_than_five_choices(repo):
+    template = repo.get_manual_question_template()
+    template.update({
+        'question_text': '6지선다 개인 제작 문제',
+        'correct_answer': 6,
+        'choices': [
+            {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': 'A'},
+            {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': 'B'},
+            {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': 'C'},
+            {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': 'D'},
+            {'choice_number': 5, 'choice_symbol': '⑤', 'choice_text': 'E'},
+            {'choice_number': 6, 'choice_symbol': '6', 'choice_text': 'F'},
+        ],
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_question(question_id)
+    assert saved['correct_answer'] == 6
+    assert [choice['choice_number'] for choice in saved['choices']] == [1, 2, 3, 4, 5, 6]
+    assert saved['choices'][-1]['choice_symbol'] == '6'
+    assert saved['choices'][-1]['choice_text'] == 'F'
+
+
+def test_manual_clone_template_copies_existing_question_for_customization(repo, sample_metadata):
+    question = Question(
+        number=8,
+        text='복제할 원본 문제',
+        choices=[
+            Choice(number=1, symbol='㉮', text='A'),
+            Choice(number=2, symbol='㉯', text='B'),
+            Choice(number=3, symbol='㉴', text='C'),
+            Choice(number=4, symbol='㉵', text='D'),
+            Choice(number=5, symbol='⑤', text='E'),
+        ],
+        correct_answer=5,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    assert repo.save_questions([question], sample_metadata) == 1
+    source = repo.get_questions_with_choices(exam_code='3급기관사', limit=1)[0]
+    assert repo.update_question_explanation(source['id'], '원본 해설') is True
+
+    template = repo.get_manual_question_clone_template(source['id'])
+
+    assert template is not None
+    assert template['editor_title'] == '기존 문제 복제'
+    assert template['exam_code'] == MANUAL_EXAM_CODE
+    assert template['subject_code'] == MANUAL_SUBJECT_CODE
+    assert template['question_text'] == '복제할 원본 문제'
+    assert template['correct_answer'] == 5
+    assert template['explanation'] == '원본 해설'
+    assert CLONED_MANUAL_TAG in template['tags']
+    assert '#개인제작' in template['tags']
+    assert [choice['choice_number'] for choice in template['choices']] == [1, 2, 3, 4, 5]
+    assert template['choices'][-1]['choice_text'] == 'E'
 
 
 def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadata, sample_question):
