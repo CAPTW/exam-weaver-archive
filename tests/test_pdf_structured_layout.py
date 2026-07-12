@@ -200,6 +200,39 @@ def test_same_baseline_four_cell_answer_row_does_not_create_page_columns():
     assert {line.column for line in structured.lines} == {0}
 
 
+def test_multiple_four_cell_answer_rows_do_not_establish_page_columns():
+    words = [
+        _word(80, 120, 200, "단일열"),
+        _word(220, 120, 460, "문제의"),
+        _word(480, 120, 760, "첫째본문"),
+        _word(80, 160, 200, "가운데를"),
+        _word(220, 160, 460, "가로지르는"),
+        _word(480, 160, 760, "둘째본문"),
+        _word(80, 500, 110, "①"),
+        _word(130, 500, 180, "44"),
+        _word(300, 500, 330, "②"),
+        _word(350, 500, 400, "46"),
+        _word(560, 500, 590, "③"),
+        _word(610, 500, 660, "48"),
+        _word(800, 500, 830, "④"),
+        _word(850, 500, 900, "50"),
+        _word(80, 550, 110, "①"),
+        _word(130, 550, 180, "10"),
+        _word(300, 550, 330, "②"),
+        _word(350, 550, 400, "20"),
+        _word(560, 550, 590, "③"),
+        _word(610, 550, 660, "30"),
+        _word(800, 550, 830, "④"),
+        _word(850, 550, 900, "40"),
+    ]
+
+    structured = PDFExtractor().extract_structured_page(_Page(words), 1)
+
+    assert "① 44 ② 46 ③ 48 ④ 50" in _texts(structured)
+    assert "① 10 ② 20 ③ 30 ④ 40" in _texts(structured)
+    assert {line.column for line in structured.lines} == {0}
+
+
 def test_sparse_header_footer_and_cover_text_is_non_question_page():
     words = [
         _word(100, 20, 180, "시험명"),

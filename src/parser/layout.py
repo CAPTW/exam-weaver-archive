@@ -200,11 +200,12 @@ def _detect_column_divider(
     minimum_gutter = width * 0.08
     candidates: list[tuple[float, float]] = []
     for row in body_rows:
-        for previous, current in zip(row, row[1:]):
-            gap = current.bbox[0] - previous.bbox[2]
-            midpoint = (previous.bbox[2] + current.bbox[0]) / 2
-            if gap >= minimum_gutter and width * 0.30 <= midpoint <= width * 0.70:
-                candidates.append((midpoint, gap))
+        wide_gaps = _wide_row_gaps(row, minimum_gutter)
+        if len(wide_gaps) != 1:
+            continue
+        midpoint, gap = wide_gaps[0]
+        if width * 0.30 <= midpoint <= width * 0.70:
+            candidates.append((midpoint, gap))
 
     if explicit_divider is not None and width * 0.25 <= explicit_divider <= width * 0.75:
         split = float(explicit_divider)
@@ -229,6 +230,8 @@ def _detect_column_divider(
         left = [word for word in row if word.center_x < split]
         right = [word for word in row if word.center_x >= split]
         if left and right:
+            if len(_wide_row_gaps(row, minimum_gutter)) > 1:
+                continue
             cross_gap = min(word.bbox[0] for word in right) - max(word.bbox[2] for word in left)
             if cross_gap >= minimum_gutter:
                 separated_rows += 1
@@ -248,6 +251,17 @@ def _detect_column_divider(
     ):
         return None
     return split
+
+
+def _wide_row_gaps(
+    row: Sequence[_RawWord], minimum_gutter: float
+) -> list[tuple[float, float]]:
+    gaps = []
+    for previous, current in zip(row, row[1:]):
+        gap = current.bbox[0] - previous.bbox[2]
+        if gap >= minimum_gutter:
+            gaps.append(((previous.bbox[2] + current.bbox[0]) / 2, gap))
+    return gaps
 
 
 def _merged_x_intervals(words: Sequence[_RawWord]) -> list[tuple[float, float]]:
