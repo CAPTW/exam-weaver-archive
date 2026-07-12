@@ -5,10 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from statistics import fmean
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import Iterable, Sequence
 
-if TYPE_CHECKING:
-    from .layout import LayoutLine, LayoutWord, StructuredPage
+from .layout import LayoutLine, LayoutWord, StructuredPage
 
 
 _QUESTION_START = re.compile(r"^\s*(\d{1,3})\s*[.)]\s*(.*)$")
@@ -19,6 +18,7 @@ _DOCUMENT_NOISE = re.compile(
     r"(?:무단\s*(?:복제|전재)|해기사\s*시험\s*전문|정답\s*및\s*해설)",
     re.IGNORECASE,
 )
+_PROPOSITION_MARKER = re.compile(r"^[㉠-㉭]$")
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class OfflineExamParser:
     """
 
     def parse_pages(
-        self, pages: Sequence[StructuredPage]
+        self, pages: list[StructuredPage]
     ) -> list[ParsedOfflineQuestion]:
         records, removed_noise_pages = self._document_lines(pages)
         regions = self._question_regions(records)
@@ -117,7 +117,7 @@ class OfflineExamParser:
         self, record: _LineRecord, normalized: str, repeated: set[str]
     ) -> bool:
         y0 = record.bbox[1]
-        if y0 >= 0.92:
+        if y0 >= 0.88:
             return True
         if y0 <= 0.07 and (normalized in repeated or not _QUESTION_START.match(record.text)):
             return True
@@ -150,22 +150,28 @@ class OfflineExamParser:
         first_stem_text = start.group(2).strip()
 
         recovery = self._recover_coordinate_choice_row(region[1:])
+        has_explicit_choices = any(
+            self._explicit_choice_pieces(record.text) for record in region[1:]
+        )
         recovered_index: int | None = None
         recovered_choices: list[str] = []
         if recovery is not None:
             relative_index, recovered_choices = recovery
             recovered_index = relative_index + 1
+        use_recovery = recovered_index is not None and not has_explicit_choices
 
         stem_parts = [first_stem_text] if first_stem_text else []
         explicit_choices: dict[int, str] = {}
+        explicit_marker_numbers: list[int] = []
         active_choice: int | None = None
 
         for index, record in enumerate(region[1:], start=1):
-            if index == recovered_index:
+            if use_recovery and index == recovered_index:
                 continue
             pieces = self._explicit_choice_pieces(record.text)
             if pieces:
                 for choice_number, text in pieces:
+                    explicit_marker_numbers.append(choice_number)
                     explicit_choices[choice_number] = text
                     active_choice = choice_number
                 continue
@@ -182,6 +188,11 @@ class OfflineExamParser:
         diagnostics: list[str] = []
         if explicit_choices:
             choices = [explicit_choices[key].strip() for key in sorted(explicit_choices)]
+            if len(set(explicit_marker_numbers)) != len(explicit_marker_numbers):
+                diagnostics.append("duplicate_choice_marker")
+            expected_markers = list(range(1, len(explicit_marker_numbers) + 1))
+            if explicit_marker_numbers != expected_markers:
+                diagnostics.append("invalid_choice_sequence")
         else:
             choices = recovered_choices
             if recovered_choices:
@@ -221,12 +232,26 @@ class OfflineExamParser:
             groups = self._horizontal_cells(records[index].words)
             if len(groups) != 4:
                 continue
+            if self._is_sequential_proposition_row(groups):
+                continue
             raw_values = [" ".join(str(word.text).strip() for word in group) for group in groups]
             values = [self._strip_damaged_marker(value) for value in raw_values]
             values = self._repair_fused_numeric_marker(values)
             if all(values) and sum(value.isdigit() for value in values) >= 3:
                 return index, values
         return None
+
+    def _is_sequential_proposition_row(
+        self, groups: Sequence[Sequence[LayoutWord]]
+    ) -> bool:
+        labels = []
+        for group in groups:
+            first_text = str(group[0].text).strip() if group else ""
+            if not _PROPOSITION_MARKER.fullmatch(first_text):
+                return False
+            labels.append(first_text)
+        first = ord("㉠")
+        return [ord(label) for label in labels] == list(range(first, first + len(labels)))
 
     def _horizontal_cells(
         self, words: Sequence[LayoutWord]

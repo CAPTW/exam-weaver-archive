@@ -1,3 +1,5 @@
+from typing import get_type_hints
+
 from src.parser.offline_exam import OfflineExamParser, ParsedOfflineQuestion
 from src.parser.offline_quality import validate_offline_question
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage
@@ -158,3 +160,103 @@ def test_quality_gate_fails_closed_for_structure_and_confidence():
         "low_confidence",
         "parser_diagnostic",
     }
+
+
+def test_sequential_proposition_cells_are_never_recovered_as_final_choices():
+    page = _page(
+        _line(["5.", "다음", "자료를", "검토하시오."], y=0.12),
+        _line(
+            ["㉠", "44", "㉡", "46", "㉢", "48", "㉣", "50"],
+            y=0.34,
+            xs=[0.08, 0.12, 0.30, 0.34, 0.52, 0.56, 0.74, 0.78],
+        ),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == []
+    assert all(label in question.stem for label in ("㉠", "㉡", "㉢", "㉣"))
+    assert "coordinate_choice_recovery" not in question.diagnostics
+    assert validate_offline_question(question).importable is False
+
+
+def test_geometry_candidate_stays_in_stem_when_explicit_choices_follow():
+    page = _page(
+        _line(["6.", "표의", "수치를", "보고", "답하시오."], y=0.12),
+        _line(
+            ["10", "20", "30", "40"],
+            y=0.28,
+            xs=[0.08, 0.31, 0.54, 0.77],
+        ),
+        _line(["①", "첫째"], y=0.48),
+        _line(["②", "둘째"], y=0.55),
+        _line(["③", "셋째"], y=0.62),
+        _line(["④", "넷째"], y=0.69),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert "10 20 30 40" in question.stem
+    assert question.choices == ["첫째", "둘째", "셋째", "넷째"]
+    assert "coordinate_choice_recovery" not in question.diagnostics
+
+
+def test_missing_explicit_choice_marker_is_fail_closed_even_with_four_choices():
+    page = _page(
+        _line(["9.", "표지", "누락", "문제"], y=0.12),
+        _line(["①", "하나"], y=0.25),
+        _line(["②", "둘"], y=0.32),
+        _line(["④", "넷"], y=0.39),
+        _line(["⑤", "다섯"], y=0.46),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+    result = validate_offline_question(question)
+
+    assert "invalid_choice_sequence" in question.diagnostics
+    assert result.importable is False
+    assert "parser_diagnostic" in result.reason_codes
+
+
+def test_duplicate_explicit_choice_marker_is_fail_closed():
+    page = _page(
+        _line(["10.", "표지", "중복", "문제"], y=0.12),
+        _line(["①", "하나"], y=0.25),
+        _line(["②", "둘"], y=0.32),
+        _line(["②", "중복"], y=0.39),
+        _line(["③", "셋"], y=0.46),
+        _line(["④", "넷"], y=0.53),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+    result = validate_offline_question(question)
+
+    assert "duplicate_choice_marker" in question.diagnostics
+    assert result.importable is False
+    assert "parser_diagnostic" in result.reason_codes
+
+
+def test_varying_page_counter_and_residual_footer_at_point_nine_are_stripped():
+    page = _page(
+        _line(["11.", "바닥글", "제거", "문제"], y=0.12),
+        _line(["①", "하나"], y=0.30),
+        _line(["②", "둘"], y=0.38),
+        _line(["③", "셋"], y=0.46),
+        _line(["④", "넷"], y=0.54),
+        _line(["7", "/", "12"], y=0.90),
+        _line(["시험지", "A형"], y=0.91),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["하나", "둘", "셋", "넷"]
+    assert "시험지" not in question.stem
+    assert "document_noise_removed" in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_public_parser_annotations_resolve_at_runtime():
+    hints = get_type_hints(OfflineExamParser.parse_pages)
+
+    assert hints["pages"] == list[StructuredPage]
+    assert hints["return"] == list[ParsedOfflineQuestion]
