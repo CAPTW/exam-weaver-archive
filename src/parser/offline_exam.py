@@ -23,6 +23,10 @@ _FOOTER_TEXT = re.compile(
     r"(?:해양경찰.*채용시험|시험지\s*[A-Z가-힣0-9]*형|무단\s*(?:복제|전재))",
     re.IGNORECASE,
 )
+_HEADER_TEXT = re.compile(
+    r"(?:해양경찰.*(?:채용)?시험|수험번호\s*[:：]?|과목명\s*[:：]?|문제지\s*[A-Z가-힣0-9]*형)",
+    re.IGNORECASE,
+)
 _PROPOSITION_MARKER = re.compile(r"^([㉠-㉭])")
 
 
@@ -46,6 +50,7 @@ class _LineRecord:
     page: int
     column: int | None
     ambiguous_bottom_margin: bool = False
+    ambiguous_top_margin: bool = False
 
 
 class OfflineExamParser:
@@ -84,6 +89,8 @@ class OfflineExamParser:
                     continue
                 if role == "ambiguous_bottom_margin":
                     record = replace(record, ambiguous_bottom_margin=True)
+                elif role == "ambiguous_top_margin":
+                    record = replace(record, ambiguous_top_margin=True)
                 if record.text:
                     records.append(record)
         return records, removed_noise_pages
@@ -126,11 +133,15 @@ class OfflineExamParser:
         self, record: _LineRecord, normalized: str, repeated: set[str]
     ) -> str:
         y0 = record.bbox[1]
-        if y0 <= 0.07 and (normalized in repeated or not _QUESTION_START.match(record.text)):
-            return "noise"
-        if normalized in repeated and (y0 <= 0.12 or y0 >= 0.88):
-            return "noise"
         if _DOCUMENT_NOISE.search(record.text):
+            return "noise"
+        if y0 <= 0.07:
+            if _QUESTION_START.match(record.text):
+                return "body"
+            if normalized in repeated or _HEADER_TEXT.search(record.text):
+                return "noise"
+            return "ambiguous_top_margin"
+        if normalized in repeated and (y0 <= 0.12 or y0 >= 0.88):
             return "noise"
         if y0 >= 0.88:
             if _PAGE_COUNTER.fullmatch(record.text) or _FOOTER_TEXT.search(record.text):
@@ -213,10 +224,13 @@ class OfflineExamParser:
 
         if len(choices) not in (4, 5):
             diagnostics.append("invalid_choice_count")
-        if region[0].page in removed_noise_pages:
+        region_pages = {record.page for record in region}
+        if region_pages & removed_noise_pages:
             diagnostics.append("document_noise_removed")
         if any(record.ambiguous_bottom_margin for record in region):
             diagnostics.append("ambiguous_bottom_margin")
+        if any(record.ambiguous_top_margin for record in region):
+            diagnostics.append("ambiguous_top_margin")
 
         confidence = self._region_confidence(region)
         return ParsedOfflineQuestion(

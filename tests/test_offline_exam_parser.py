@@ -292,6 +292,58 @@ def test_ambiguous_bottom_margin_choice_continuation_is_preserved_and_blocked():
     assert "parser_diagnostic" in result.reason_codes
 
 
+def test_unknown_top_margin_continuation_on_second_page_is_preserved_and_blocked():
+    first_page = _page(
+        _line(["13.", "두", "페이지에", "걸친", "문제"], y=0.72, page=1),
+        number=1,
+    )
+    second_page = _page(
+        _line(["계속되는", "문제", "본문"], y=0.05, page=2),
+        _line(["①", "하나"], y=0.20, page=2),
+        _line(["②", "둘"], y=0.28, page=2),
+        _line(["③", "셋"], y=0.36, page=2),
+        _line(["④", "넷"], y=0.44, page=2),
+        number=2,
+    )
+
+    question = OfflineExamParser().parse_pages([first_page, second_page])[0]
+    result = validate_offline_question(question)
+
+    assert "계속되는 문제 본문" in question.stem
+    assert "ambiguous_top_margin" in question.diagnostics
+    assert result.importable is False
+    assert "parser_diagnostic" in result.reason_codes
+
+
+def test_repeated_header_on_later_region_page_is_stripped_and_diagnosed():
+    preface_page = _page(
+        _line(["해양경찰", "채용시험"], y=0.03, page=0),
+        number=0,
+    )
+    first_page = _page(
+        _line(["14.", "반복", "머리글", "제거", "문제"], y=0.70, page=1),
+        number=1,
+    )
+    second_page = _page(
+        _line(["해양경찰", "채용시험"], y=0.03, page=2),
+        _line(["이어지는", "본문"], y=0.14, page=2),
+        _line(["①", "하나"], y=0.24, page=2),
+        _line(["②", "둘"], y=0.32, page=2),
+        _line(["③", "셋"], y=0.40, page=2),
+        _line(["④", "넷"], y=0.48, page=2),
+        number=2,
+    )
+
+    question = OfflineExamParser().parse_pages(
+        [preface_page, first_page, second_page]
+    )[0]
+
+    assert "해양경찰 채용시험" not in question.stem
+    assert "document_noise_removed" in question.diagnostics
+    assert "ambiguous_top_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
 def test_public_parser_annotations_resolve_at_runtime():
     hints = get_type_hints(OfflineExamParser.parse_pages)
 
