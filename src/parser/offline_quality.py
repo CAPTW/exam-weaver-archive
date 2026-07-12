@@ -15,7 +15,8 @@ _PLACEHOLDER = re.compile(
     re.IGNORECASE,
 )
 _CONTAMINATION = re.compile(
-    r"(?:\b\d+\s*/\s*\d+\b|(?:^|\s)\d{1,3}\s*[.)]\s*[A-Za-z가-힣<]"
+    r"(?:\b\d{1,3}(?:\s+/\s*|\s*/\s+)\d{1,3}\b"
+    r"|(?:^|\s)\d{1,3}\s*[.)]\s*[A-Za-z가-힣<]"
     r"|해양경찰\s*채용시험|무단\s*(?:복제|전재)|정답\s*[:：]?)",
     re.IGNORECASE,
 )
@@ -23,6 +24,7 @@ _SINGLE_PROPOSITION = re.compile(r"^[㉠-㉭](?:\s+.+)?$")
 _NON_BLOCKING_DIAGNOSTICS = {
     "coordinate_choice_recovery",
     "document_noise_removed",
+    "damaged_choice_recovery",
 }
 
 

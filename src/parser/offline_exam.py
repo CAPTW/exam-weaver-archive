@@ -13,12 +13,17 @@ from .layout import LayoutLine, LayoutWord, StructuredPage
 _QUESTION_START = re.compile(r"^\s*(\d{1,3})\s*[.)]\s*(.*)$")
 _CHOICE_MARKERS = {"①": 1, "②": 2, "③": 3, "④": 4, "⑤": 5}
 _CHOICE_PATTERN = re.compile(r"([①②③④⑤])")
+_DAMAGED_VERTICAL_MARKERS = {"㉦": 1, "㉨": 2, "㉭": 3}
+_DAMAGED_VERTICAL_PATTERN = re.compile(r"^([㉦㉨㉭])\s*")
 _DAMAGED_MARKER = re.compile(r"^[①-⑤㉠-㉭]\s*")
 _DOCUMENT_NOISE = re.compile(
-    r"(?:무단\s*(?:복제|전재)|해기사\s*시험\s*전문|정답\s*및\s*해설)",
+    r"(?:무단\s*(?:복제|전재)|해기사\s*시험\s*전문|정답\s*및\s*해설"
+    r"|론박.*(?:합격코스|커리큘럼)|해양공무원전문학원|ronpark\.com"
+    r"|동시학습\s*실전대비|고민하지\s*말고)",
     re.IGNORECASE,
 )
 _PAGE_COUNTER = re.compile(r"^\s*\d+\s*(?:/|-|쪽\s*/\s*)\s*\d+\s*$")
+_PAGE_COUNTER_SUFFIX = re.compile(r"\b\d+\s*/\s*\d+\s*$")
 _FOOTER_TEXT = re.compile(
     r"(?:해양경찰.*채용시험|시험지\s*[A-Z가-힣0-9]*형|무단\s*(?:복제|전재))",
     re.IGNORECASE,
@@ -138,7 +143,11 @@ class OfflineExamParser:
         if y0 <= 0.07:
             if _QUESTION_START.match(record.text):
                 return "body"
-            if normalized in repeated or _HEADER_TEXT.search(record.text):
+            if (
+                normalized in repeated
+                or _HEADER_TEXT.search(record.text)
+                or _PAGE_COUNTER_SUFFIX.search(record.text)
+            ):
                 return "noise"
             return "ambiguous_top_margin"
         if normalized in repeated and (y0 <= 0.12 or y0 >= 0.88):
@@ -146,6 +155,8 @@ class OfflineExamParser:
         if y0 >= 0.88:
             if _PAGE_COUNTER.fullmatch(record.text) or _FOOTER_TEXT.search(record.text):
                 return "noise"
+            if self._plausible_coordinate_choice_row(record.words):
+                return "body"
             return "ambiguous_bottom_margin"
         return "body"
 
@@ -183,6 +194,13 @@ class OfflineExamParser:
             relative_index, recovered_choices = recovery
             recovered_index = relative_index + 1
         use_recovery = recovered_index is not None and not has_explicit_choices
+        damaged_recovery = None
+        if not has_explicit_choices and not use_recovery:
+            damaged_recovery = self._recover_damaged_vertical_choices(region)
+        damaged_indexes: set[int] = set()
+        damaged_choices: list[str] = []
+        if damaged_recovery is not None:
+            damaged_indexes, damaged_choices = damaged_recovery
 
         stem_parts = [first_stem_text] if first_stem_text else []
         explicit_choices: dict[int, str] = {}
@@ -191,6 +209,8 @@ class OfflineExamParser:
 
         for index, record in enumerate(region[1:], start=1):
             if use_recovery and index == recovered_index:
+                continue
+            if index in damaged_indexes:
                 continue
             pieces = self._explicit_choice_pieces(record.text)
             if pieces:
@@ -218,18 +238,31 @@ class OfflineExamParser:
             if explicit_marker_numbers != expected_markers:
                 diagnostics.append("invalid_choice_sequence")
         else:
-            choices = recovered_choices
+            choices = recovered_choices or damaged_choices
             if recovered_choices:
                 diagnostics.append("coordinate_choice_recovery")
+            elif damaged_choices:
+                diagnostics.append("damaged_choice_recovery")
 
         if len(choices) not in (4, 5):
             diagnostics.append("invalid_choice_count")
         region_pages = {record.page for record in region}
         if region_pages & removed_noise_pages:
             diagnostics.append("document_noise_removed")
-        if any(record.ambiguous_bottom_margin for record in region):
+        recovered_margin_indexes = set(damaged_indexes)
+        if use_recovery and recovered_index is not None:
+            recovered_margin_indexes.add(recovered_index)
+        if any(
+            record.ambiguous_bottom_margin
+            for index, record in enumerate(region)
+            if index not in recovered_margin_indexes
+        ):
             diagnostics.append("ambiguous_bottom_margin")
-        if any(record.ambiguous_top_margin for record in region):
+        if any(
+            record.ambiguous_top_margin
+            for index, record in enumerate(region)
+            if index not in recovered_margin_indexes
+        ):
             diagnostics.append("ambiguous_top_margin")
 
         confidence = self._region_confidence(region)
@@ -258,6 +291,9 @@ class OfflineExamParser:
         self, records: Sequence[_LineRecord]
     ) -> tuple[int, list[str]] | None:
         for index in range(len(records) - 1, -1, -1):
+            inline_values = self._inline_numeric_choice_values(records[index].words)
+            if inline_values is not None:
+                return index, inline_values
             groups = self._horizontal_cells(records[index].words)
             if len(groups) != 4:
                 continue
@@ -266,9 +302,173 @@ class OfflineExamParser:
             raw_values = [" ".join(str(word.text).strip() for word in group) for group in groups]
             values = [self._strip_damaged_marker(value) for value in raw_values]
             values = self._repair_fused_numeric_marker(values)
-            if all(values) and sum(value.isdigit() for value in values) >= 3:
+            if all(values) and self._plausible_choice_values(values):
                 return index, values
         return None
+
+    def _plausible_coordinate_choice_row(self, words: Sequence[LayoutWord]) -> bool:
+        if self._inline_numeric_choice_values(words) is not None:
+            return True
+        groups = self._horizontal_cells(words)
+        if len(groups) != 4 or self._is_sequential_proposition_row(groups):
+            return False
+        values = [
+            self._strip_damaged_marker(" ".join(str(word.text).strip() for word in group))
+            for group in groups
+        ]
+        return all(values) and self._plausible_choice_values(values)
+
+    @staticmethod
+    def _plausible_choice_values(values: Sequence[str]) -> bool:
+        compact_value = re.compile(r"^\d+(?:\s*(?:개|명|년|회|차|%))?$")
+        return sum(bool(compact_value.fullmatch(value.strip())) for value in values) >= 3
+
+    def _inline_numeric_choice_values(
+        self, words: Sequence[LayoutWord]
+    ) -> list[str] | None:
+        ordered = sorted(words, key=lambda word: word.bbox[0])
+        marker_indexes = [
+            index
+            for index, word in enumerate(ordered)
+            if str(word.text).strip() == "㉭"
+        ]
+        if marker_indexes != [2] or len(ordered) != 5:
+            return None
+        values = [
+            str(word.text).strip()
+            for index, word in enumerate(ordered)
+            if index != marker_indexes[0]
+        ]
+        return values if self._plausible_choice_values(values) else None
+
+    def _recover_damaged_vertical_choices(
+        self, region: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        grid_recovery = self._recover_two_by_two_choice_grid(region)
+        if grid_recovery is not None:
+            return grid_recovery
+        records = list(region[1:])
+        markers: list[tuple[int, int]] = []
+        for index, record in enumerate(records):
+            match = _DAMAGED_VERTICAL_PATTERN.match(record.text)
+            if match:
+                markers.append((index, _DAMAGED_VERTICAL_MARKERS[match.group(1)]))
+        if not markers:
+            return None
+        if len(markers) >= 4 and [number for _, number in markers[-4:]] == [1, 2, 3, 1]:
+            markers = [
+                (markers[-4][0], 1),
+                (markers[-3][0], 2),
+                (markers[-2][0], 3),
+                (markers[-1][0], 4),
+            ]
+        marker_numbers = [number for _, number in markers]
+        if marker_numbers != sorted(set(marker_numbers)) or marker_numbers[-1] > 4:
+            return None
+
+        first_index, first_number = markers[0]
+        if first_number == 1:
+            choice_start = first_index
+        else:
+            choice_start = first_index - (first_number - 1)
+            if choice_start < 0:
+                return None
+
+        choices: list[str] = []
+        if choice_start < first_index:
+            leading = self._split_damaged_choice_records(
+                records[choice_start:first_index], first_number - 1
+            )
+            if leading is None:
+                return None
+            choices.extend(leading)
+
+        for marker_offset, (start_index, number) in enumerate(markers):
+            next_index = markers[marker_offset + 1][0] if marker_offset + 1 < len(markers) else len(records)
+            next_number = markers[marker_offset + 1][1] if marker_offset + 1 < len(markers) else 5
+            segment = self._split_damaged_choice_records(
+                records[start_index:next_index], next_number - number
+            )
+            if segment is None:
+                return None
+            choices.extend(segment)
+        if len(choices) != 4 or any(not choice.strip() for choice in choices):
+            return None
+        return set(range(choice_start + 1, len(region))), choices
+
+    def _recover_two_by_two_choice_grid(
+        self, region: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        for second_index in range(len(region) - 1, 1, -1):
+            second = region[second_index]
+            if not _DAMAGED_VERTICAL_PATTERN.match(second.text):
+                continue
+            marker = _DAMAGED_VERTICAL_PATTERN.match(second.text)
+            if marker is None or _DAMAGED_VERTICAL_MARKERS[marker.group(1)] != 3:
+                continue
+            first = region[second_index - 1]
+            first_cells = self._split_two_horizontal_cells(first.words)
+            second_words = tuple(
+                word
+                for word in second.words
+                if str(word.text).strip() != marker.group(1)
+            )
+            second_cells = self._split_two_horizontal_cells(second_words)
+            if first_cells is None or second_cells is None:
+                continue
+            choices = first_cells + second_cells
+            if all(choices):
+                return {second_index - 1, second_index}, choices
+        return None
+
+    @staticmethod
+    def _split_two_horizontal_cells(words: Sequence[LayoutWord]) -> list[str] | None:
+        ordered = sorted(words, key=lambda word: word.bbox[0])
+        if len(ordered) < 2:
+            return None
+        gaps = [
+            float(ordered[index].bbox[0]) - float(ordered[index - 1].bbox[2])
+            for index in range(1, len(ordered))
+        ]
+        split_index = max(range(1, len(ordered)), key=lambda index: gaps[index - 1])
+        if gaps[split_index - 1] < 0.08:
+            return None
+        cells = (ordered[:split_index], ordered[split_index:])
+        return [
+            " ".join(str(word.text).strip() for word in cell).strip()
+            for cell in cells
+        ]
+
+    def _split_damaged_choice_records(
+        self, records: Sequence[_LineRecord], expected_count: int
+    ) -> list[str] | None:
+        if expected_count < 1 or len(records) < expected_count:
+            return None
+        texts = [record.text.strip() for record in records]
+        texts[0] = _DAMAGED_VERTICAL_PATTERN.sub("", texts[0]).strip()
+        if expected_count == 1:
+            return [" ".join(texts).strip()]
+        if len(texts) == expected_count:
+            return texts
+        groups: list[str] = []
+        current: list[str] = []
+        for text in texts:
+            current.append(text)
+            if len(groups) < expected_count - 1 and re.search(r"[.!?。]$", text):
+                groups.append(" ".join(current).strip())
+                current = []
+        if current:
+            groups.append(" ".join(current).strip())
+        if len(groups) != expected_count:
+            if expected_count == 2:
+                split_index = len(texts) // 2
+                if split_index:
+                    return [
+                        " ".join(texts[:split_index]).strip(),
+                        " ".join(texts[split_index:]).strip(),
+                    ]
+            return None
+        return groups
 
     def _is_sequential_proposition_row(
         self, groups: Sequence[Sequence[LayoutWord]]

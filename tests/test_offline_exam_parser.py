@@ -38,6 +38,140 @@ def _page(*lines, number=2):
     )
 
 
+def test_ronpark_damaged_vertical_choices_recover_complete_40_question_group():
+    pages = []
+    number = 1
+    for page_number in range(2, 8):
+        lines = [
+            _line(["2021년도", "경찰공무원", "승진시험", "문제지"], y=0.023, page=page_number),
+        ]
+        for slot in range(7 if page_number < 7 else 5):
+            y = 0.08 + slot * 0.125
+            lines.append(_line([f"{number}.", "다음", "중", "옳은", "것은?"], y=y, xs=[0.02, 0.06, 0.13, 0.20, 0.27], page=page_number))
+            if number == 3:
+                lines.extend([
+                    _line(["㉠", "첫째", "명제"], y=y + 0.020, xs=[0.06, 0.10, 0.18], page=page_number),
+                    _line(["㉡", "둘째", "명제"], y=y + 0.038, xs=[0.06, 0.10, 0.18], page=page_number),
+                    _line(
+                        ["1개", "2개", "㉭", "3개", "4개"],
+                        y=y + 0.058,
+                        xs=[0.08, 0.20, 0.29, 0.32, 0.44],
+                        page=page_number,
+                    ),
+                ])
+            elif number % 2:
+                lines.extend([
+                    _line(["㉦", f"{number}번 첫째 선택지."], y=y + 0.020, xs=[0.05, 0.09], page=page_number),
+                    _line([f"{number}번 둘째 선택지."], y=y + 0.038, xs=[0.08], page=page_number),
+                    _line(["㉭", f"{number}번 셋째 선택지."], y=y + 0.056, xs=[0.05, 0.09], page=page_number),
+                    _line([f"{number}번 넷째 선택지."], y=y + 0.074, xs=[0.08], page=page_number),
+                ])
+            else:
+                lines.extend([
+                    _line([f"{number}번 첫째 선택지."], y=y + 0.020, xs=[0.08], page=page_number),
+                    _line([f"{number}번 둘째 선택지."], y=y + 0.038, xs=[0.08], page=page_number),
+                    _line(["㉭", f"{number}번 셋째 선택지."], y=y + 0.056, xs=[0.05, 0.09], page=page_number),
+                    _line([f"{number}번 넷째 선택지."], y=y + 0.074, xs=[0.08], page=page_number),
+                ])
+            number += 1
+        lines.append(
+            _line(["[론박", "합격코스", "커리큘럼]"], y=0.965, xs=[0.08, 0.18, 0.30], page=page_number)
+        )
+        pages.append(_page(*lines, number=page_number))
+
+    questions = OfflineExamParser().parse_pages(pages)
+
+    assert [question.number for question in questions] == list(range(1, 41))
+    rejected = [
+        (question.number, question.choices, question.diagnostics, validate_offline_question(question).reason_codes)
+        for question in questions
+        if not validate_offline_question(question).importable
+    ]
+    assert rejected == []
+    assert questions[0].choices == ["1번 첫째 선택지.", "1번 둘째 선택지.", "1번 셋째 선택지.", "1번 넷째 선택지."]
+    assert questions[2].choices == ["1개", "2개", "3개", "4개"]
+    assert "㉠ 첫째 명제" in questions[2].stem
+
+
+def test_damaged_vertical_choices_use_balanced_wrapped_lines_after_third_marker():
+    page = _page(
+        _line(["9.", "다음", "중", "옳지", "않은", "것은?"], y=0.12),
+        _line(["㉦", "첫째 선택지"], y=0.22, xs=[0.05, 0.09]),
+        _line(["둘째 선택지"], y=0.28, xs=[0.08]),
+        _line(["㉭", "셋째 선택지는 길어서"], y=0.34, xs=[0.05, 0.09]),
+        _line(["두 줄로 이어진다"], y=0.40, xs=[0.08]),
+        _line(["넷째 선택지도 길어서"], y=0.46, xs=[0.08]),
+        _line(["두 줄로 이어진다"], y=0.52, xs=[0.08]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째 선택지",
+        "둘째 선택지",
+        "셋째 선택지는 길어서 두 줄로 이어진다",
+        "넷째 선택지도 길어서 두 줄로 이어진다",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_damaged_two_by_two_choice_grid_is_recovered_without_promoting_view_rows():
+    page = _page(
+        _line(["19.", "다음", "보기에서", "옳은", "조합은?"], y=0.12),
+        _line(["㉠", "보기 하나", "㉡", "보기 둘"], y=0.22, xs=[0.06, 0.10, 0.27, 0.31]),
+        _line(["㉢", "보기 셋", "㉣", "보기 넷"], y=0.28, xs=[0.06, 0.10, 0.27, 0.31]),
+        _line(["㉠,", "㉡", "㉠,", "㉢"], y=0.40, xs=[0.08, 0.12, 0.30, 0.34]),
+        _line(["㉭", "㉡,", "㉣", "㉢,", "㉣"], y=0.46, xs=[0.05, 0.08, 0.12, 0.30, 0.34]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["㉠, ㉡", "㉠, ㉢", "㉡, ㉣", "㉢, ㉣"]
+    assert "보기 하나" in question.stem
+    assert validate_offline_question(question).importable is True
+
+
+def test_repeated_first_damaged_marker_after_three_is_treated_as_fourth_choice():
+    page = _page(
+        _line(["40.", "다음", "보기의", "설명으로", "옳은", "것은?"], y=0.12),
+        _line(["㉠", "보기 하나"], y=0.20, xs=[0.06, 0.10]),
+        _line(["㉦", "보기 일곱"], y=0.26, xs=[0.06, 0.10]),
+        _line(["㉦", "첫째 선택지"], y=0.36, xs=[0.05, 0.09]),
+        _line(["㉨", "둘째 선택지는"], y=0.42, xs=[0.05, 0.09]),
+        _line(["이어진다"], y=0.48, xs=[0.08]),
+        _line(["㉭", "셋째 선택지는"], y=0.54, xs=[0.05, 0.09]),
+        _line(["이어진다"], y=0.60, xs=[0.08]),
+        _line(["㉦", "넷째 선택지는"], y=0.66, xs=[0.05, 0.09]),
+        _line(["이어진다"], y=0.72, xs=[0.08]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert "㉦ 보기 일곱" in question.stem
+    assert question.choices == [
+        "첫째 선택지",
+        "둘째 선택지는 이어진다",
+        "셋째 선택지는 이어진다",
+        "넷째 선택지는 이어진다",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_quality_gate_does_not_treat_slash_damaged_percentages_as_page_counters():
+    question = ParsedOfflineQuestion(
+        number=13,
+        stem="비율 조합으로 옳은 것은?",
+        choices=["1209/0 200/0", "12096 209/0", "11096 300%", "1100/0 200/0"],
+        source_page=4,
+        confidence=0.98,
+        diagnostics=("damaged_choice_recovery",),
+    )
+
+    result = validate_offline_question(question)
+
+    assert result.importable is True
+
+
 def test_parses_explicit_circled_choices_and_stops_at_next_question():
     page = _page(
         _line(["7.", "다음", "중", "옳은", "것은?"], y=0.12),
