@@ -110,6 +110,7 @@ def build_structured_page(
         raw_words,
         physical_rows,
         width=float(width),
+        height=float(height),
         explicit_divider=divider_x,
     )
     lines = _make_layout_lines(
@@ -120,7 +121,13 @@ def build_structured_page(
         height=float(height),
         divider_x=detected_divider,
     )
-    kind = _classify_page(raw_words, source=source, full_page_image=full_page_image)
+    kind = _classify_page(
+        raw_words,
+        source=source,
+        full_page_image=full_page_image,
+        height=float(height),
+        has_column_geometry=detected_divider is not None,
+    )
     return StructuredPage(
         number=page_number,
         width=width,
@@ -179,14 +186,20 @@ def _detect_column_divider(
     rows: Sequence[Sequence[_RawWord]],
     *,
     width: float,
+    height: float,
     explicit_divider: Optional[float],
 ) -> Optional[float]:
-    if len(words) < 4 or width <= 0:
+    if len(words) < 4 or width <= 0 or height <= 0:
+        return None
+
+    body_rows = [row for row in rows if _row_is_in_body(row, height)]
+    body_words = tuple(word for row in body_rows for word in row)
+    if len(body_words) < 4:
         return None
 
     minimum_gutter = width * 0.08
     candidates: list[tuple[float, float]] = []
-    for row in rows:
+    for row in body_rows:
         for previous, current in zip(row, row[1:]):
             gap = current.bbox[0] - previous.bbox[2]
             midpoint = (previous.bbox[2] + current.bbox[0]) / 2
@@ -198,7 +211,7 @@ def _detect_column_divider(
     elif candidates:
         split = median(midpoint for midpoint, _ in candidates)
     else:
-        intervals = _merged_x_intervals(words)
+        intervals = _merged_x_intervals(body_words)
         global_gaps = [
             ((left[1] + right[0]) / 2, right[0] - left[1])
             for left, right in zip(intervals, intervals[1:])
@@ -209,24 +222,30 @@ def _detect_column_divider(
             return None
         split = max(global_gaps, key=lambda item: item[1])[0]
 
-    left_support = 0
-    right_support = 0
-    for row in rows:
+    separated_rows = 0
+    left_only_rows = 0
+    right_only_rows = 0
+    for row in body_rows:
         left = [word for word in row if word.center_x < split]
         right = [word for word in row if word.center_x >= split]
         if left and right:
             cross_gap = min(word.bbox[0] for word in right) - max(word.bbox[2] for word in left)
             if cross_gap >= minimum_gutter:
-                left_support += 1
-                right_support += 1
+                separated_rows += 1
         elif left:
-            left_support += 1
+            left_only_rows += 1
         elif right:
-            right_support += 1
+            right_only_rows += 1
 
-    left_count = sum(word.center_x < split for word in words)
-    right_count = len(words) - left_count
-    if left_support < 2 or right_support < 2 or left_count < 2 or right_count < 2:
+    left_count = sum(word.center_x < split for word in body_words)
+    right_count = len(body_words) - left_count
+    has_repeated_bilateral_evidence = separated_rows >= 2
+    has_staggered_column_evidence = left_only_rows >= 2 and right_only_rows >= 2
+    if (
+        not (has_repeated_bilateral_evidence or has_staggered_column_evidence)
+        or left_count < 2
+        or right_count < 2
+    ):
         return None
     return split
 
@@ -296,21 +315,50 @@ def _layout_line(
     )
 
 
-def _classify_page(words: Sequence[_RawWord], *, source: str, full_page_image: bool) -> str:
+def _classify_page(
+    words: Sequence[_RawWord],
+    *,
+    source: str,
+    full_page_image: bool,
+    height: float,
+    has_column_geometry: bool,
+) -> str:
     normalized_text = ["".join(word.text.split()).casefold() for word in words if word.text.strip()]
     repeated_ratio = 0.0
     if normalized_text:
         repeated_ratio = 1.0 - (len(set(normalized_text)) / len(normalized_text))
 
-    if full_page_image and source == "native" and len(words) >= 6 and repeated_ratio >= 0.5:
-        return "image_with_fake_text_layer"
-    if source == "ocr" or (full_page_image and not words):
+    if not words and (source == "ocr" or full_page_image):
         return "scanned"
 
-    character_count = sum(len(text) for text in normalized_text)
-    if len(words) < 3 or character_count < 6:
+    body_words = tuple(word for word in words if height * 0.08 <= word.center_y <= height * 0.90)
+    body_rows = _group_raw_lines(body_words)
+    body_character_count = sum(len("".join(word.text.split())) for word in body_words)
+    has_dense_body = (
+        len(body_words) >= 6
+        and len(body_rows) >= 3
+        and body_character_count >= 10
+    )
+    has_column_body = (
+        has_column_geometry
+        and len(body_words) >= 4
+        and len(body_rows) >= 2
+        and body_character_count >= 6
+    )
+    if not (has_dense_body or has_column_body):
         return "non_question"
+    if full_page_image and source == "native" and len(words) >= 6 and repeated_ratio >= 0.5:
+        return "image_with_fake_text_layer"
+    if source == "ocr":
+        return "scanned"
     return "native"
+
+
+def _row_is_in_body(row: Sequence[_RawWord], height: float) -> bool:
+    if not row or height <= 0:
+        return False
+    center_y = sum(word.center_y for word in row) / len(row)
+    return height * 0.08 <= center_y <= height * 0.90
 
 
 def _bbox_area(bbox: BBox) -> float:

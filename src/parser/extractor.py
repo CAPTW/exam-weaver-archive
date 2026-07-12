@@ -76,11 +76,12 @@ class PDFExtractor:
     def extract_structured_page(self, page, page_number: int) -> StructuredPage:
         """Extract one page into normalized, position-aware layout records."""
         native_page = self._extract_native_structured_page(page, page_number)
-        if native_page.kind == 'image_with_fake_text_layer':
-            return native_page
-
         has_embedded_images = bool(native_page.images)
-        if self._should_use_ocr_fallback(native_page.text, has_embedded_images):
+        needs_ocr = (
+            native_page.kind == 'image_with_fake_text_layer'
+            or self._should_use_ocr_fallback(native_page.text, has_embedded_images)
+        )
+        if needs_ocr:
             ocr_page = self._extract_ocr_structured_page(page, page_number)
             if ocr_page.lines:
                 return ocr_page
@@ -283,20 +284,27 @@ class PDFExtractor:
                     text = self._extract_positioned_text(fitz_page) or text
                     structured_page = self.extract_structured_page(fitz_page, i + 1)
                     embedded_images = fitz_page.get_images(full=True)
-                    if self._should_use_ocr_fallback(text, bool(embedded_images)):
+                    structured_ocr_text = (
+                        self._structured_page_text(structured_page)
+                        if structured_page.kind == 'scanned' and structured_page.lines
+                        else ''
+                    )
+                    if structured_ocr_text or self._should_use_ocr_fallback(text, bool(embedded_images)):
                         ocr_cache_path = ocr_out_dir / f"{i + 1}.txt"
-                        if ocr_cache_path.exists():
+                        if structured_ocr_text:
+                            ocr_text = structured_ocr_text
+                        elif ocr_cache_path.exists():
                             ocr_text = ocr_cache_path.read_text(encoding='utf-8')
                         else:
-                            ocr_text = (
-                                self._structured_page_text(structured_page)
-                                if structured_page.kind == 'scanned'
-                                else self._extract_ocr_text(fitz_page)
-                            )
+                            ocr_text = self._extract_ocr_text(fitz_page)
                             if ocr_text.strip():
                                 ocr_cache_path.write_text(ocr_text, encoding='utf-8')
                         if ocr_text.strip():
-                            if not text.strip() or len(ocr_text.strip()) > len(text.strip()):
+                            if (
+                                structured_ocr_text
+                                or not text.strip()
+                                or len(ocr_text.strip()) > len(text.strip())
+                            ):
                                 text = ocr_text
                             is_ocr_text = True
                     underlined_texts = self._extract_underlined_texts(fitz_page)
@@ -429,6 +437,52 @@ class PDFExtractor:
         structured_page = await self._extract_ocr_structured_page_async(page, page_number)
         return self._structured_page_text(structured_page)
 
+    def _structured_page_from_ocr_result(
+        self,
+        result,
+        *,
+        page_number: int,
+        page_width: float,
+        page_height: float,
+        image_width: float,
+        image_height: float,
+        divider_x: Optional[float],
+    ) -> StructuredPage:
+        """Adapt WinRT pixel-coordinate words to normalized PDF page coordinates."""
+        safe_image_width = max(float(image_width), 1.0)
+        safe_image_height = max(float(image_height), 1.0)
+        page_width = float(page_width) if page_width > 0 else safe_image_width
+        page_height = float(page_height) if page_height > 0 else safe_image_height
+        scale_x = page_width / safe_image_width
+        scale_y = page_height / safe_image_height
+        items = []
+        for line in getattr(result, 'lines', ()) or ():
+            for word in getattr(line, 'words', ()) or ():
+                value = str(getattr(word, 'text', '') or '').strip()
+                if not value:
+                    continue
+                rect = word.bounding_rect
+                x0 = float(rect.x) * scale_x
+                y0 = float(rect.y) * scale_y
+                x1 = x0 + float(rect.width) * scale_x
+                y1 = y0 + float(rect.height) * scale_y
+                items.append({
+                    'text': value,
+                    'bbox': (x0, y0, x1, y1),
+                    'confidence': getattr(word, 'confidence', None),
+                })
+
+        scaled_divider = float(divider_x) * scale_x if divider_x is not None else None
+        return build_structured_page(
+            items,
+            page_number=page_number,
+            width=page_width,
+            height=page_height,
+            source='ocr',
+            images=((0.0, 0.0, page_width, page_height),),
+            divider_x=scaled_divider,
+        )
+
     async def _extract_ocr_structured_page_async(self, page, page_number: int) -> StructuredPage:
         try:
             import fitz
@@ -469,40 +523,15 @@ class PDFExtractor:
         bitmap = await decoder.get_software_bitmap_async()
         result = await engine.recognize_async(bitmap)
 
-        items = []
-        scale_x = page_width / image.width if page_width > 0 else 1.0
-        scale_y = page_height / image.height if page_height > 0 else 1.0
-        if page_width <= 0:
-            page_width = float(image.width)
-        if page_height <= 0:
-            page_height = float(image.height)
         detected_split = self._detect_vertical_column_split(image)
-        column_split_x = detected_split * scale_x if detected_split is not None else None
-        for line in result.lines:
-            for word in line.words:
-                value = str(word.text or '').strip()
-                if not value:
-                    continue
-                rect = word.bounding_rect
-                x0 = float(rect.x) * scale_x
-                y0 = float(rect.y) * scale_y
-                x1 = x0 + float(rect.width) * scale_x
-                y1 = y0 + float(rect.height) * scale_y
-                confidence = getattr(word, 'confidence', None)
-                items.append({
-                    'text': value,
-                    'bbox': (x0, y0, x1, y1),
-                    'confidence': confidence,
-                })
-
-        return build_structured_page(
-            items,
+        return self._structured_page_from_ocr_result(
+            result,
             page_number=page_number,
-            width=page_width,
-            height=page_height,
-            source='ocr',
-            images=((0.0, 0.0, page_width, page_height),),
-            divider_x=column_split_x,
+            page_width=page_width,
+            page_height=page_height,
+            image_width=image.width,
+            image_height=image.height,
+            divider_x=detected_split,
         )
 
     @staticmethod

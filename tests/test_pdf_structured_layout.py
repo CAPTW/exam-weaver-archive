@@ -1,10 +1,13 @@
+import io
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
+import fitz
 import pytest
+from PIL import Image
 
 from src.parser.extractor import PDFExtractor
-from src.parser.layout import LayoutWord, StructuredPage
+from src.parser.layout import LayoutWord, StructuredPage, build_structured_page
 
 
 def _word(x0, y0, x1, text, *, height=12):
@@ -129,3 +132,147 @@ def test_repeated_native_words_over_a_full_page_image_are_fake_text_layer():
     assert structured.kind == "image_with_fake_text_layer"
     assert structured.images == ((0.0, 0.0, 1.0, 1.0),)
     assert all(isinstance(word, LayoutWord) for line in structured.lines for word in line.words)
+
+
+def test_fake_text_layer_uses_ocr_layout_and_keeps_legacy_text_in_sync(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "fake-layer.pdf"
+    document = fitz.open()
+    page = document.new_page(width=600, height=800)
+    image = Image.new("RGB", (10, 10), "white")
+    image_bytes = io.BytesIO()
+    image.save(image_bytes, format="PNG")
+    page.insert_image(page.rect, stream=image_bytes.getvalue())
+    fake_token = "FAKE_LAYER_TOKEN_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for y in range(100, 460, 30):
+        page.insert_text((50, y), fake_token, fontsize=10)
+    document.save(pdf_path)
+    document.close()
+
+    ocr_page = build_structured_page(
+        [
+            _word(50, 100, 90, "OCR"),
+            _word(100, 100, 160, "문제"),
+            _word(50, 140, 90, "둘째"),
+            _word(100, 140, 160, "문장"),
+            _word(50, 180, 90, "①"),
+            _word(100, 180, 160, "정답"),
+        ],
+        page_number=1,
+        width=600,
+        height=800,
+        source="ocr",
+        images=((0, 0, 600, 800),),
+    )
+    extractor = PDFExtractor(output_dir=str(tmp_path / "output"))
+    monkeypatch.setattr(
+        extractor,
+        "_extract_ocr_structured_page",
+        lambda _page, _number: ocr_page,
+    )
+
+    extracted = extractor.extract(str(pdf_path)).pages[0]
+
+    assert extracted.structured_page == ocr_page
+    assert extracted.structured_page.kind == "scanned"
+    assert extracted.text == extractor._structured_page_text(ocr_page)
+    assert fake_token not in extracted.text
+
+
+def test_same_baseline_four_cell_answer_row_does_not_create_page_columns():
+    words = [
+        _word(80, 20, 180, "왼쪽머리1"),
+        _word(80, 50, 180, "왼쪽머리2"),
+        _word(80, 500, 110, "①"),
+        _word(130, 500, 180, "44"),
+        _word(300, 500, 330, "②"),
+        _word(350, 500, 400, "46"),
+        _word(560, 500, 590, "③"),
+        _word(610, 500, 660, "48"),
+        _word(800, 500, 830, "④"),
+        _word(850, 500, 900, "50"),
+        _word(820, 930, 920, "오른쪽꼬리1"),
+        _word(820, 960, 920, "오른쪽꼬리2"),
+    ]
+
+    structured = PDFExtractor().extract_structured_page(_Page(words), 1)
+
+    assert "① 44 ② 46 ③ 48 ④ 50" in _texts(structured)
+    assert {line.column for line in structured.lines} == {0}
+
+
+def test_sparse_header_footer_and_cover_text_is_non_question_page():
+    words = [
+        _word(100, 20, 180, "시험명"),
+        _word(190, 20, 270, "안내"),
+        _word(100, 50, 180, "응시자"),
+        _word(300, 450, 380, "표지"),
+        _word(390, 450, 470, "문구"),
+        _word(700, 950, 760, "1"),
+        _word(770, 950, 790, "/"),
+        _word(800, 950, 860, "8"),
+    ]
+
+    structured = PDFExtractor().extract_structured_page(_Page(words), 1)
+
+    assert structured.kind == "non_question"
+
+
+def test_sparse_repeated_cover_layer_is_non_question_before_fake_layer_classification():
+    words = [
+        _word(100, 20, 180, "표지"),
+        _word(200, 20, 280, "표지"),
+        _word(300, 20, 380, "표지"),
+        _word(300, 450, 380, "표지"),
+        _word(500, 950, 580, "표지"),
+        _word(600, 950, 680, "표지"),
+        _word(700, 950, 780, "표지"),
+    ]
+
+    structured = PDFExtractor().extract_structured_page(
+        _Page(words, full_page_image=True),
+        1,
+    )
+
+    assert structured.kind == "non_question"
+
+
+def test_winrt_adapter_scales_pixels_preserves_confidence_and_matches_text_order():
+    def ocr_word(text, x, y, width, height, confidence):
+        return SimpleNamespace(
+            text=text,
+            confidence=confidence,
+            bounding_rect=SimpleNamespace(x=x, y=y, width=width, height=height),
+        )
+
+    result = SimpleNamespace(lines=[
+        SimpleNamespace(words=[
+            ocr_word("B", 250, 200, 100, 100, 0.91),
+            ocr_word("A", 100, 200, 100, 100, 0.83),
+        ]),
+        SimpleNamespace(words=[
+            ocr_word("D", 250, 500, 100, 100, 0.92),
+            ocr_word("C", 100, 500, 100, 100, 0.84),
+        ]),
+        SimpleNamespace(words=[
+            ocr_word("F", 250, 800, 100, 100, 0.93),
+            ocr_word("E", 100, 800, 100, 100, 0.85),
+        ]),
+    ])
+    extractor = PDFExtractor()
+
+    structured = extractor._structured_page_from_ocr_result(
+        result,
+        page_number=5,
+        page_width=100,
+        page_height=200,
+        image_width=1000,
+        image_height=2000,
+        divider_x=None,
+    )
+
+    assert structured.width == 100
+    assert structured.height == 200
+    assert _texts(structured) == ["A B", "C D", "E F"]
+    assert structured.lines[0].words[0].bbox == pytest.approx((0.1, 0.1, 0.2, 0.15))
+    assert structured.lines[0].words[0].confidence == pytest.approx(0.83)
+    assert extractor._structured_page_text(structured) == "A B\nC D\nE F"
