@@ -43,7 +43,10 @@ from src.web_import.comcbt_pdf import (  # noqa: E402
     normalize_space,
     parse_answer_table_rows,
 )
-from src.parser.offline_sources import parse_offline_question_pdf  # noqa: E402
+from src.parser.offline_sources import (  # noqa: E402
+    extract_offline_structured_pages,
+    parse_offline_question_pdf,
+)
 from src.parser.question import Choice, Question  # noqa: E402
 from src.web_import.importer import (  # noqa: E402
     ComcbtImportService,
@@ -194,6 +197,7 @@ class PdfMeta:
     session: int
     document_id: str
     top_category: str
+    expected_question_count: int | None = None
 
     @property
     def key(self) -> ExamKey:
@@ -994,6 +998,7 @@ def build_ocr_required_exam(
     meta: PdfMeta,
     answer_text: CleanTextResult | None,
     source_url: str,
+    answer_path: Path | None = None,
 ) -> tuple[ComcbtParsedExam, dict[int, int]]:
     """Convert shared structured-parser output into the public importer model."""
 
@@ -1007,13 +1012,27 @@ def build_ocr_required_exam(
             "probe": {"role": meta.role},
         },
     )
-    expected_numbers = [candidate.number for candidate in offline.questions]
     answer_key: dict[int, int] = {}
+    answer_lines: list[PdfTextLine] = []
     if answer_text is not None:
-        answer_lines = replace_boundary_markers(
-            expand_parser_lines(answer_text.lines), meta.subject_name
-        )
-        answer_key = parse_gong_answer_key(answer_lines, expected_numbers)
+        if answer_text.text_extractable:
+            answer_lines = replace_boundary_markers(
+                expand_parser_lines(answer_text.lines), meta.subject_name
+            )
+        elif answer_path is not None:
+            answer_pages = extract_offline_structured_pages(
+                answer_path, {"probe": {"role": "정답"}}
+            )
+            answer_lines = structured_pages_to_pdf_lines(answer_pages)
+    if answer_lines:
+        answer_key = parse_gong_answer_key(answer_lines, [])
+
+    if meta.expected_question_count:
+        expected_numbers = list(range(1, meta.expected_question_count + 1))
+    elif answer_key:
+        expected_numbers = sorted(answer_key)
+    else:
+        expected_numbers = []
 
     questions = [
         Question(
@@ -1032,6 +1051,8 @@ def build_ocr_required_exam(
         )
         for candidate in offline.questions
     ]
+    actual_numbers = [question.number for question in questions]
+    groups = structured_question_groups(offline.structured_pages, meta, questions)
     return (
         ComcbtParsedExam(
             title=f"{meta.exam_type} {meta.year}년 {meta.session}회 {meta.subject_name}",
@@ -1043,13 +1064,77 @@ def build_ocr_required_exam(
             questions=questions,
             attachments=[],
             selected_attachment=None,
+            groups=groups,
             diagnostics={
                 "parser": "offline_structured",
                 "rejected_question_count": len(offline.rejected),
+                "expected_question_numbers": expected_numbers,
+                "actual_question_numbers": actual_numbers,
+                "expected_question_coverage_unknown": not expected_numbers,
+                "question_coverage_mismatch": bool(expected_numbers) and actual_numbers != expected_numbers,
             },
         ),
         answer_key,
     )
+
+
+def structured_pages_to_pdf_lines(pages) -> list[PdfTextLine]:
+    """Adapt normalized structured layout lines to the COMCBT line model."""
+
+    output: list[PdfTextLine] = []
+    for page in pages:
+        for line in page.lines:
+            x0, y0, x1, y1 = line.bbox
+            output.append(
+                PdfTextLine(
+                    text=line.text,
+                    page=page.number - 1,
+                    bbox=(
+                        x0 * page.width,
+                        y0 * page.height,
+                        x1 * page.width,
+                        y1 * page.height,
+                    ),
+                    page_width=page.width,
+                    page_height=page.height,
+                )
+            )
+    return output
+
+
+def structured_question_groups(
+    pages, meta: PdfMeta, questions: list[Question]
+) -> list[ComcbtQuestionGroup]:
+    """Recover shared-passage groups from the same structured OCR lines."""
+
+    if not pages:
+        return []
+    context = ComcbtPdfParser().parse_lines_result(
+        structured_pages_to_pdf_lines(pages),
+        image_boxes=[],
+        exam_type=meta.exam_type,
+        subject_name=meta.subject_name,
+        year=meta.year,
+        session=meta.session,
+    )
+    by_number = {question.number: question for question in questions}
+    for group in context.groups:
+        child_numbers = list(group.child_numbers)
+        if not child_numbers and group.range_start is not None and group.range_end is not None:
+            child_numbers = [
+                number
+                for number in range(group.range_start, group.range_end + 1)
+                if number in by_number
+            ]
+            group.child_numbers = child_numbers
+        for order, number in enumerate(child_numbers, start=1):
+            question = by_number.get(number)
+            if question is None:
+                continue
+            question.group_id = group.group_id
+            question.group_order = order
+            question.shared_passage = group.text
+    return context.groups
 
 
 def replace_boundary_markers(lines: list[PdfTextLine], subject_name: str) -> list[PdfTextLine]:
@@ -1218,14 +1303,31 @@ def extra_quality_errors(parsed: ComcbtParsedExam, answer_key: dict[int, int]) -
     errors: list[str] = []
     questions = list(parsed.questions)
     numbers = [question.number for question in questions]
-    if len(questions) < 5:
+    if len(questions) < 10:
         errors.append("question_count_below_safe_threshold")
+    if parsed.diagnostics.get("question_coverage_mismatch"):
+        errors.append("question_coverage_mismatch")
+    if parsed.diagnostics.get("expected_question_coverage_unknown"):
+        errors.append("expected_question_coverage_unknown")
+    if int(parsed.diagnostics.get("rejected_question_count", 0) or 0):
+        errors.append("offline_rejected_questions")
     if questions and not answer_key and not any(question.correct_answer is not None for question in questions):
         errors.append("answer_key_missing")
     if numbers and sorted(numbers) != list(range(min(numbers), max(numbers) + 1)):
         errors.append("question_numbers_not_contiguous")
     if answer_key and len(questions) != len(answer_key):
         errors.append(f"answer_key_count_mismatch: questions={len(questions)} answers={len(answer_key)}")
+    if any(not isinstance(answer, int) or not 1 <= answer <= 5 for answer in answer_key.values()):
+        errors.append("invalid_answer_value")
+    if any(
+        question.correct_answer is not None
+        and (
+            not isinstance(question.correct_answer, int)
+            or not 1 <= question.correct_answer <= len(question.choices)
+        )
+        for question in questions
+    ):
+        errors.append("invalid_question_answer")
     if parsed.subject_name == UNKNOWN_SUBJECT and all((q.subject_name or UNKNOWN_SUBJECT) == UNKNOWN_SUBJECT for q in questions):
         errors.append("unknown_subject")
     return errors
@@ -1432,7 +1534,7 @@ def process_pdf(
         source_url = local_source_url(path)
         if use_shared_ocr_parser:
             parsed, answer_key = build_ocr_required_exam(
-                path, meta, answer_text, source_url
+                path, meta, answer_text, source_url, answer_path=answer_pair
             )
         else:
             parsed, answer_key = build_parsed_exam(meta, question_text, answer_text, source_url)

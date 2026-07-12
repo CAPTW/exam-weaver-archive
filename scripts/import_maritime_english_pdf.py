@@ -38,6 +38,8 @@ from src.database.repository import ExamRepository  # noqa: E402
 from src.parser.offline_sources import (  # noqa: E402
     OfflineParseResult,
     parse_offline_question_pdf,
+    require_complete_offline_set,
+    require_persistable_offline_questions,
     select_group_questions,
 )
 from src.parser.question import Choice, Question  # noqa: E402
@@ -389,6 +391,13 @@ def build_questions(
             group, parse_subject_question_pdf, source_cache
         )
         choice_review += rejected_count
+        require_complete_offline_set(
+            common_questions,
+            expected_numbers=range(1, 21),
+            answers=answers,
+            rejected_count=rejected_count,
+            choice_counts={number: len(item.choices) for number, item in common_questions.items()},
+        )
 
         for question_number in range(1, 21):
             common_question = common_questions.get(question_number)
@@ -477,6 +486,7 @@ def grouped(parsed_questions: Iterable[ParsedQuestion]) -> dict[int, list[Parsed
 
 
 def import_into_db(db_path: Path, parsed_questions: list[ParsedQuestion], apply: bool) -> dict:
+    require_persistable_offline_questions(parsed_questions)
     if not apply:
         return {"db": str(db_path), "status": "dry_run", "saved": 0, "backup": None}
     if not db_path.exists():

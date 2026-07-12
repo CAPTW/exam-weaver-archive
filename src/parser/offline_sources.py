@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, MutableMapping
+from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 from .extractor import PDFExtractor
+from .layout import StructuredPage
 from .offline_exam import OfflineExamParser, ParsedOfflineQuestion
 from .offline_quality import validate_offline_question
 
@@ -34,6 +35,11 @@ class OfflineParseResult:
     metadata: Mapping[str, object]
     questions: tuple[ParsedOfflineQuestion, ...]
     rejected: tuple[RejectedOfflineQuestion, ...]
+    structured_pages: tuple[StructuredPage, ...] = ()
+
+
+class OfflineSetValidationError(RuntimeError):
+    """Raised before persistence when an expected offline exam set is incomplete."""
 
 
 Probe = Mapping[str, Any] | object | Callable[[Path], Mapping[str, Any] | object]
@@ -101,13 +107,7 @@ def parse_offline_question_pdf(
     if role is not DocumentRole.QUESTION:
         return OfflineParseResult(source_path, role, frozen_metadata, (), ())
 
-    output_dir = frozen_metadata.get("extract_dir", "outputs/offline_parser_cache")
-    content = PDFExtractor(str(output_dir)).extract(str(source_path))
-    pages = tuple(
-        page.structured_page
-        for page in content.pages
-        if getattr(page, "structured_page", None) is not None
-    )
+    pages = extract_offline_structured_pages(source_path, frozen_metadata)
     candidates = OfflineExamParser().parse_pages(pages)
 
     accepted: list[ParsedOfflineQuestion] = []
@@ -125,7 +125,72 @@ def parse_offline_question_pdf(
         frozen_metadata,
         tuple(accepted),
         tuple(rejected),
+        pages,
     )
+
+
+def extract_offline_structured_pages(
+    path: Path, metadata: Mapping[str, object] | None = None
+) -> tuple[StructuredPage, ...]:
+    """Extract structured pages for a document whose role is already known."""
+
+    source_metadata = dict(metadata or {})
+    output_dir = source_metadata.get("extract_dir", "outputs/offline_parser_cache")
+    content = PDFExtractor(str(output_dir)).extract(str(Path(path)))
+    return tuple(
+        page.structured_page
+        for page in content.pages
+        if getattr(page, "structured_page", None) is not None
+    )
+
+
+def require_complete_offline_set(
+    questions: Mapping[int, object],
+    *,
+    expected_numbers: Sequence[int],
+    answers: Sequence[int],
+    rejected_count: int,
+    choice_counts: Mapping[int, int],
+) -> None:
+    """Block a complete exam set before any partial or invalid data can persist."""
+
+    expected = [int(number) for number in expected_numbers]
+    present = set(int(number) for number in questions)
+    missing = [number for number in expected if number not in present]
+    extra = sorted(present - set(expected))
+    if missing or extra:
+        raise OfflineSetValidationError(
+            f"missing_questions: missing={missing} extra={extra}"
+        )
+    if rejected_count:
+        raise OfflineSetValidationError(
+            f"rejected_questions: count={int(rejected_count)}"
+        )
+    invalid_answers: list[tuple[int, object]] = []
+    if len(answers) != len(expected):
+        invalid_answers.append((-1, f"count={len(answers)} expected={len(expected)}"))
+    else:
+        for number, answer in zip(expected, answers):
+            choice_count = int(choice_counts.get(number, 0) or 0)
+            if not isinstance(answer, int) or not 1 <= answer <= choice_count:
+                invalid_answers.append((number, answer))
+    if invalid_answers:
+        raise OfflineSetValidationError(f"invalid_answers: {invalid_answers}")
+
+
+def require_persistable_offline_questions(items: Iterable[object]) -> None:
+    """Defense-in-depth guard at the database persistence boundary."""
+
+    invalid: list[tuple[int, object]] = []
+    for item in items:
+        question = getattr(item, "question", item)
+        number = int(getattr(question, "number", 0) or 0)
+        answer = getattr(question, "correct_answer", None)
+        choice_count = len(getattr(question, "choices", ()) or ())
+        if not isinstance(answer, int) or not 1 <= answer <= choice_count:
+            invalid.append((number, answer))
+    if invalid:
+        raise OfflineSetValidationError(f"invalid_answers: {invalid}")
 
 
 def select_group_questions(

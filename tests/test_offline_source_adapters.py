@@ -205,6 +205,61 @@ def test_group_selector_filters_by_source_page_and_reuses_cached_parse_result():
 
 
 @pytest.mark.parametrize(
+    ("questions", "answers", "rejected_count", "reason"),
+    [
+        ({1: object()}, [1, 2], 0, "missing_questions"),
+        ({1: object(), 2: object()}, [1, 2], 1, "rejected_questions"),
+        ({1: object(), 2: object()}, [1, 0], 0, "invalid_answers"),
+        ({1: object(), 2: object()}, [1, 5], 0, "invalid_answers"),
+    ],
+)
+def test_complete_set_gate_rejects_partial_rejected_or_invalid_answer_sets(
+    questions, answers, rejected_count, reason
+):
+    from src.parser.offline_sources import OfflineSetValidationError, require_complete_offline_set
+
+    with pytest.raises(OfflineSetValidationError, match=reason):
+        require_complete_offline_set(
+            questions,
+            expected_numbers=[1, 2],
+            answers=answers,
+            rejected_count=rejected_count,
+            choice_counts={1: 4, 2: 4},
+        )
+
+
+def test_persistence_gate_rejects_zero_answer_question():
+    from src.parser.offline_sources import OfflineSetValidationError, require_persistable_offline_questions
+    from src.parser.question import Choice, Question
+
+    question = Question(
+        number=1,
+        text="본문",
+        choices=[Choice(number, str(number), str(number)) for number in range(1, 5)],
+        correct_answer=0,
+    )
+
+    with pytest.raises(OfflineSetValidationError, match="invalid_answers"):
+        require_persistable_offline_questions([SimpleNamespace(question=question)])
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "scripts.import_maritime_law_pdf",
+        "scripts.import_maritime_english_pdf",
+        "scripts.import_police_navigation_pdf",
+        "scripts.import_police_engineering_pdf",
+    ],
+)
+def test_every_subject_builder_applies_complete_set_gate(module_name):
+    module = importlib.import_module(module_name)
+
+    assert "require_complete_offline_set" in inspect.getsource(module.build_questions)
+    assert "require_persistable_offline_questions" in inspect.getsource(module.import_into_db)
+
+
+@pytest.mark.parametrize(
     ("module_name", "subject_name", "exam_type"),
     [
         ("scripts.import_maritime_law_pdf", "해사법규", "해양경찰 해사법규"),
@@ -270,3 +325,159 @@ def test_public_importer_ocr_required_adapter_uses_shared_parser(monkeypatch):
     assert calls and calls[0][0] == Path("scanned.pdf")
     assert [choice.text for choice in parsed.questions[0].choices] == ["가", "나", "다", "라"]
     assert answer_key == {}
+
+
+def test_public_ocr_coverage_uses_authoritative_expected_count(monkeypatch):
+    import scripts.import_public_exam_pdf_folder as public_importer
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import DocumentRole, OfflineParseResult
+
+    questions = tuple(
+        ParsedOfflineQuestion(number, f"Q{number}", ["a", "b", "c", "d"], 1, 0.99, ())
+        for number in range(1, 6)
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(path, DocumentRole.QUESTION, metadata, questions, ()),
+    )
+    meta = public_importer.PdfMeta(
+        path=Path("scanned.pdf"),
+        relative_path="scanned.pdf",
+        role="문제",
+        exam_type="해경",
+        subject_name="항해학",
+        year=2025,
+        session=1,
+        document_id="doc",
+        top_category="해경",
+        expected_question_count=20,
+    )
+
+    parsed, answer_key = public_importer.build_ocr_required_exam(
+        Path("scanned.pdf"), meta, None, "file:///scanned.pdf"
+    )
+
+    assert answer_key == {}
+    assert parsed.diagnostics["expected_question_numbers"] == list(range(1, 21))
+    assert "question_coverage_mismatch" in public_importer.extra_quality_errors(parsed, answer_key)
+
+
+def test_public_ocr_without_authoritative_coverage_is_blocked(monkeypatch):
+    import scripts.import_public_exam_pdf_folder as public_importer
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import DocumentRole, OfflineParseResult
+
+    questions = tuple(
+        ParsedOfflineQuestion(number, f"Q{number}", ["a", "b", "c", "d"], 1, 0.99, ())
+        for number in range(1, 11)
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(path, DocumentRole.QUESTION, metadata, questions, ()),
+    )
+    meta = public_importer.PdfMeta(
+        Path("scanned.pdf"), "scanned.pdf", "문제", "해경", "항해학", 2025, 1, "doc", "해경"
+    )
+
+    parsed, answer_key = public_importer.build_ocr_required_exam(
+        Path("scanned.pdf"), meta, None, "file:///scanned.pdf"
+    )
+
+    assert parsed.diagnostics["expected_question_numbers"] == []
+    assert "expected_question_coverage_unknown" in public_importer.extra_quality_errors(
+        parsed, answer_key
+    )
+
+
+def test_public_ocr_conversion_preserves_explicit_shared_passage_groups(monkeypatch):
+    import scripts.import_public_exam_pdf_folder as public_importer
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import DocumentRole, OfflineParseResult
+
+    page = _page_with_question()
+    passage = _line(["[1~2]", "다음", "글을", "읽고", "답하시오."], 0.04)
+    question_two_lines = (
+        _line(["2.", "둘째", "문제"], 0.55),
+        _line(["①", "가"], 0.63),
+        _line(["②", "나"], 0.71),
+        _line(["③", "다"], 0.79),
+        _line(["④", "라"], 0.87),
+    )
+    structured = StructuredPage(
+        1, 1, 1, "scanned", (passage, *page.lines, *question_two_lines), ()
+    )
+    questions = (
+        ParsedOfflineQuestion(1, "첫째 문제", ["가", "나", "다", "라"], 1, 0.99, ()),
+        ParsedOfflineQuestion(2, "둘째 문제", ["가", "나", "다", "라"], 1, 0.99, ()),
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(
+            path, DocumentRole.QUESTION, metadata, questions, (), (structured,)
+        ),
+    )
+    meta = public_importer.PdfMeta(
+        Path("scanned.pdf"), "scanned.pdf", "문제", "해경", "항해학", 2025, 1, "doc", "해경", 2
+    )
+
+    parsed, _ = public_importer.build_ocr_required_exam(
+        Path("scanned.pdf"), meta, None, "file:///scanned.pdf"
+    )
+
+    assert len(parsed.groups) == 1
+    assert parsed.groups[0].child_numbers == [1, 2]
+    assert parsed.questions[0].shared_passage == parsed.groups[0].text
+    assert parsed.questions[1].group_id == parsed.groups[0].group_id
+
+
+def test_public_ocr_reads_paired_scanned_answer_with_shared_extractor(monkeypatch):
+    import scripts.import_public_exam_pdf_folder as public_importer
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import DocumentRole, OfflineParseResult
+
+    questions = tuple(
+        ParsedOfflineQuestion(number, f"Q{number}", ["a", "b", "c", "d"], 1, 0.99, ())
+        for number in range(1, 6)
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(path, DocumentRole.QUESTION, metadata, questions, ()),
+    )
+    answer_page = StructuredPage(
+        1,
+        1,
+        1,
+        "scanned",
+        (
+            _line(["1", "2", "3", "4", "5"], 0.20),
+            _line(["①", "②", "③", "④", "①"], 0.30),
+        ),
+        (),
+    )
+    extracted = []
+
+    def fake_extract(path, metadata=None):
+        extracted.append(path)
+        return (answer_page,)
+
+    monkeypatch.setattr(public_importer, "extract_offline_structured_pages", fake_extract)
+    answer_text = public_importer.CleanTextResult([], 1, False, None, None, 0, [])
+    meta = public_importer.PdfMeta(
+        Path("question.pdf"), "question.pdf", "문제", "해경", "항해학", 2025, 1, "doc", "해경", 5
+    )
+
+    parsed, answer_key = public_importer.build_ocr_required_exam(
+        Path("question.pdf"),
+        meta,
+        answer_text,
+        "file:///question.pdf",
+        answer_path=Path("answer.pdf"),
+    )
+
+    assert extracted == [Path("answer.pdf")]
+    assert answer_key == {1: 1, 2: 2, 3: 3, 4: 4, 5: 1}
+    assert [question.correct_answer for question in parsed.questions] == [1, 2, 3, 4, 1]
