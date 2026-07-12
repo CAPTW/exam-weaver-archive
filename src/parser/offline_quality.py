@@ -17,7 +17,7 @@ _PLACEHOLDER = re.compile(
 _CONTAMINATION = re.compile(
     r"(?:\b\d{1,3}(?:\s+/\s*|\s*/\s+)\d{1,3}\b"
     r"|(?:^|\s)\d{1,3}\s*[.)]\s*[A-Za-z가-힣<]"
-    r"|해양경찰\s*채용시험|무단\s*(?:복제|전재)|정답\s*[:：]?)",
+    r"|^\s*@|해양경찰\s*채용시험|무단\s*(?:복제|전재)|정답\s*[:：]?)",
     re.IGNORECASE,
 )
 _SINGLE_PROPOSITION = re.compile(r"^[㉠-㉭](?:\s+.+)?$")

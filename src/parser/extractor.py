@@ -577,7 +577,10 @@ class PDFExtractor:
                         continue
                     first_text = str(line.words[0].text).strip()
                     known_number = _VISUAL_EXPLICIT_MARKERS.get(first_text[:1])
-                    has_damaged_anchor = first_text[:1] in _VISUAL_DAMAGED_MARKERS
+                    has_damaged_anchor = (
+                        first_text[:1] in _VISUAL_DAMAGED_MARKERS
+                        or first_text == "@"
+                    )
                     is_missing_marker_line = (
                         marker_x + 0.018 <= float(line.bbox[0]) <= marker_x + 0.060
                     )
@@ -646,10 +649,14 @@ class PDFExtractor:
     def _line_with_visual_marker(line: LayoutLine, symbol: str) -> LayoutLine:
         words = list(line.words)
         first_text = str(words[0].text).strip()
-        if first_text[:1] in _VISUAL_DAMAGED_MARKERS or first_text[:1] in _VISUAL_EXPLICIT_MARKERS:
+        if (
+            first_text[:1] in _VISUAL_DAMAGED_MARKERS
+            or first_text[:1] in _VISUAL_EXPLICIT_MARKERS
+            or first_text == "@"
+        ):
             words[0] = replace(
                 words[0],
-                text=symbol + first_text[1:],
+                text=symbol + (first_text[1:] if first_text != "@" else ""),
                 visual_choice_marker=True,
             )
         else:

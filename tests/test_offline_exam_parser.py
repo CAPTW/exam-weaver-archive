@@ -382,6 +382,22 @@ def test_quality_gate_rejects_placeholder_and_contaminated_choices():
     assert "contaminated_choice" in contaminated_result.reason_codes
 
 
+def test_quality_gate_rejects_unproven_leading_at_sign_choice():
+    question = ParsedOfflineQuestion(
+        number=18,
+        stem="평문 선택지 문제",
+        choices=["첫째", "둘째", "셋째", "@ 넷째"],
+        source_page=4,
+        confidence=0.99,
+        diagnostics=(),
+    )
+
+    result = validate_offline_question(question)
+
+    assert result.importable is False
+    assert "contaminated_choice" in result.reason_codes
+
+
 def test_quality_gate_fails_closed_for_structure_and_confidence():
     question = ParsedOfflineQuestion(
         number=4,

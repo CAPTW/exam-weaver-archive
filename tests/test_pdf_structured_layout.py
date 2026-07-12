@@ -471,3 +471,36 @@ def test_fused_damaged_marker_keeps_its_choice_text_when_visually_restored():
     question = OfflineExamParser().parse_pages([restored])[0]
 
     assert question.choices == ["첫째", "둘째", "셋째", "넷째"]
+
+
+def test_at_sign_is_restored_as_fourth_marker_only_with_visual_ring_evidence():
+    words = [
+        {"text": "18.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "문제", "bbox": (52, 50, 92, 64), "confidence": 0.98},
+        {"text": "㉦", "bbox": (50, 100, 68, 114), "confidence": 0.80},
+        {"text": "첫째", "bbox": (80, 100, 450, 114), "confidence": 0.98},
+        {"text": "㉨", "bbox": (50, 150, 68, 164), "confidence": 0.80},
+        {"text": "둘째", "bbox": (80, 150, 450, 164), "confidence": 0.98},
+        {"text": "㉭", "bbox": (50, 200, 68, 214), "confidence": 0.80},
+        {"text": "셋째", "bbox": (80, 200, 450, 214), "confidence": 0.98},
+        {"text": "@", "bbox": (50, 250, 68, 264), "confidence": 0.80},
+        {"text": "넷째", "bbox": (80, 250, 450, 264), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (100, 150, 200, 250):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+    structured = build_structured_page(
+        words,
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["첫째", "둘째", "셋째", "넷째"]
+    assert restored.lines[-1].words[0].visual_choice_marker is True
