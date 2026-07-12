@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import fmean
 from typing import Iterable, Sequence
 
@@ -18,7 +18,12 @@ _DOCUMENT_NOISE = re.compile(
     r"(?:무단\s*(?:복제|전재)|해기사\s*시험\s*전문|정답\s*및\s*해설)",
     re.IGNORECASE,
 )
-_PROPOSITION_MARKER = re.compile(r"^[㉠-㉭]$")
+_PAGE_COUNTER = re.compile(r"^\s*\d+\s*(?:/|-|쪽\s*/\s*)\s*\d+\s*$")
+_FOOTER_TEXT = re.compile(
+    r"(?:해양경찰.*채용시험|시험지\s*[A-Z가-힣0-9]*형|무단\s*(?:복제|전재))",
+    re.IGNORECASE,
+)
+_PROPOSITION_MARKER = re.compile(r"^([㉠-㉭])")
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,7 @@ class _LineRecord:
     bbox: tuple[float, float, float, float]
     page: int
     column: int | None
+    ambiguous_bottom_margin: bool = False
 
 
 class OfflineExamParser:
@@ -72,9 +78,12 @@ class OfflineExamParser:
             for _, line in indexed_lines:
                 record = self._record(line, page.number)
                 normalized = self._normalized_text(record.text)
-                if self._is_document_noise(record, normalized, repeated):
+                role = self._document_line_role(record, normalized, repeated)
+                if role == "noise":
                     removed_noise_pages.add(page.number)
                     continue
+                if role == "ambiguous_bottom_margin":
+                    record = replace(record, ambiguous_bottom_margin=True)
                 if record.text:
                     records.append(record)
         return records, removed_noise_pages
@@ -113,17 +122,21 @@ class OfflineExamParser:
                     occurrences.setdefault(text, set()).add(page.number)
         return {text for text, page_numbers in occurrences.items() if len(page_numbers) >= 2}
 
-    def _is_document_noise(
+    def _document_line_role(
         self, record: _LineRecord, normalized: str, repeated: set[str]
-    ) -> bool:
+    ) -> str:
         y0 = record.bbox[1]
-        if y0 >= 0.88:
-            return True
         if y0 <= 0.07 and (normalized in repeated or not _QUESTION_START.match(record.text)):
-            return True
+            return "noise"
         if normalized in repeated and (y0 <= 0.12 or y0 >= 0.88):
-            return True
-        return bool(_DOCUMENT_NOISE.search(record.text))
+            return "noise"
+        if _DOCUMENT_NOISE.search(record.text):
+            return "noise"
+        if y0 >= 0.88:
+            if _PAGE_COUNTER.fullmatch(record.text) or _FOOTER_TEXT.search(record.text):
+                return "noise"
+            return "ambiguous_bottom_margin"
+        return "body"
 
     def _question_regions(
         self, records: Sequence[_LineRecord]
@@ -202,6 +215,8 @@ class OfflineExamParser:
             diagnostics.append("invalid_choice_count")
         if region[0].page in removed_noise_pages:
             diagnostics.append("document_noise_removed")
+        if any(record.ambiguous_bottom_margin for record in region):
+            diagnostics.append("ambiguous_bottom_margin")
 
         confidence = self._region_confidence(region)
         return ParsedOfflineQuestion(
@@ -246,10 +261,11 @@ class OfflineExamParser:
     ) -> bool:
         labels = []
         for group in groups:
-            first_text = str(group[0].text).strip() if group else ""
-            if not _PROPOSITION_MARKER.fullmatch(first_text):
+            cell_text = "".join(str(word.text).strip() for word in group)
+            marker = _PROPOSITION_MARKER.match(cell_text)
+            if marker is None:
                 return False
-            labels.append(first_text)
+            labels.append(marker.group(1))
         first = ord("㉠")
         return [ord(label) for label in labels] == list(range(first, first + len(labels)))
 

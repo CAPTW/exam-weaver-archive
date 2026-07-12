@@ -180,6 +180,24 @@ def test_sequential_proposition_cells_are_never_recovered_as_final_choices():
     assert validate_offline_question(question).importable is False
 
 
+def test_fused_sequential_proposition_cells_are_not_recovered_as_choices():
+    page = _page(
+        _line(["5.", "붙은", "명제", "표를", "검토하시오."], y=0.12),
+        _line(
+            ["㉠44", "㉡46", "㉢48", "㉣50"],
+            y=0.34,
+            xs=[0.08, 0.30, 0.52, 0.74],
+        ),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == []
+    assert all(label in question.stem for label in ("㉠", "㉡", "㉢", "㉣"))
+    assert "coordinate_choice_recovery" not in question.diagnostics
+    assert validate_offline_question(question).importable is False
+
+
 def test_geometry_candidate_stays_in_stem_when_explicit_choices_follow():
     page = _page(
         _line(["6.", "표의", "수치를", "보고", "답하시오."], y=0.12),
@@ -253,6 +271,25 @@ def test_varying_page_counter_and_residual_footer_at_point_nine_are_stripped():
     assert "시험지" not in question.stem
     assert "document_noise_removed" in question.diagnostics
     assert validate_offline_question(question).importable is True
+
+
+def test_ambiguous_bottom_margin_choice_continuation_is_preserved_and_blocked():
+    page = _page(
+        _line(["12.", "아래", "문장을", "고르시오."], y=0.12),
+        _line(["①", "하나"], y=0.30),
+        _line(["②", "둘"], y=0.38),
+        _line(["③", "셋"], y=0.46),
+        _line(["④", "넷째", "문장의"], y=0.54),
+        _line(["계속되는", "내용"], y=0.89),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+    result = validate_offline_question(question)
+
+    assert question.choices[-1] == "넷째 문장의 계속되는 내용"
+    assert "ambiguous_bottom_margin" in question.diagnostics
+    assert result.importable is False
+    assert "parser_diagnostic" in result.reason_codes
 
 
 def test_public_parser_annotations_resolve_at_runtime():
