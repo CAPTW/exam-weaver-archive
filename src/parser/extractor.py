@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 import pypdf
 import logging
 
+from src.parser.layout import StructuredPage, build_structured_page
+
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
@@ -54,6 +56,7 @@ class PageData:
     tables: List[TableData] = field(default_factory=list)
     has_visual_content: bool = False
     is_ocr_text: bool = False
+    structured_page: Optional[StructuredPage] = None
 
 
 @dataclass
@@ -69,6 +72,64 @@ class PDFExtractor:
     
     def __init__(self, output_dir: str = './extracted'):
         self.output_dir = Path(output_dir)
+
+    def extract_structured_page(self, page, page_number: int) -> StructuredPage:
+        """Extract one page into normalized, position-aware layout records."""
+        native_page = self._extract_native_structured_page(page, page_number)
+        if native_page.kind == 'image_with_fake_text_layer':
+            return native_page
+
+        has_embedded_images = bool(native_page.images)
+        if self._should_use_ocr_fallback(native_page.text, has_embedded_images):
+            ocr_page = self._extract_ocr_structured_page(page, page_number)
+            if ocr_page.lines:
+                return ocr_page
+        return native_page
+
+    def _extract_native_structured_page(self, page, page_number: int) -> StructuredPage:
+        rect = getattr(page, 'rect', None)
+        width = float(getattr(rect, 'width', 0) or 0)
+        height = float(getattr(rect, 'height', 0) or 0)
+        try:
+            words = page.get_text('words') or []
+        except Exception:
+            words = []
+        if width <= 0:
+            width = max((float(word[2]) for word in words), default=1.0)
+        if height <= 0:
+            height = max((float(word[3]) for word in words), default=1.0)
+        images = self._structured_image_bboxes(page, width, height)
+        return build_structured_page(
+            words,
+            page_number=page_number,
+            width=width,
+            height=height,
+            source='native',
+            images=images,
+        )
+
+    @staticmethod
+    def _structured_image_bboxes(page, width: float, height: float) -> List[tuple]:
+        try:
+            embedded = page.get_images(full=True) or []
+        except Exception:
+            return []
+
+        bboxes = []
+        for image in embedded:
+            try:
+                rects = page.get_image_rects(image[0]) or []
+            except Exception:
+                continue
+            for rect in rects:
+                try:
+                    bboxes.append((float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)))
+                except (AttributeError, TypeError, ValueError):
+                    try:
+                        bboxes.append(tuple(float(value) for value in rect[:4]))
+                    except (TypeError, ValueError):
+                        continue
+        return bboxes
     
     def extract(self, pdf_path: str) -> PDFContent:
         """
@@ -216,16 +277,22 @@ class PDFExtractor:
                 overlined_texts = []
                 tables = []
                 is_ocr_text = False
+                structured_page = None
                 if fitz_doc is not None:
                     fitz_page = fitz_doc[i]
                     text = self._extract_positioned_text(fitz_page) or text
+                    structured_page = self.extract_structured_page(fitz_page, i + 1)
                     embedded_images = fitz_page.get_images(full=True)
                     if self._should_use_ocr_fallback(text, bool(embedded_images)):
                         ocr_cache_path = ocr_out_dir / f"{i + 1}.txt"
                         if ocr_cache_path.exists():
                             ocr_text = ocr_cache_path.read_text(encoding='utf-8')
                         else:
-                            ocr_text = self._extract_ocr_text(fitz_page)
+                            ocr_text = (
+                                self._structured_page_text(structured_page)
+                                if structured_page.kind == 'scanned'
+                                else self._extract_ocr_text(fitz_page)
+                            )
                             if ocr_text.strip():
                                 ocr_cache_path.write_text(ocr_text, encoding='utf-8')
                         if ocr_text.strip():
@@ -292,7 +359,8 @@ class PDFExtractor:
                     overlined_texts=overlined_texts,
                     tables=tables,
                     has_visual_content=bool(image_paths),
-                    is_ocr_text=is_ocr_text
+                    is_ocr_text=is_ocr_text,
+                    structured_page=structured_page,
                 ))
         finally:
             if fitz_doc is not None:
@@ -306,11 +374,45 @@ class PDFExtractor:
 
     def _extract_ocr_text(self, page) -> str:
         """OCR scanned pages with Windows OCR and rebuild two-column reading order."""
+        page_number = int(getattr(page, 'number', 0) or 0) + 1
+        return self._structured_page_text(self._extract_ocr_structured_page(page, page_number))
+
+    def _extract_ocr_structured_page(self, page, page_number: int) -> StructuredPage:
         try:
             import asyncio
-            return asyncio.run(self._extract_ocr_text_async(page))
+            return asyncio.run(self._extract_ocr_structured_page_async(page, page_number))
         except Exception:
-            return ''
+            return self._empty_ocr_structured_page(page, page_number)
+
+    @staticmethod
+    def _empty_ocr_structured_page(page, page_number: int) -> StructuredPage:
+        rect = getattr(page, 'rect', None)
+        width = float(getattr(rect, 'width', 0) or 1.0)
+        height = float(getattr(rect, 'height', 0) or 1.0)
+        return build_structured_page(
+            (),
+            page_number=page_number,
+            width=width,
+            height=height,
+            source='ocr',
+            images=((0.0, 0.0, width, height),),
+        )
+
+    def _structured_page_text(self, page: StructuredPage) -> str:
+        text_lines = []
+        for line in page.lines:
+            items = [
+                {
+                    'x0': word.bbox[0] * page.width,
+                    'y0': word.bbox[1] * page.height,
+                    'x1': word.bbox[2] * page.width,
+                    'y1': word.bbox[3] * page.height,
+                    'text': word.text,
+                }
+                for word in line.words
+            ]
+            text_lines.append(self._join_positioned_line(items))
+        return "\n".join(line for line in text_lines if line.strip())
 
     @staticmethod
     def _should_use_ocr_fallback(text: str, has_embedded_images: bool) -> bool:
@@ -323,6 +425,11 @@ class PDFExtractor:
         return len(stripped) < 250
 
     async def _extract_ocr_text_async(self, page) -> str:
+        page_number = int(getattr(page, 'number', 0) or 0) + 1
+        structured_page = await self._extract_ocr_structured_page_async(page, page_number)
+        return self._structured_page_text(structured_page)
+
+    async def _extract_ocr_structured_page_async(self, page, page_number: int) -> StructuredPage:
         try:
             import fitz
             from PIL import Image
@@ -331,11 +438,11 @@ class PDFExtractor:
             from winrt.windows.media.ocr import OcrEngine
             from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
         except Exception:
-            return ''
+            return self._empty_ocr_structured_page(page, page_number)
 
         engine = OcrEngine.try_create_from_language(Language('ko'))
         if engine is None:
-            return ''
+            return self._empty_ocr_structured_page(page, page_number)
 
         rect = getattr(page, 'rect', None)
         page_width = float(getattr(rect, 'width', 0) or 0)
@@ -363,48 +470,40 @@ class PDFExtractor:
         result = await engine.recognize_async(bitmap)
 
         items = []
-        column_split_x = self._detect_vertical_column_split(image) or image.width / 2
-        has_left = False
-        has_right = False
+        scale_x = page_width / image.width if page_width > 0 else 1.0
+        scale_y = page_height / image.height if page_height > 0 else 1.0
+        if page_width <= 0:
+            page_width = float(image.width)
+        if page_height <= 0:
+            page_height = float(image.height)
+        detected_split = self._detect_vertical_column_split(image)
+        column_split_x = detected_split * scale_x if detected_split is not None else None
         for line in result.lines:
             for word in line.words:
                 value = str(word.text or '').strip()
                 if not value:
                     continue
                 rect = word.bounding_rect
-                x0 = float(rect.x)
-                y0 = float(rect.y)
-                x1 = x0 + float(rect.width)
-                y1 = y0 + float(rect.height)
-                center_x = (x0 + x1) / 2
-                has_left = has_left or center_x < column_split_x
-                has_right = has_right or center_x >= column_split_x
+                x0 = float(rect.x) * scale_x
+                y0 = float(rect.y) * scale_y
+                x1 = x0 + float(rect.width) * scale_x
+                y1 = y0 + float(rect.height) * scale_y
+                confidence = getattr(word, 'confidence', None)
                 items.append({
-                    'x0': x0,
-                    'y0': y0,
-                    'x1': x1,
-                    'y1': y1,
                     'text': value,
-                    'column': 0 if center_x < column_split_x else 1,
+                    'bbox': (x0, y0, x1, y1),
+                    'confidence': confidence,
                 })
 
-        if not items:
-            return ''
-        if not (has_left and has_right):
-            for item in items:
-                item['column'] = 0
-
-        text_lines = []
-        for column in sorted({item['column'] for item in items}):
-            column_items = sorted(
-                [item for item in items if item['column'] == column],
-                key=lambda item: (item['y0'], item['x0']),
-            )
-            lines = self._group_positioned_lines(column_items, tolerance=10.0)
-            for line in lines:
-                text_lines.append(self._join_positioned_line(line, gap_threshold=7.0))
-
-        return "\n".join(line for line in text_lines if line.strip())
+        return build_structured_page(
+            items,
+            page_number=page_number,
+            width=page_width,
+            height=page_height,
+            source='ocr',
+            images=((0.0, 0.0, page_width, page_height),),
+            divider_x=column_split_x,
+        )
 
     @staticmethod
     def _detect_vertical_column_split(image) -> Optional[float]:
