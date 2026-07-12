@@ -2,6 +2,7 @@ import os
 import sys
 import faulthandler
 import traceback
+from pathlib import Path
 
 try:
     from src.runtime_paths import ensure_user_database, get_base_dir
@@ -49,7 +50,7 @@ from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget
 from PyQt5.QtCore import Qt, QTimer
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, NavigationAvatarWidget,
-    FluentTranslator, SplashScreen, PushButton
+    FluentTranslator, SplashScreen, PushButton, InfoBar
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -60,6 +61,20 @@ from .interface.practice import PracticeInterface
 from .interface.import_view import ImportInterface
 from .interface.db_mount import DbMountInterface
 from .interface.codex_panel import CodexInterface
+from ..database.repository import ExamRepository
+from experiments.db_mount_prototype.mount_repo import MountedExamRepository
+
+
+def build_question_repository(db_path, manifest_path):
+    manifest = Path(manifest_path)
+    if manifest.exists():
+        try:
+            repository = MountedExamRepository(manifest)
+            repository.init_database()
+            return repository, None
+        except (OSError, ValueError) as exc:
+            return ExamRepository(str(db_path)), str(exc)
+    return ExamRepository(str(db_path)), None
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -71,22 +86,48 @@ class MainWindow(FluentWindow):
         # when exam_bank.db is absent.
         self.db_path = str(ensure_user_database(BASE_DIR))
         # Ensure DB schema/migrations are applied (e.g., tags column)
-        from ..database.repository import ExamRepository
         ExamRepository(self.db_path).init_database()
+
+        question_repository, self.question_repository_error = build_question_repository(
+            self.db_path,
+            Path(BASE_DIR) / "data" / "domain_dbs" / "mount_manifest.json",
+        )
 
         # Interfaces
         self.home_interface = HomeInterface(self)
-        self.browser_interface = BrowserInterface(self.db_path, self)
+        self.browser_interface = BrowserInterface(self.db_path, self, repository=question_repository)
         self.practice_interface = PracticeInterface(self.db_path, self)
         self.export_interface = ExportInterface(self.db_path, self)
         self.import_interface = ImportInterface(self.db_path, self)
         self.db_mount_interface = DbMountInterface(BASE_DIR, self, db_path=self.db_path)
+        self.db_mount_interface.mountsChanged.connect(self.refresh_question_repository)
         self.codex_interface = CodexInterface(BASE_DIR, self, side_panel=True)
         self.codex_sidecar_expanded = True
 
         # Navigation
         self.init_navigation()
         self.init_codex_sidecar()
+        if self.question_repository_error:
+            QTimer.singleShot(0, self._show_question_repository_error)
+
+    def refresh_question_repository(self):
+        repository, error = build_question_repository(
+            self.db_path,
+            self.db_mount_interface.manifest_path,
+        )
+        self.question_repository_error = error
+        self.browser_interface.set_repository(repository)
+        if error:
+            self._show_question_repository_error()
+
+    def _show_question_repository_error(self):
+        if not self.question_repository_error:
+            return
+        InfoBar.error(
+            title="Mount 로드 실패",
+            content=self.question_repository_error,
+            parent=self,
+        )
 
     def init_window(self):
         self.resize(*DEFAULT_WINDOW_SIZE)

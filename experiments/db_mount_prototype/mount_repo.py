@@ -169,7 +169,19 @@ class MountedExamRepository:
         sessions = set()
         for mount in self.mounts:
             with self._connect(mount) as conn:
-                for row in conn.execute("SELECT code, name FROM exams ORDER BY name, code"):
+                for row in conn.execute(
+                    """
+                    SELECT e.code, e.name
+                    FROM exams e
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM exam_subjects es
+                        JOIN questions q ON q.exam_subject_id = es.id
+                        WHERE es.exam_id = e.id
+                    )
+                    ORDER BY e.name, e.code
+                    """
+                ):
                     options["exams"].append({
                         "code": namespaced_value(mount.id, row["code"]),
                         "local_code": row["code"],
@@ -200,7 +212,9 @@ class MountedExamRepository:
                         FROM subjects s
                         JOIN exam_subjects es ON es.subject_id = s.id
                         JOIN exams e ON es.exam_id = e.id
+                        JOIN questions q ON q.exam_subject_id = es.id
                         WHERE e.code = ?
+                        GROUP BY s.code, s.name_ko, es.display_order
                         ORDER BY es.display_order ASC
                         """,
                         (local_exam_code,),
@@ -211,6 +225,7 @@ class MountedExamRepository:
                         SELECT DISTINCT s.code, s.name_ko, 0 AS display_order
                         FROM subjects s
                         JOIN exam_subjects es ON es.subject_id = s.id
+                        JOIN questions q ON q.exam_subject_id = es.id
                         ORDER BY s.name_ko ASC
                         """
                     ).fetchall()
@@ -342,6 +357,48 @@ class MountedExamRepository:
             question = self._namespace_question(mount, dict(row))
             question["choices"] = self._choices_for_mount(mount, [int(local_id)]).get(int(local_id), [])
             return question
+
+    def update_question(self, question_id: Any, data: Dict[str, Any]) -> bool:
+        mount, local_id = self._write_target(question_id)
+        normalized = dict(data)
+        for key in ("exam_code", "subject_code"):
+            value_mount_id, local_value = split_namespaced_value(normalized.get(key))
+            if value_mount_id and value_mount_id != mount.id:
+                raise ValueError(f"{key} belongs to another mount: {value_mount_id}")
+            if value_mount_id:
+                normalized[key] = local_value
+        if not self._write_repo(mount).update_question(local_id, normalized):
+            raise RuntimeError(f"{mount.label} DB에서 문제를 수정하지 못했습니다.")
+        return True
+
+    def update_question_explanation(self, question_id: Any, explanation: Optional[str]) -> bool:
+        mount, local_id = self._write_target(question_id)
+        if not self._write_repo(mount).update_question_explanation(local_id, explanation):
+            raise RuntimeError(f"{mount.label} DB에서 해설을 저장하지 못했습니다.")
+        return True
+
+    def delete_question(self, question_id: Any) -> bool:
+        mount, local_id = self._write_target(question_id)
+        if not self._write_repo(mount).delete_question(local_id):
+            raise RuntimeError(f"{mount.label} DB에서 문제를 삭제하지 못했습니다.")
+        return True
+
+    def delete_questions(self, question_ids: List[Any]) -> int:
+        targets = [self._write_target(question_id) for question_id in question_ids]
+        ids_by_mount: Dict[str, List[int]] = {}
+        for mount, local_id in targets:
+            ids_by_mount.setdefault(mount.id, []).append(local_id)
+
+        deleted = 0
+        for mount_id, local_ids in ids_by_mount.items():
+            mount = self._mounts_by_id[mount_id]
+            mount_deleted = self._write_repo(mount).delete_questions(local_ids)
+            if mount_deleted != len(local_ids):
+                raise RuntimeError(
+                    f"{mount.label} DB에서 {len(local_ids)}개 중 {mount_deleted}개만 삭제했습니다."
+                )
+            deleted += mount_deleted
+        return deleted
 
     def get_statistics(self, exam_code=None, year=None) -> Dict[str, Any]:
         exam_mount_id, local_exam_code = split_namespaced_value(exam_code)
@@ -571,6 +628,26 @@ class MountedExamRepository:
             return self.mounts
         mount = self._mounts_by_id.get(mount_id)
         return [mount] if mount else []
+
+    def _write_target(self, question_id: Any) -> Tuple[MountedDatabase, int]:
+        mount_id, local_id = split_namespaced_value(question_id)
+        if mount_id is None:
+            raise ValueError("mounted writes require a namespaced question id")
+        mount = self._mounts_by_id.get(mount_id)
+        if mount is None:
+            raise ValueError(f"unknown or disabled mount: {mount_id}")
+        try:
+            return mount, int(local_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid local question id: {local_id}") from exc
+
+    @staticmethod
+    def _write_repo(mount: MountedDatabase):
+        from src.database.repository import ExamRepository
+
+        repo = ExamRepository(str(mount.path))
+        repo.init_database()
+        return repo
 
     @staticmethod
     def _combine_mount_filters(

@@ -4,6 +4,8 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
+import pytest
+
 from experiments.db_mount_prototype.domain_split import classify_exam, split_database_by_domain
 from experiments.db_mount_prototype.mount_repo import (
     MountedDatabase,
@@ -119,6 +121,108 @@ def test_mounted_repository_get_question_uses_namespaced_id(tmp_path):
     assert question["id"] == "main::1"
     assert question["question_text"] == "단건 조회 문제"
     assert [choice["text"] for choice in question["choices"]] == ["가", "나", "사", "아"]
+    assert question["mounted_exam_code"] == "main::3급기관사"
+    assert question["mounted_subject_code"] == "main::engine1"
+    assert question["mount_label"] == "Main"
+    assert question["choices"][0]["id"].startswith("main::")
+
+
+def test_mounted_repository_routes_writes_to_read_only_marked_owner(tmp_path):
+    first_db = tmp_path / "first.db"
+    second_db = tmp_path / "second.db"
+    _make_db(first_db, "첫 원본")
+    _make_db(second_db, "둘 원본")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(id="first", label="First", path=first_db, read_only=True),
+            MountedDatabase(id="second", label="Second", path=second_db, read_only=True),
+        ],
+    )
+    mounted = MountedExamRepository(manifest)
+
+    assert mounted.update_question("first::1", {
+        "exam_code": "first::3급기관사",
+        "subject_code": "first::engine1",
+        "question_text": "수정됨",
+        "correct_answer": 2,
+        "tags": "#custom",
+    })
+    assert ExamRepository(str(first_db)).get_question(1)["question_text"] == "수정됨"
+    assert ExamRepository(str(second_db)).get_question(1)["question_text"] == "둘 원본"
+
+    assert mounted.update_question_explanation("first::1", "사용자 해설")
+    assert ExamRepository(str(first_db)).get_question(1)["explanation"] == "사용자 해설"
+
+    assert mounted.delete_question("first::1")
+    assert ExamRepository(str(first_db)).get_question(1) is None
+    assert ExamRepository(str(second_db)).get_question(1) is not None
+
+
+def test_mounted_repository_bulk_delete_groups_ids_by_owner(tmp_path):
+    first_db = tmp_path / "first.db"
+    second_db = tmp_path / "second.db"
+    _make_db(first_db, "첫 문제")
+    _make_db(second_db, "둘 문제")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(id="first", label="First", path=first_db),
+            MountedDatabase(id="second", label="Second", path=second_db),
+        ],
+    )
+
+    assert MountedExamRepository(manifest).delete_questions(["first::1", "second::1"]) == 2
+    assert ExamRepository(str(first_db)).get_question(1) is None
+    assert ExamRepository(str(second_db)).get_question(1) is None
+
+
+@pytest.mark.parametrize("question_id", [1, "missing::1", "disabled::1", "first::bad"])
+def test_mounted_repository_rejects_unsafe_write_ids_without_changes(tmp_path, question_id):
+    first_db = tmp_path / "first.db"
+    disabled_db = tmp_path / "disabled.db"
+    _make_db(first_db, "보존할 문제")
+    _make_db(disabled_db, "비활성 문제")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(id="first", label="First", path=first_db),
+            MountedDatabase(id="disabled", label="Disabled", path=disabled_db, enabled=False),
+        ],
+    )
+    mounted = MountedExamRepository(manifest)
+
+    with pytest.raises(ValueError):
+        mounted.delete_questions(["first::1", question_id])
+
+    assert ExamRepository(str(first_db)).get_question(1)["question_text"] == "보존할 문제"
+    assert ExamRepository(str(disabled_db)).get_question(1)["question_text"] == "비활성 문제"
+
+
+def test_mounted_repository_applies_limit_after_global_sort(tmp_path):
+    first_db = tmp_path / "first.db"
+    second_db = tmp_path / "second.db"
+    _make_db(first_db, "older")
+    _make_db(second_db, "newest")
+    with sqlite3.connect(second_db) as conn:
+        conn.execute("UPDATE questions SET session = 2")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(id="first", label="First", path=first_db),
+            MountedDatabase(id="second", label="Second", path=second_db),
+        ],
+    )
+
+    rows = MountedExamRepository(manifest).search_questions(limit=1)
+
+    assert len(rows) == 1
+    assert rows[0]["question_text"] == "newest"
+    assert rows[0]["id"].startswith("second::")
 
 
 def test_domain_classifier_keeps_maritime_and_diat_separate():

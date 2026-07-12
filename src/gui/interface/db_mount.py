@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem,
     QInputDialog,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from qfluentwidgets import (
     BodyLabel,
     ComboBox,
@@ -46,6 +46,8 @@ from experiments.db_mount_prototype.mount_repo import MountedDatabase, load_mani
 
 
 class DbMountInterface(QWidget):
+    mountsChanged = pyqtSignal()
+
     def __init__(self, base_dir, parent=None, db_path=None):
         super().__init__(parent)
         self.base_dir = Path(base_dir)
@@ -206,6 +208,7 @@ class DbMountInterface(QWidget):
         self._rebuild_source_target_combos()
         self.on_source_changed()
         self.log(f"Mount 설정 저장 완료. 활성: {len(self.active_mounts)}개")
+        self.mountsChanged.emit()
         InfoBar.success(title="저장 완료", content="Mount 설정을 저장했습니다.", parent=self)
 
     def rename_current_source_mount(self):
@@ -371,6 +374,7 @@ class DbMountInterface(QWidget):
         )
         InfoBar.success(title="사본 생성 완료", content="Exam 사본을 target DB에 만들었습니다.", parent=self)
         self.refresh_mounts()
+        self.mountsChanged.emit()
 
     def on_source_changed(self):
         self.examCombo.clear()
@@ -452,6 +456,7 @@ class DbMountInterface(QWidget):
         )
         InfoBar.success(title="이동 완료", content="exam 이동이 저장되었습니다.", parent=self)
         self.refresh_mounts()
+        self.mountsChanged.emit()
 
     def _reset_plan(self):
         self.last_plan = None
@@ -461,6 +466,7 @@ class DbMountInterface(QWidget):
     def _rename_mount(self, mount_id: str, label: str):
         rename_mount_database(self.manifest_path, mount_id, label)
         self.refresh_mounts()
+        self.mountsChanged.emit()
 
     def _create_user_database(self, mount_id: str, label: str):
         created = create_empty_mount_database(
@@ -469,6 +475,7 @@ class DbMountInterface(QWidget):
             label=label,
         )
         self.refresh_mounts()
+        self.mountsChanged.emit()
         return created
 
     def _copy_current_exam_to_target(self, backup: bool = True):
@@ -525,6 +532,7 @@ class DbMountInterface(QWidget):
             base_dir=self.base_dir,
         )
         self.refresh_mounts()
+        self.mountsChanged.emit()
         return result
 
     def _default_export_path(self, mount):

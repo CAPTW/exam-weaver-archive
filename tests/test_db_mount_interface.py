@@ -6,6 +6,7 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt
+from PyQt5.QtTest import QSignalSpy
 from PyQt5.QtWidgets import QApplication
 
 from experiments.db_mount_prototype.mount_repo import MountedDatabase, load_manifest, write_manifest
@@ -100,6 +101,27 @@ def test_db_mount_interface_can_enable_disable_mounts_and_save_manifest(tmp_path
     saved = {mount.id: mount.enabled for mount in load_manifest(manifest)}
 
     assert saved == {"first": False, "second": True, "third": True}
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_db_mount_interface_emits_only_after_persisted_mount_changes(tmp_path):
+    widget, _manifest = _make_mount_interface(tmp_path)
+    spy = QSignalSpy(widget.mountsChanged)
+
+    widget.mountList.item(0).setCheckState(Qt.Unchecked)
+    APP.processEvents()
+    assert len(spy) == 0
+
+    widget.save_mount_selection()
+    assert len(spy) == 1
+
+    widget._rename_mount("second", "Renamed Second")
+    assert len(spy) == 2
+
+    widget._create_user_database("custom", "Custom DB")
+    assert len(spy) == 3
+
     widget.deleteLater()
     APP.processEvents()
 

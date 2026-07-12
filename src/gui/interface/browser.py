@@ -1,3 +1,5 @@
+import sqlite3
+
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QHeaderView, QTableWidgetItem,
     QAbstractItemView, QCheckBox, QComboBox, QMessageBox, QTextEdit
@@ -12,9 +14,13 @@ from ...database.validator import QuestionValidator
 from .editor import QuestionEditor
 
 class BrowserInterface(QWidget):
-    def __init__(self, db_path, parent=None):
+    def __init__(self, db_path=None, parent=None, repository=None):
         super().__init__(parent)
-        self.repo = ExamRepository(db_path)
+        if repository is None:
+            if db_path is None:
+                raise ValueError("db_path or repository is required")
+            repository = ExamRepository(db_path)
+        self.repo = repository
         self.validator = QuestionValidator(self.repo)
         self.validation_mode = False
         self.current_explanation_question_id = None
@@ -30,6 +36,17 @@ class BrowserInterface(QWidget):
         self.rootLayout.addWidget(self.contentWidget, 1)
         self._init_explanation_sidecar()
         self.rootLayout.addWidget(self.explanationDock, 0)
+        self.load_data()
+
+    def set_repository(self, repository):
+        self.repo = repository
+        self.validator = QuestionValidator(repository)
+        self.validation_mode = False
+        self.current_explanation_question_id = None
+        self.explanationEditor.clear()
+        self.explanationInfoLabel.clear()
+        self.examFilter.clear()
+        self.subjectFilter.clear()
         self.load_data()
 
     def init_ui(self):
@@ -182,8 +199,9 @@ class BrowserInterface(QWidget):
         self.examFilter.clear()
         self.examFilter.addItem("전체 시험", None)
         for exam in self.repo.get_filter_options().get('exams', []):
+            prefix = f"{exam['mount_label']} · " if exam.get('mount_label') else ""
             self.examFilter.addItem(
-                f"{exam['name']} ({exam['code']})",
+                f"{prefix}{exam['name']} ({exam.get('local_code') or exam['code']})",
                 exam['code']
             )
 
@@ -218,10 +236,11 @@ class BrowserInterface(QWidget):
     @staticmethod
     def _subject_label(subject):
         name = subject.get('name_ko') or subject.get('code') or ''
-        code = subject.get('code') or ''
+        code = subject.get('local_code') or subject.get('code') or ''
+        prefix = f"{subject['mount_label']} · " if subject.get('mount_label') else ""
         if not code or code.startswith(('custom_', 'auto_')) or code == name:
-            return name
-        return f"{name} ({code})"
+            return f"{prefix}{name}"
+        return f"{prefix}{name} ({code})"
         
     def load_data(self):
         self.validation_mode = False
@@ -322,14 +341,23 @@ class BrowserInterface(QWidget):
         if not q:
             return
 
+        editor_question = dict(q)
+        editor_question['exam_code'] = q.get('mounted_exam_code') or q.get('exam_code')
+        editor_question['subject_code'] = q.get('mounted_subject_code') or q.get('subject_code')
+
         dialog = QuestionEditor(
             self.window(),
-            q,
-            subject_options=self.repo.get_subject_options(q.get('exam_code'))
+            editor_question,
+            subject_options=self.repo.get_subject_options(editor_question.get('exam_code'))
         )
         if dialog.exec():
             new_data = dialog.get_data()
-            if self.repo.update_question(question_id, new_data):
+            try:
+                updated = self.repo.update_question(question_id, new_data)
+            except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
+                self._show_write_error("수정", exc)
+                return
+            if updated:
                 InfoBar.success(
                     title='수정 완료',
                     content="문제가 성공적으로 수정되었습니다.",
@@ -352,10 +380,12 @@ class BrowserInterface(QWidget):
 
     def _format_info(self, question):
         prefix = "공통 " if question.get('group_id') is not None else ""
-        return (
+        info = (
             f"{prefix}{question['year']}-{question['session']} "
             f"{question['subject_name']} {question['question_number']}번"
         )
+        mount_label = question.get('mount_label')
+        return f"{mount_label} · {info}" if mount_label else info
 
     def _format_question_preview(self, question):
         question_text = question.get('question_text') or ''
@@ -402,10 +432,16 @@ class BrowserInterface(QWidget):
             InfoBar.warning(title='선택 없음', content="해설을 저장할 문제를 먼저 선택하세요.", parent=self)
             return
 
-        if self.repo.update_question_explanation(
-            self.current_explanation_question_id,
-            self.explanationEditor.toPlainText(),
-        ):
+        try:
+            updated = self.repo.update_question_explanation(
+                self.current_explanation_question_id,
+                self.explanationEditor.toPlainText(),
+            )
+        except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
+            self._show_write_error("해설 저장", exc)
+            return
+
+        if updated:
             InfoBar.success(title='저장 완료', content="문제 해설을 저장했습니다.", parent=self)
             if self.validation_mode:
                 self.load_validation_results()
@@ -435,7 +471,7 @@ class BrowserInterface(QWidget):
                 continue
             checkbox = widget.findChild(QCheckBox)
             if checkbox is not None and checkbox.isChecked():
-                ids.append(int(checkbox.property("question_id")))
+                ids.append(checkbox.property("question_id"))
         return ids
 
     def delete_question(self, question_id):
@@ -449,7 +485,13 @@ class BrowserInterface(QWidget):
         if result != QMessageBox.StandardButton.Yes:
             return
 
-        if self.repo.delete_question(question_id):
+        try:
+            deleted = self.repo.delete_question(question_id)
+        except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
+            self._show_write_error("삭제", exc)
+            return
+
+        if deleted:
             InfoBar.success(
                 title='삭제 완료',
                 content="문제가 삭제되었습니다.",
@@ -490,7 +532,11 @@ class BrowserInterface(QWidget):
         if result != QMessageBox.StandardButton.Yes:
             return
 
-        deleted_count = self.repo.delete_questions(question_ids)
+        try:
+            deleted_count = self.repo.delete_questions(question_ids)
+        except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
+            self._show_write_error("선택 삭제", exc)
+            return
         InfoBar.success(
             title='삭제 완료',
             content=f"{deleted_count}개 문제가 삭제되었습니다.",
@@ -504,3 +550,10 @@ class BrowserInterface(QWidget):
             self.load_validation_results()
         else:
             self.load_data()
+
+    def _show_write_error(self, action, exc):
+        InfoBar.error(
+            title=f'{action} 실패',
+            content=str(exc),
+            parent=self,
+        )
