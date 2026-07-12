@@ -77,6 +77,30 @@ STRICT_EXPECTED_QUESTION_COUNT = 3280
 
 
 @dataclass(frozen=True)
+class StandaloneSpec:
+    question_filename: str
+    answer_filename: str
+    exam_type: str
+    subject_name: str
+    year: int
+    session: int
+    question_count: int
+    official_key: str
+
+
+STANDALONE_SPECS = (
+    StandaloneSpec(
+        "2023 2차 - 물리.pdf", "2023 2차 - 물리 정답 & 해설.pdf",
+        "해양경찰 일반직 9급", "물리", 2023, 2, 20, "2023-general-physics-official",
+    ),
+    StandaloneSpec(
+        "2023 2차 - 항해.pdf", "2023 2차 - 확정답안.pdf",
+        "해양경찰 일반직 9급", "항해", 2023, 2, 20, "2023-general-navigation-official",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class ExpectedExamSet:
     exam_type: str
     subject_name: str
@@ -107,8 +131,9 @@ class RegisteredExamSet:
     expected: ExpectedExamSet
     questions: tuple[Question, ...]
     source_path: Path
-    answer_path: Path
+    answer_path: Path | None
     rejected_count: int = 0
+    official_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +337,7 @@ def build_staging_database(
     if database_path.exists():
         database_path.unlink()
 
+    _initialize_nullable_answer_schema(database_path)
     repository = ExamRepository(str(database_path))
     repository.init_database()
     _initialize_rebuild_schema(database_path)
@@ -428,6 +454,8 @@ def build_staging_database(
         for key, numbers in sorted(expected_by_key.items())
     )
     _store_expected_sets(database_path, expected_sets)
+    if inventory_contract == STRICT_CORPUS_INVENTORY:
+        _require_production_rebuild_metadata(database_path)
     database_counts = _database_counts(database_path)
 
     report_paths = {
@@ -568,30 +596,66 @@ def validate_staging_database(
                     Path(str(row[0])).name: (str(row[1]), str(row[2]))
                     for row in inventory_rows
                 }
-                provenance_rows = connection.execute(
-                    """
-                    SELECT DISTINCT qs.source_url, qs.content_hash,
-                           qs.attachment_url, qs.attachment_filename
-                    FROM questions q
-                    JOIN question_sources qs ON qs.id = q.source_id
-                    """
-                ).fetchall()
+                inventory_by_relative = {
+                    str(row[0]): (str(row[1]), str(row[2])) for row in inventory_rows
+                }
                 provenance_mismatch = False
-                for source_url, content_hash, attachment_url, attachment_filename in provenance_rows:
-                    source_name = _url_filename(str(source_url or ""))
-                    source_inventory = inventory_by_name.get(source_name)
-                    answer_name = _url_filename(str(attachment_url or ""))
-                    answer_inventory = inventory_by_name.get(answer_name)
-                    if (
-                        source_inventory is None
-                        or source_inventory[0] != DocumentRole.QUESTION.value
-                        or source_inventory[1] != str(content_hash or "")
-                        or answer_inventory is None
-                        or answer_inventory[0] != DocumentRole.ANSWER.value
-                        or answer_name != str(attachment_filename or "")
-                    ):
+                set_provenance_exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='offline_rebuild_set_provenance'"
+                ).fetchone()
+                set_provenance_rows = (
+                    connection.execute(
+                        "SELECT * FROM offline_rebuild_set_provenance"
+                    ).fetchall() if set_provenance_exists else []
+                )
+                if set_provenance_rows:
+                    provenance_rows = set_provenance_rows
+                    expected_by_key = {item.key: item for item in normalized_sets}
+                    if len(provenance_rows) != len(normalized_sets):
                         provenance_mismatch = True
-                        break
+                    for row in provenance_rows:
+                        key = (str(row[0]), str(row[1]), int(row[2]), int(row[3]))
+                        expected_item = expected_by_key.get(key)
+                        source_inventory = inventory_by_relative.get(str(row[4]))
+                        answer_inventory = inventory_by_relative.get(str(row[7])) if row[7] else None
+                        if (
+                            expected_item is None
+                            or source_inventory != (DocumentRole.QUESTION.value, str(row[5]))
+                            or (expected_item.require_answers and (
+                                str(row[6]) != "required"
+                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[8]))
+                                or Path(str(row[7])).name != str(row[9])
+                            ))
+                            or (not expected_item.require_answers and (
+                                str(row[6]) != "not_required" or row[7] is not None or row[8] is not None
+                            ))
+                        ):
+                            provenance_mismatch = True
+                            break
+                else:
+                    provenance_rows = connection.execute(
+                        """
+                        SELECT DISTINCT qs.source_url, qs.content_hash,
+                               qs.attachment_url, qs.attachment_filename
+                        FROM questions q
+                        JOIN question_sources qs ON qs.id = q.source_id
+                        """
+                    ).fetchall()
+                    for source_url, content_hash, attachment_url, attachment_filename in provenance_rows:
+                        source_name = _url_filename(str(source_url or ""))
+                        source_inventory = inventory_by_name.get(source_name)
+                        answer_name = _url_filename(str(attachment_url or ""))
+                        answer_inventory = inventory_by_name.get(answer_name)
+                        if (
+                            source_inventory is None
+                            or source_inventory[0] != DocumentRole.QUESTION.value
+                            or source_inventory[1] != str(content_hash or "")
+                            or answer_inventory is None
+                            or answer_inventory[0] != DocumentRole.ANSWER.value
+                            or answer_name != str(attachment_filename or "")
+                        ):
+                            provenance_mismatch = True
+                            break
                 if provenance_mismatch:
                     errors.append("provenance_mismatch")
                 rejection_table = connection.execute(
@@ -649,6 +713,8 @@ def replace_mounted_database(
     mounted: str | Path,
     backup_dir: str | Path,
     receipt_path: str | Path,
+    *,
+    allow_synthetic_rebuild: bool = False,
 ) -> ReplacementReceipt:
     """Validate, back up, and atomically replace a mounted database."""
 
@@ -659,6 +725,8 @@ def replace_mounted_database(
     if not mounted_path.is_file():
         raise ReplacementError(f"mounted database does not exist: {mounted_path}")
     validate_rebuild_paths(staging_path, mounted_path, backups, receipt_file)
+    if not allow_synthetic_rebuild:
+        _require_production_rebuild_metadata(staging_path)
 
     expected_sets = _load_expected_sets(staging_path)
     validation = validate_staging_database(staging_path, expected_sets)
@@ -742,6 +810,48 @@ def replace_mounted_database(
                 pass
 
 
+def _require_production_rebuild_metadata(path: Path) -> None:
+    required_tables = {
+        "offline_rebuild_documents",
+        "offline_rebuild_expected_sets",
+        "offline_rebuild_set_provenance",
+    }
+    try:
+        with _readonly_connection(path) as connection:
+            tables = {
+                str(row[0]) for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if not required_tables.issubset(tables):
+                raise ReplacementError("rebuild metadata is missing")
+            inventory_counts = dict(
+                connection.execute(
+                    "SELECT role, COUNT(*) FROM offline_rebuild_documents GROUP BY role"
+                ).fetchall()
+            )
+            inventory_counts["total"] = sum(int(value) for value in inventory_counts.values())
+            if STRICT_CORPUS_INVENTORY.mismatches(inventory_counts):
+                raise ReplacementError("rebuild metadata inventory contract is invalid")
+            expected_rows = connection.execute(
+                "SELECT question_numbers_json FROM offline_rebuild_expected_sets"
+            ).fetchall()
+            expected_questions = sum(len(json.loads(row[0])) for row in expected_rows)
+            provenance_count = int(
+                connection.execute("SELECT COUNT(*) FROM offline_rebuild_set_provenance").fetchone()[0]
+            )
+            actual_questions = int(connection.execute("SELECT COUNT(*) FROM questions").fetchone()[0])
+            if (
+                len(expected_rows) != STRICT_EXPECTED_SET_COUNT
+                or expected_questions != STRICT_EXPECTED_QUESTION_COUNT
+                or provenance_count != STRICT_EXPECTED_SET_COUNT
+                or actual_questions != STRICT_EXPECTED_QUESTION_COUNT
+            ):
+                raise ReplacementError("rebuild metadata expected-set registry is invalid")
+    except sqlite3.DatabaseError as exc:
+        raise ReplacementError(f"rebuild metadata is unreadable: {exc}") from exc
+
+
 def _initialize_rebuild_schema(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         connection.executescript(
@@ -770,8 +880,25 @@ def _initialize_rebuild_schema(path: Path) -> None:
                 rejected_count INTEGER NOT NULL,
                 PRIMARY KEY (exam_type, subject_name, year, session)
             );
+            CREATE TABLE IF NOT EXISTS offline_rebuild_set_provenance (
+                exam_type TEXT NOT NULL, subject_name TEXT NOT NULL,
+                year INTEGER NOT NULL, session INTEGER NOT NULL,
+                source_relative_path TEXT NOT NULL, source_sha256 TEXT NOT NULL,
+                answer_state TEXT NOT NULL, answer_relative_path TEXT,
+                answer_sha256 TEXT, answer_filename TEXT,
+                PRIMARY KEY (exam_type, subject_name, year, session)
+            );
             """
         )
+
+
+def _initialize_nullable_answer_schema(path: Path) -> None:
+    schema_path = Path(__file__).with_name("schema.sql")
+    schema = schema_path.read_text(encoding="utf-8").replace(
+        "correct_answer INTEGER NOT NULL", "correct_answer INTEGER"
+    )
+    with sqlite3.connect(path) as connection:
+        connection.executescript(schema)
 
 
 def _record_set_rejections(path: Path, expected: ExpectedExamSet, count: int) -> None:
@@ -788,19 +915,25 @@ def _persist_registered_set(
     registered: RegisteredExamSet,
     inventory: Sequence[Mapping[str, object]],
 ) -> None:
+    expected = registered.expected
     source = registered.source_path.resolve()
-    answer = registered.answer_path.resolve()
+    answer = registered.answer_path.resolve() if registered.answer_path else None
     source_row = next(
         (row for row in inventory if Path(str(row["relative_path"])).name == source.name), None
     )
     answer_row = next(
-        (row for row in inventory if Path(str(row["relative_path"])).name == answer.name), None
+        (
+            row for row in inventory
+            if answer is not None and Path(str(row["relative_path"])).name == answer.name
+        ),
+        None,
     )
     if source_row is None or source_row.get("role") != DocumentRole.QUESTION.value:
         raise ValueError(f"registered source is absent from question inventory: {source}")
-    if answer_row is None or answer_row.get("role") != DocumentRole.ANSWER.value:
+    if expected.require_answers and (
+        answer_row is None or answer_row.get("role") != DocumentRole.ANSWER.value
+    ):
         raise ValueError(f"registered answer is absent from answer inventory: {answer}")
-    expected = registered.expected
     metadata = {
         "exam_type": expected.exam_type,
         "subject_name": expected.subject_name,
@@ -810,7 +943,7 @@ def _persist_registered_set(
     source_id = _insert_question_source(
         database_path,
         source,
-        source.stem,
+        registered.official_key or source.stem,
         str(source_row["sha256"]),
         answer,
     )
@@ -819,6 +952,22 @@ def _persist_registered_set(
         SimpleNamespace(year=expected.year, session=expected.session, exam_type=expected.exam_type),
     )
     _attach_provenance(database_path, metadata, expected.question_numbers, source_id)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO offline_rebuild_set_provenance VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                *expected.key,
+                str(source_row["relative_path"]),
+                str(source_row["sha256"]),
+                "required" if expected.require_answers else "not_required",
+                str(answer_row["relative_path"]) if answer_row else None,
+                str(answer_row["sha256"]) if answer_row else None,
+                answer.name if answer else None,
+            ),
+        )
     _mark_document_build(
         database_path,
         str(source_row["relative_path"]),
@@ -913,7 +1062,16 @@ def _build_registered_corpus_sets(
         for group_index, group in enumerate(groups, start=1):
             items = items_by_group.get(group_index, [])
             expected_count = int(group.get("question_count") or (20 if module is maritime_english else 0))
-            answer_path = _registered_answer_path(module, group, group_index, root)
+            no_source_answer = (
+                module is police_engineering
+                and str(group.get("answer_key") or "") in module.NO_SOURCE_ANSWER_KEYS
+            )
+            if no_source_answer:
+                for item in items:
+                    item.question.correct_answer = None
+            answer_path = None if no_source_answer else _registered_answer_path(
+                module, group, group_index, root
+            )
             source_path = Path(str(group["pages"][0]["source_path"]))
             expected = ExpectedExamSet(
                 module.EXAM_CODE,
@@ -921,10 +1079,7 @@ def _build_registered_corpus_sets(
                 int(group["year"]),
                 int(sessions[group_index]),
                 tuple(range(1, expected_count + 1)),
-                require_answers=not (
-                    module is police_engineering
-                    and str(group.get("answer_key") or "") in module.NO_SOURCE_ANSWER_KEYS
-                ),
+                require_answers=not no_source_answer,
             )
             registered.append(
                 RegisteredExamSet(
@@ -936,15 +1091,27 @@ def _build_registered_corpus_sets(
             )
 
     for path in native_paths:
-        metadata = _infer_document_metadata(path, root)
-        expected_count = metadata.get("expected_question_count")
-        if not isinstance(expected_count, int) or expected_count < 1:
-            raise ValueError(f"native 2023 coverage is not registered: {path.name}")
+        spec = next((item for item in STANDALONE_SPECS if item.question_filename == path.name), None)
+        if spec is None:
+            raise ValueError(f"native 2023 file is not explicitly registered: {path.name}")
+        metadata = {
+            "exam_type": spec.exam_type,
+            "subject_name": spec.subject_name,
+            "year": spec.year,
+            "session": spec.session,
+            "document_id": spec.official_key,
+            "expected_question_count": spec.question_count,
+            "probe": {"role": "question"},
+        }
         parsed = parse_offline_question_pdf(path, metadata)
-        expected_numbers = tuple(range(1, expected_count + 1))
-        answers, answer_path = _resolve_answer_key(path, root, metadata, expected_numbers)
-        if answer_path is None:
-            raise ValueError(f"native 2023 answer association missing: {path.name}")
+        expected_numbers = tuple(range(1, spec.question_count + 1))
+        answer_matches = list(root.rglob(spec.answer_filename))
+        if len(answer_matches) != 1:
+            raise ValueError(f"native 2023 answer association missing: {spec.answer_filename}")
+        answer_path = answer_matches[0]
+        answers = _resolve_standalone_answer_key(
+            answer_path, spec.subject_name, expected_numbers
+        )
         questions = tuple(
             Question(
                 item.number,
@@ -969,9 +1136,42 @@ def _build_registered_corpus_sets(
                 path,
                 answer_path,
                 len(parsed.rejected),
+                official_key=spec.official_key,
             )
         )
     return registered
+
+
+def registered_provider_preflight() -> dict[str, int]:
+    """Enumerate independent provider contracts without opening or OCRing PDFs."""
+
+    from scripts import import_maritime_law_pdf as law
+    from scripts import import_police_engineering_pdf as engineering
+    from scripts import import_police_navigation_pdf as navigation
+
+    modules = (law, navigation, engineering)
+    set_count = 30 + len(STANDALONE_SPECS)
+    question_count = 30 * 20 + sum(spec.question_count for spec in STANDALONE_SPECS)
+    missing_associations = 0
+    no_answer_sets = 0
+    for module in modules:
+        groups = [group for values in module.KNOWN_GROUPS.values() for group in values]
+        set_count += len(groups)
+        question_count += sum(int(group.question_count) for group in groups)
+        associated = {key for keys in module.ANSWER_KEYS.values() for key in keys}
+        no_source = set(getattr(module, "NO_SOURCE_ANSWER_KEYS", set()))
+        no_answer_sets += len(no_source)
+        missing_associations += sum(
+            group.answer_key not in associated and group.answer_key not in no_source
+            for group in groups
+        )
+    return {
+        "set_count": set_count,
+        "question_count": question_count,
+        "engineering_no_answer_sets": no_answer_sets,
+        "standalone_sets": len(STANDALONE_SPECS),
+        "missing_answer_associations": int(missing_associations),
+    }
 
 
 def _registered_answer_path(module: object, group: Mapping[str, object], group_index: int, root: Path) -> Path:
@@ -1066,6 +1266,28 @@ def _resolve_answer_key(
         expand_parser_lines(answer_text.lines), str(metadata["subject_name"])
     )
     return parse_gong_answer_key(answer_lines, list(expected_numbers)), answer_path
+
+
+def _resolve_standalone_answer_key(
+    answer_path: Path, subject_name: str, expected_numbers: Sequence[int]
+) -> dict[int, int]:
+    from scripts.import_public_exam_pdf_folder import (
+        clean_pdf_text,
+        expand_parser_lines,
+        parse_gong_answer_key,
+        replace_boundary_markers,
+        structured_pages_to_pdf_lines,
+    )
+    from src.parser.offline_sources import extract_offline_structured_pages
+
+    answer_text = clean_pdf_text(answer_path)
+    if answer_text.text_extractable:
+        lines = replace_boundary_markers(expand_parser_lines(answer_text.lines), subject_name)
+    else:
+        lines = structured_pages_to_pdf_lines(
+            extract_offline_structured_pages(answer_path, {"probe": {"role": "answer"}})
+        )
+    return parse_gong_answer_key(lines, list(expected_numbers))
 
 
 def _insert_question_source(

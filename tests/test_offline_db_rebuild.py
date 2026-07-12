@@ -13,10 +13,12 @@ from src.database.staging import (
     ExpectedExamSet,
     InventoryContract,
     RegisteredExamSet,
+    STANDALONE_SPECS,
     ReplacementError,
     build_staging_database,
     replace_mounted_database,
     validate_staging_database,
+    registered_provider_preflight,
 )
 from src.parser.offline_exam import ParsedOfflineQuestion
 from src.parser.offline_sources import DocumentRole, OfflineParseResult
@@ -405,6 +407,7 @@ def test_replacement_validation_failure_leaves_mounted_bytes_unchanged(tmp_path)
             mounted,
             tmp_path / "backups",
             tmp_path / "receipt.json",
+            allow_synthetic_rebuild=True,
         )
 
     assert mounted.read_bytes() == before
@@ -432,6 +435,7 @@ def test_replacement_creates_backup_atomic_receipt_hashes_and_readable_mount(tmp
         mounted,
         tmp_path / "backups",
         receipt_path,
+        allow_synthetic_rebuild=True,
     )
 
     assert receipt.backup_path.is_file()
@@ -468,6 +472,7 @@ def test_atomic_replace_failure_leaves_mounted_unchanged_and_writes_no_receipt(t
             mounted,
             tmp_path / "backups",
             tmp_path / "receipt.json",
+            allow_synthetic_rebuild=True,
         )
 
     assert mounted.read_bytes() == before
@@ -605,6 +610,7 @@ def test_sqlite_backup_includes_committed_wal_rows(tmp_path):
         with pytest.raises(ReplacementError, match="access|액세스|process|프로세스"):
             replace_mounted_database(
                 staging_db, mounted, tmp_path / "backups", tmp_path / "receipt.json"
+                , allow_synthetic_rebuild=True
             )
     finally:
         writer.close()
@@ -614,3 +620,74 @@ def test_sqlite_backup_includes_committed_wal_rows(tmp_path):
     with sqlite3.connect(backups[0]) as conn:
         assert conn.execute("SELECT question_text FROM questions").fetchone()[0] == "WAL 최신값"
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_no_source_answer_registered_set_persists_null_and_explicit_state(tmp_path):
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    source = root / "engineering_문제.pdf"
+    source.write_bytes(b"question")
+    question = _question(1)
+    question.correct_answer = None
+
+    summary = build_staging_database(
+        root,
+        tmp_path / "staging.db",
+        tmp_path / "reports",
+        inventory_contract=InventoryContract(1, 1, 0, 0),
+        registered_set_provider=lambda *_args: (
+            RegisteredExamSet(
+                ExpectedExamSet(
+                    "해양경찰 경찰직 기관학",
+                    "기관학",
+                    2020,
+                    1,
+                    (1,),
+                    require_answers=False,
+                ),
+                (question,),
+                source,
+                None,
+            ),
+        ),
+    )
+
+    with sqlite3.connect(summary.staging_db) as conn:
+        assert conn.execute("SELECT correct_answer FROM questions").fetchone()[0] is None
+        assert conn.execute(
+            "SELECT answer_state, answer_relative_path FROM offline_rebuild_set_provenance"
+        ).fetchone() == ("not_required", None)
+
+
+def test_native_2023_specs_are_explicit_distinct_official_associations():
+    assert {spec.subject_name for spec in STANDALONE_SPECS} == {"물리", "항해"}
+    assert {spec.exam_type for spec in STANDALONE_SPECS} == {"해양경찰 일반직 9급"}
+    assert {(spec.year, spec.session) for spec in STANDALONE_SPECS} == {(2023, 2)}
+    assert len({spec.answer_filename for spec in STANDALONE_SPECS}) == 2
+    assert len({spec.official_key for spec in STANDALONE_SPECS}) == 2
+
+
+def test_real_provider_preflight_enumerates_registered_contract_without_ocr():
+    report = registered_provider_preflight()
+
+    assert report["set_count"] == 135
+    assert report["question_count"] == 3280
+    assert report["engineering_no_answer_sets"] == 1
+    assert report["standalone_sets"] == 2
+    assert report["missing_answer_associations"] == 0
+
+
+def test_plain_database_is_not_replaceable_without_explicit_synthetic_trust(tmp_path):
+    mounted = tmp_path / "mounted.db"
+    staging_db = tmp_path / "plain.db"
+    _database(mounted, [_question(1)])
+    _database(staging_db, [_question(1)])
+    before = mounted.read_bytes()
+
+    with pytest.raises(ReplacementError, match="rebuild metadata"):
+        replace_mounted_database(
+            staging_db, mounted, tmp_path / "backups", tmp_path / "receipt.json"
+        )
+
+    assert mounted.read_bytes() == before
+    assert not (tmp_path / "backups").exists()
