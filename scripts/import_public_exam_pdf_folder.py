@@ -169,6 +169,17 @@ COMMON_SUBJECT_LABELS = {
     "수학",
 }
 
+# Independent exam-format facts. OCR question/answer output is deliberately
+# excluded from this registry because truncated extraction cannot establish a
+# document's expected coverage.
+TRUSTED_EXAM_FORMAT_QUESTION_COUNTS = {
+    "해경": 20,
+    "해경 1차": 20,
+    "해경 2차": 20,
+    "해경 3차": 20,
+    "해경 경채": 20,
+}
+
 
 @dataclass(frozen=True)
 class ExamKey:
@@ -435,7 +446,14 @@ def infer_meta(path: Path, root: Path, text: str = "") -> PdfMeta:
         session=session,
         document_id=document_id,
         top_category=top_category,
+        expected_question_count=trusted_expected_question_count(exam_type),
     )
+
+
+def trusted_expected_question_count(exam_type: str) -> int | None:
+    """Return only counts registered from an independent known exam format."""
+
+    return TRUSTED_EXAM_FORMAT_QUESTION_COUNTS.get(normalize_exam_label(exam_type))
 
 
 def infer_year(stem_parts: list[str], rel_parts: tuple[str, ...], text: str) -> int:
@@ -1029,8 +1047,6 @@ def build_ocr_required_exam(
 
     if meta.expected_question_count:
         expected_numbers = list(range(1, meta.expected_question_count + 1))
-    elif answer_key:
-        expected_numbers = sorted(answer_key)
     else:
         expected_numbers = []
 

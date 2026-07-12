@@ -391,6 +391,55 @@ def test_public_ocr_without_authoritative_coverage_is_blocked(monkeypatch):
     )
 
 
+def test_infer_meta_populates_count_only_for_trusted_exam_format(tmp_path):
+    import scripts.import_public_exam_pdf_folder as public_importer
+
+    known = tmp_path / "해경" / "2025" / "항해학" / "2025_해경_항해학_자료_100.pdf"
+    unknown = tmp_path / "미분류" / "2025" / "과목" / "2025_미분류_과목_자료_101.pdf"
+
+    known_meta = public_importer.infer_meta(known, tmp_path)
+    unknown_meta = public_importer.infer_meta(unknown, tmp_path)
+
+    assert known_meta.expected_question_count == 20
+    assert unknown_meta.expected_question_count is None
+
+
+def test_parsed_answer_key_cannot_establish_expected_ocr_coverage(monkeypatch):
+    import scripts.import_public_exam_pdf_folder as public_importer
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import DocumentRole, OfflineParseResult
+    from src.web_import.comcbt_pdf import PdfTextLine
+
+    questions = tuple(
+        ParsedOfflineQuestion(number, f"Q{number}", ["a", "b", "c", "d"], 1, 0.99, ())
+        for number in range(1, 11)
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(path, DocumentRole.QUESTION, metadata, questions, ()),
+    )
+    monkeypatch.setattr(
+        public_importer,
+        "parse_gong_answer_key",
+        lambda lines, expected: {number: 1 for number in range(1, 11)},
+    )
+    meta = public_importer.PdfMeta(
+        Path("unknown.pdf"), "unknown.pdf", "문제", "미분류", "과목", 2025, 1, "doc", "미분류"
+    )
+    answer_text = public_importer.CleanTextResult(
+        [PdfTextLine("answer")], 1, True, 1, 1, 0, []
+    )
+
+    parsed, answer_key = public_importer.build_ocr_required_exam(
+        Path("unknown.pdf"), meta, answer_text, "file:///unknown.pdf"
+    )
+
+    assert len(answer_key) == 10
+    assert parsed.diagnostics["expected_question_numbers"] == []
+    assert parsed.diagnostics["expected_question_coverage_unknown"] is True
+
+
 def test_public_ocr_conversion_preserves_explicit_shared_passage_groups(monkeypatch):
     import scripts.import_public_exam_pdf_folder as public_importer
     from src.parser.offline_exam import ParsedOfflineQuestion
