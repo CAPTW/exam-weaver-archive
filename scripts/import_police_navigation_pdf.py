@@ -29,25 +29,21 @@ from scripts.analyze_police_navigation_pdfs import (  # noqa: E402
     SUBJECT_NAME,
     build_groups,
     classify_topic,
-    compact_spaces,
     group_label,
     load_jsonl,
-    segment_map_for_group,
-    strip_noise,
 )
 from src.database.repository import ExamRepository  # noqa: E402
+from src.parser.offline_sources import (  # noqa: E402
+    OfflineParseResult,
+    parse_offline_question_pdf,
+    select_group_questions,
+)
 from src.parser.question import Choice, Question  # noqa: E402
 from src.web_import.importer import QuestionSource, QuestionSourceRegistry, sha256_file, utc_timestamp  # noqa: E402
 
 
 DEFAULT_OUTPUT_DIR = Path("outputs/police_navigation_pdf_20260702_v3")
 EXAM_CODE = "해양경찰 경찰직 항해학"
-GENERIC_CHOICES = [
-    "① 원문 보기 참조",
-    "② 원문 보기 참조",
-    "③ 원문 보기 참조",
-    "④ 원문 보기 참조",
-]
 
 ANSWER_FILENAMES = {
     "recent_2025_h2": "[기출정답]경찰직 항해학(25년 하반기).pdf",
@@ -359,71 +355,6 @@ class DigitAnswerTableReader:
         ))
 
 
-QUESTION_CUE_RE = re.compile(
-    r"(?:것은\??|옳은|옳지|고르시오|몇\s*개|무엇인가|설명|내용|해당|괄호|빈칸)",
-    re.IGNORECASE,
-)
-CHOICE_MARKER_RE = re.compile(
-    r"(?:①|②|③|④|[㉠-㉭]|\([0O1Il기나다라마바사아의피쇠]\)?|(?<!\d)[1-4][\)\.]\s)"
-)
-
-
-def compact_text(value: str) -> str:
-    return re.sub(r"\s+", " ", strip_noise(value or "")).strip()
-
-
-def split_question_and_choices(segment: str) -> tuple[str, list[str], list[str]]:
-    text = compact_text(segment)
-    if not text:
-        return "", [], ["blank_segment"]
-
-    markers = [match for match in CHOICE_MARKER_RE.finditer(text) if match.start() > 10]
-    if len(markers) >= 4:
-        best = None
-        for index in range(len(markers) - 3):
-            seq = markers[index:index + 4]
-            score = _choice_sequence_score(text, seq)
-            if best is None or score > best[0]:
-                best = (score, seq)
-        if best and best[0] > -100:
-            seq = best[1]
-            choices = []
-            for index, marker in enumerate(seq):
-                end = seq[index + 1].start() if index + 1 < len(seq) else len(text)
-                choices.append(text[marker.end():end].strip())
-            if len(choices) == 4 and all(choices):
-                return text[:seq[0].start()].strip(), choices, []
-
-    count_match = re.search(r"(없음|\d+개)\s+(없음|\d+개)\s+(없음|\d+개)\s+(없음|\d+개)\s*$", text)
-    if count_match:
-        return text[:count_match.start()].strip(), list(count_match.groups()), []
-
-    return text, GENERIC_CHOICES.copy(), ["choice_split_review"]
-
-
-def _choice_sequence_score(text: str, seq: list[re.Match]) -> float:
-    first = seq[0].start()
-    chunks = []
-    for index, marker in enumerate(seq):
-        end = seq[index + 1].start() if index + 1 < len(seq) else len(text)
-        chunks.append(text[marker.end():end].strip())
-    if any(not chunk for chunk in chunks):
-        return -999
-
-    score = first / 10_000
-    cues = list(QUESTION_CUE_RE.finditer(text[:first]))
-    if cues:
-        score += 50
-        score -= min(100, first - cues[-1].end()) * 0.1
-    if first < len(text) * 0.20:
-        score -= 20
-    if max(len(chunk) for chunk in chunks) > 900:
-        score -= 20
-    if sum(1 for chunk in chunks if len(chunk) > 6) >= 3:
-        score += 20
-    return score
-
-
 def read_analysis_rows(output_dir: Path) -> dict[str, dict]:
     path = output_dir / "02_questions_master.csv"
     if not path.exists():
@@ -464,6 +395,14 @@ def build_session_map(groups: list[dict]) -> dict[int, int]:
     return sessions
 
 
+def parse_subject_question_pdf(
+    path: Path, metadata: dict[str, object] | None = None
+) -> OfflineParseResult:
+    source_metadata = {"subject_name": SUBJECT_NAME, "exam_type": EXAM_CODE}
+    source_metadata.update(metadata or {})
+    return parse_offline_question_pdf(path, source_metadata)
+
+
 def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path) -> tuple[list[ParsedQuestion], dict]:
     groups = build_groups(page_records)
     expected_groups = sum(len(items) for items in KNOWN_GROUPS.values())
@@ -478,6 +417,7 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
     missing_text = []
     choice_review = 0
     answer_review = 0
+    source_cache: dict[str, OfflineParseResult] = {}
 
     for group_index, group in enumerate(groups, start=1):
         answer_key = str(group.get("answer_key") or "")
@@ -488,33 +428,26 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
         if len(answers) != expected_count:
             raise RuntimeError(f"Answer count mismatch for {answer_key}: expected {expected_count}, got {len(answers)}")
 
-        segments = segment_map_for_group(group)
         label = group_label(group, group_index)
         year = int(group.get("year") or 0)
         session = session_map[group_index]
         source_paths = {page.get("source_path", "") for page in group["pages"] if page.get("source_path")}
         source_path = sorted(source_paths)[0] if source_paths else ""
+        common_questions, rejected_count = select_group_questions(
+            group, parse_subject_question_pdf, source_cache
+        )
+        choice_review += rejected_count
 
         for question_number in range(1, expected_count + 1):
-            parser_tags: list[str] = []
-            segment_info = segments.get(question_number)
-            if segment_info is None:
+            parsed = common_questions.get(question_number)
+            if parsed is None:
                 missing_text.append(f"G{group_index:03d}-Q{question_number:02d}")
-                segment = f"원문 PDF 확인 필요: OCR 또는 번호분할 누락 ({label} {question_number}번)."
-                page_number = group["pages"][0]["page"] if group.get("pages") else 0
-                question_text = segment
-                choice_texts = GENERIC_CHOICES.copy()
-                parser_tags.append("text_missing_review")
-            else:
-                segment, page_number = segment_info
-                question_text, choice_texts, parser_tags = split_question_and_choices(segment)
-                if not question_text:
-                    question_text = f"원문 PDF 확인 필요: OCR 문항 본문 공백 ({label} {question_number}번)."
-                    choice_texts = GENERIC_CHOICES.copy()
-                    parser_tags.append("text_blank_review")
-
-            if "choice_split_review" in parser_tags:
-                choice_review += 1
+                continue
+            question_text = parsed.stem
+            choice_texts = parsed.choices
+            page_number = parsed.source_page
+            parser_tags = list(parsed.diagnostics)
+            segment = "\n".join([question_text, *choice_texts])
 
             row = analysis_rows.get(f"G{group_index:03d}-Q{question_number:02d}", {})
             topic = classify_topic(segment)
@@ -540,10 +473,7 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
                 answer_review += 1
                 parser_tags.append("answer_requires_manual_review")
 
-            choices = [Choice(number=index, symbol=f"{index}", text=text) for index, text in enumerate(choice_texts[:4], start=1)]
-            while len(choices) < 4:
-                index = len(choices) + 1
-                choices.append(Choice(number=index, symbol=f"{index}", text=GENERIC_CHOICES[index - 1]))
+            choices = [Choice(number=index, symbol=f"{index}", text=text) for index, text in enumerate(choice_texts, start=1)]
 
             question = Question(
                 number=question_number,

@@ -33,11 +33,14 @@ from scripts.analyze_maritime_english_pdfs import (  # noqa: E402
     classify_topic,
     group_label,
     load_jsonl,
-    question_starts,
-    strip_noise,
 )
 from src.database.repository import ExamRepository  # noqa: E402
-from src.parser.question import Choice, Question, QuestionParser  # noqa: E402
+from src.parser.offline_sources import (  # noqa: E402
+    OfflineParseResult,
+    parse_offline_question_pdf,
+    select_group_questions,
+)
+from src.parser.question import Choice, Question  # noqa: E402
 from src.web_import.importer import QuestionSource, QuestionSourceRegistry, sha256_file, utc_timestamp  # noqa: E402
 
 
@@ -49,12 +52,6 @@ ANSWER_FILENAMES = {
     "recent_2024_h2_2025_h1": "[기출정답]해사영어(24년 하반기-25년 상반기).pdf",
     "archive_2024_2013": "[기출정답]해사영어(24년-13년).pdf",
 }
-GENERIC_CHOICES = [
-    "① 원문 보기 참조",
-    "② 원문 보기 참조",
-    "③ 원문 보기 참조",
-    "④ 원문 보기 참조",
-]
 
 
 @dataclass
@@ -312,136 +309,6 @@ class CircledAnswerTableReader:
         return answers, scores
 
 
-QUESTION_CUE_RE = re.compile(
-    r"(?:것은\??|고르시오\.?|Select|Choose|blank\.?|무엇인가\??|몇\s*개\s*인가\??|일치하지 않는 것은\??)",
-    re.IGNORECASE,
-)
-CHOICE_MARKER_RE = re.compile(
-    r"(?:①|②|③|④|[㉠-㉵]|\([0O1Il기나다라마바사아의피쇠]\)?|(?<!\d)[1-4][\)\.]\s)"
-)
-
-
-def compact_text(value: str) -> str:
-    return re.sub(r"\s+", " ", strip_noise(value or "")).strip()
-
-
-def split_question_and_choices(segment: str) -> tuple[str, list[str], list[str]]:
-    text = compact_text(segment)
-    if not text:
-        return "", [], ["blank_segment"]
-
-    markers = [match for match in CHOICE_MARKER_RE.finditer(text) if match.start() > 10]
-    if len(markers) >= 4:
-        best = None
-        for index in range(len(markers) - 3):
-            seq = markers[index:index + 4]
-            score = _choice_sequence_score(text, seq)
-            if best is None or score > best[0]:
-                best = (score, seq)
-        if best and best[0] > -100:
-            seq = best[1]
-            choices = []
-            for index, marker in enumerate(seq):
-                end = seq[index + 1].start() if index + 1 < len(seq) else len(text)
-                choices.append(text[marker.end():end].strip())
-            if len(choices) == 4 and all(choices):
-                return text[:seq[0].start()].strip(), choices, []
-
-    count_match = re.search(r"(없음|\d+개)\s+(없음|\d+개)\s+(없음|\d+개)\s+(없음|\d+개)\s*$", text)
-    if count_match:
-        return text[:count_match.start()].strip(), list(count_match.groups()), []
-
-    return text, GENERIC_CHOICES.copy(), ["choice_split_review"]
-
-
-def _choice_sequence_score(text: str, seq: list[re.Match]) -> float:
-    first = seq[0].start()
-    chunks = []
-    for index, marker in enumerate(seq):
-        end = seq[index + 1].start() if index + 1 < len(seq) else len(text)
-        chunks.append(text[marker.end():end].strip())
-    if any(not chunk for chunk in chunks):
-        return -999
-
-    score = first / 10_000
-    cues = list(QUESTION_CUE_RE.finditer(text[:first]))
-    if cues:
-        score += 50
-        score -= min(100, first - cues[-1].end()) * 0.1
-    if first < len(text) * 0.25:
-        score -= 20
-    if max(len(chunk) for chunk in chunks) > 800:
-        score -= 20
-    if sum(1 for chunk in chunks if len(chunk) > 8) >= 3:
-        score += 20
-    return score
-
-
-def build_segment_map(group: dict, parser: QuestionParser) -> dict[int, tuple[str, int]]:
-    candidates: dict[int, tuple[str, int, int]] = {}
-
-    def add_candidate(number: int, segment: str, page_number: int) -> None:
-        if not 1 <= number <= 20:
-            return
-        quality = len(compact_text(segment))
-        if quality == 0:
-            return
-        current = candidates.get(number)
-        if current is None or quality > current[2]:
-            candidates[number] = (segment, page_number, quality)
-
-    for page in group["pages"]:
-        text = page.get("text", "")
-        starts = [(number, start, end) for number, start, end in question_starts(text)]
-        starts.extend(
-            (int(match.group(1)), match.start(), match.end())
-            for match in parser._find_question_starts(text, allow_subject_reset=False)
-        )
-        starts = sorted(starts, key=lambda item: item[1])
-        unique_starts = []
-        for number, start, end in starts:
-            if not 1 <= number <= 20:
-                continue
-            if any(existing_number == number and abs(existing_start - start) < 8 for existing_number, existing_start, _ in unique_starts):
-                continue
-            unique_starts.append((number, start, end))
-
-        for index, (number, _, end) in enumerate(unique_starts):
-            next_start = unique_starts[index + 1][1] if index + 1 < len(unique_starts) else len(text)
-            add_candidate(number, text[end:next_start], page["page"])
-
-        for parsed in parser._parse_page(text, page["page"], [], allow_subject_reset=False):
-            segment = parsed.text + " " + " ".join(f"{choice.symbol} {choice.text}" for choice in parsed.choices)
-            add_candidate(parsed.number, segment, page["page"])
-
-    recover_numbered_segments(candidates)
-    return {number: (segment, page) for number, (segment, page, _) in candidates.items()}
-
-
-def recover_numbered_segments(candidates: dict[int, tuple[str, int, int]]) -> None:
-    """Split missed question starts embedded in the previous OCR segment."""
-    for missing in range(1, 21):
-        if missing in candidates:
-            continue
-        previous_numbers = [number for number in candidates if number < missing]
-        if not previous_numbers:
-            continue
-        previous = max(previous_numbers)
-        segment, page_number, _ = candidates[previous]
-        match = re.search(rf"(?m)(?<!\d){missing}\s*[\.\u2022]\s*(?=\S)", segment)
-        if match is None and missing >= 10:
-            # OCR sometimes drops the leading "1" in 17/18/19 at a line start.
-            match = re.search(rf"(?m)^\s*{missing % 10}\s*[\.\u2022]\s*(?=\S)", segment)
-        if match is None or match.start() < 40:
-            continue
-        before = segment[:match.start()].strip()
-        after = segment[match.end():].strip()
-        if len(compact_text(after)) < 30:
-            continue
-        candidates[previous] = (before, page_number, len(compact_text(before)))
-        candidates[missing] = (after, page_number, len(compact_text(after)))
-
-
 def read_analysis_rows(output_dir: Path) -> dict[str, dict]:
     path = output_dir / "02_questions_master.csv"
     if not path.exists():
@@ -481,6 +348,14 @@ def build_session_map(groups: list[dict]) -> dict[int, int]:
     return sessions
 
 
+def parse_subject_question_pdf(
+    path: Path, metadata: dict[str, object] | None = None
+) -> OfflineParseResult:
+    source_metadata = {"subject_name": SUBJECT_NAME, "exam_type": EXAM_CODE}
+    source_metadata.update(metadata or {})
+    return parse_offline_question_pdf(path, source_metadata)
+
+
 def build_questions(
     page_records: list[dict],
     output_dir: Path,
@@ -493,15 +368,14 @@ def build_questions(
     analysis_rows = read_analysis_rows(output_dir)
     answer_map = build_answer_map(input_dir)
     session_map = build_session_map(groups)
-    parser = QuestionParser(EXAM_CODE)
 
     parsed_questions: list[ParsedQuestion] = []
     skipped_missing = []
     choice_review = 0
     no_answer = 0
+    source_cache: dict[str, OfflineParseResult] = {}
 
     for group_index, group in enumerate(groups, start=1):
-        segments = build_segment_map(group, parser)
         answers = answer_map.get(group_index)
         if not answers or len(answers) != 20:
             raise RuntimeError(f"Missing 20-answer key for group G{group_index:03d}")
@@ -511,20 +385,22 @@ def build_questions(
         session = session_map[group_index]
         source_paths = {page.get("source_path", "") for page in group["pages"] if page.get("source_path")}
         source_path = sorted(source_paths)[0] if source_paths else ""
+        common_questions, rejected_count = select_group_questions(
+            group, parse_subject_question_pdf, source_cache
+        )
+        choice_review += rejected_count
 
         for question_number in range(1, 21):
-            segment_info = segments.get(question_number)
-            if segment_info is None:
+            common_question = common_questions.get(question_number)
+            if common_question is None:
                 skipped_missing.append(f"G{group_index:03d}-Q{question_number:02d}")
                 continue
 
-            segment, page_number = segment_info
-            question_text, choice_texts, parser_tags = split_question_and_choices(segment)
-            if not question_text:
-                skipped_missing.append(f"G{group_index:03d}-Q{question_number:02d}")
-                continue
-            if "choice_split_review" in parser_tags:
-                choice_review += 1
+            question_text = common_question.stem
+            choice_texts = common_question.choices
+            page_number = common_question.source_page
+            parser_tags = list(common_question.diagnostics)
+            segment = "\n".join([question_text, *choice_texts])
 
             row = analysis_rows.get(f"G{group_index:03d}-Q{question_number:02d}", {})
             topic = classify_topic(segment)
@@ -548,11 +424,8 @@ def build_questions(
 
             choices = [
                 Choice(number=index, symbol=f"{index}", text=text)
-                for index, text in enumerate(choice_texts[:4], start=1)
+                for index, text in enumerate(choice_texts, start=1)
             ]
-            while len(choices) < 4:
-                index = len(choices) + 1
-                choices.append(Choice(number=index, symbol=f"{index}", text=GENERIC_CHOICES[index - 1]))
 
             question = Question(
                 number=question_number,

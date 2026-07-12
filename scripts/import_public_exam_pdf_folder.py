@@ -43,6 +43,8 @@ from src.web_import.comcbt_pdf import (  # noqa: E402
     normalize_space,
     parse_answer_table_rows,
 )
+from src.parser.offline_sources import parse_offline_question_pdf  # noqa: E402
+from src.parser.question import Choice, Question  # noqa: E402
 from src.web_import.importer import (  # noqa: E402
     ComcbtImportService,
     QuestionSource,
@@ -987,6 +989,69 @@ def build_parsed_exam(
     return parsed, answer_key
 
 
+def build_ocr_required_exam(
+    path: Path,
+    meta: PdfMeta,
+    answer_text: CleanTextResult | None,
+    source_url: str,
+) -> tuple[ComcbtParsedExam, dict[int, int]]:
+    """Convert shared structured-parser output into the public importer model."""
+
+    offline = parse_offline_question_pdf(
+        path,
+        {
+            "exam_type": meta.exam_type,
+            "subject_name": meta.subject_name,
+            "year": meta.year,
+            "session": meta.session,
+            "probe": {"role": meta.role},
+        },
+    )
+    expected_numbers = [candidate.number for candidate in offline.questions]
+    answer_key: dict[int, int] = {}
+    if answer_text is not None:
+        answer_lines = replace_boundary_markers(
+            expand_parser_lines(answer_text.lines), meta.subject_name
+        )
+        answer_key = parse_gong_answer_key(answer_lines, expected_numbers)
+
+    questions = [
+        Question(
+            number=candidate.number,
+            text=candidate.stem,
+            choices=[
+                Choice(number=index, symbol=str(index), text=text)
+                for index, text in enumerate(candidate.choices, start=1)
+            ],
+            correct_answer=answer_key.get(candidate.number),
+            source_page=candidate.source_page,
+            subject_name=meta.subject_name,
+            year=meta.year,
+            session=meta.session,
+            exam_type=meta.exam_type,
+        )
+        for candidate in offline.questions
+    ]
+    return (
+        ComcbtParsedExam(
+            title=f"{meta.exam_type} {meta.year}년 {meta.session}회 {meta.subject_name}",
+            source_url=source_url,
+            exam_type=meta.exam_type,
+            subject_name=meta.subject_name,
+            year=meta.year,
+            session=meta.session,
+            questions=questions,
+            attachments=[],
+            selected_attachment=None,
+            diagnostics={
+                "parser": "offline_structured",
+                "rejected_question_count": len(offline.rejected),
+            },
+        ),
+        answer_key,
+    )
+
+
 def replace_boundary_markers(lines: list[PdfTextLine], subject_name: str) -> list[PdfTextLine]:
     return [
         copy_line(line, f"1과목 : {subject_name}") if line.text == BOUNDARY_MARKER else line
@@ -1330,21 +1395,24 @@ def process_pdf(
     if write_text_cache:
         write_text_cache_files(out_dir, meta, question_text, answer_pair, answer_text)
 
+    use_shared_ocr_parser = False
     if not question_text.text_extractable:
         no_text_probe = no_text_pre_probe or probe_no_text_pdf(path)
-        status = "skipped_non_exam_listing" if no_text_probe.cause == "listing_or_non_exam_page" else "blocked_no_text"
-        return ProcessResult(
-            path=str(path),
-            relative_path=meta.relative_path,
-            status=status,
-            exam_type=meta.exam_type,
-            subject_name=meta.subject_name,
-            year=meta.year,
-            session=meta.session,
-            page_count=question_text.page_count or no_text_probe.page_count,
-            answer_pair=str(answer_pair or ""),
-            reason=no_text_probe_reason(question_text.notes, no_text_probe),
-        )
+        use_shared_ocr_parser = no_text_probe.cause == "ocr_required"
+        if not use_shared_ocr_parser:
+            status = "skipped_non_exam_listing" if no_text_probe.cause == "listing_or_non_exam_page" else "blocked_no_text"
+            return ProcessResult(
+                path=str(path),
+                relative_path=meta.relative_path,
+                status=status,
+                exam_type=meta.exam_type,
+                subject_name=meta.subject_name,
+                year=meta.year,
+                session=meta.session,
+                page_count=question_text.page_count or no_text_probe.page_count,
+                answer_pair=str(answer_pair or ""),
+                reason=no_text_probe_reason(question_text.notes, no_text_probe),
+            )
 
     if pre_skip_existing and existing_keys.contains(meta.key):
         return ProcessResult(
@@ -1362,7 +1430,12 @@ def process_pdf(
 
     try:
         source_url = local_source_url(path)
-        parsed, answer_key = build_parsed_exam(meta, question_text, answer_text, source_url)
+        if use_shared_ocr_parser:
+            parsed, answer_key = build_ocr_required_exam(
+                path, meta, answer_text, source_url
+            )
+        else:
+            parsed, answer_key = build_parsed_exam(meta, question_text, answer_text, source_url)
     except Exception as exc:
         return ProcessResult(
             path=str(path),
@@ -1375,6 +1448,20 @@ def process_pdf(
             page_count=question_text.page_count,
             answer_pair=str(answer_pair or ""),
             reason=f"{type(exc).__name__}: {exc}",
+        )
+
+    if use_shared_ocr_parser and not parsed.questions:
+        return ProcessResult(
+            path=str(path),
+            relative_path=meta.relative_path,
+            status="blocked_no_text",
+            exam_type=meta.exam_type,
+            subject_name=meta.subject_name,
+            year=meta.year,
+            session=meta.session,
+            page_count=question_text.page_count,
+            answer_pair=str(answer_pair or ""),
+            reason="shared structured OCR parser produced no importable questions",
         )
 
     parsed, answer_key, skipped_fragment_questions = filter_fragment_questions(parsed, answer_key)
