@@ -222,13 +222,41 @@ def select_group_questions(
         if result is None:
             result = parse_source(Path(source_path), metadata)
             cache[source_path] = result
-        rejected_count += sum(
-            rejected.question.source_page in page_numbers
-            for rejected in result.rejected
+        source_page_numbers = {
+            int(page.get("page", 0) or 0)
+            for page in raw_pages
+            if isinstance(page, Mapping)
+            and str(page.get("source_path", "") or "") == source_path
+        }
+        scoped_pages = tuple(
+            page
+            for page in result.structured_pages
+            if page.number in source_page_numbers
         )
-        for question in result.questions:
-            if question.source_page not in page_numbers:
-                continue
+        has_complete_scope = (
+            bool(source_page_numbers)
+            and {page.number for page in scoped_pages} == source_page_numbers
+        )
+        if has_complete_scope:
+            candidates = OfflineExamParser().parse_pages(list(scoped_pages))
+            scoped_questions: list[ParsedOfflineQuestion] = []
+            for candidate in candidates:
+                quality = validate_offline_question(candidate)
+                if quality.importable:
+                    scoped_questions.append(candidate)
+                else:
+                    rejected_count += 1
+        else:
+            rejected_count += sum(
+                rejected.question.source_page in page_numbers
+                for rejected in result.rejected
+            )
+            scoped_questions = [
+                question
+                for question in result.questions
+                if question.source_page in page_numbers
+            ]
+        for question in scoped_questions:
             current = selected.get(question.number)
             if current is None or question.confidence > current.confidence:
                 selected[question.number] = question

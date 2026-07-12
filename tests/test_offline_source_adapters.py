@@ -293,6 +293,94 @@ def test_subject_adapters_delegate_to_shared_parser_without_placeholders(
     assert "원문 보기 참조" not in inspect.getsource(module)
 
 
+def test_maritime_provider_reparses_registered_group_pages_with_hard_end_boundary(monkeypatch, tmp_path):
+    import scripts.import_maritime_law_pdf as provider
+    from src.parser.offline_exam import OfflineExamParser, ParsedOfflineQuestion
+    from src.parser.offline_sources import (
+        DocumentRole,
+        OfflineParseResult,
+        RejectedOfflineQuestion,
+    )
+
+    def layout_line(texts, y, page_number):
+        words = tuple(
+            LayoutWord(text, (0.06 + index * 0.12, y, 0.15 + index * 0.12, y + 0.012), 0.99)
+            for index, text in enumerate(texts)
+        )
+        return LayoutLine(words, (words[0].bbox[0], y, words[-1].bbox[2], y + 0.012), page_number, 0)
+
+    expected_q40_choices = [
+        "해양경찰청이 단독 소관 하는 법률은 모두 다이다.",
+        "유선 및 도선 사업법은 해양수산부 소관 법률이다.",
+        "선박교통관제법은 제정되었으나 시행되지 않고 있다.",
+        "내수면과 해수면은 모두 해양경찰 관할이다.",
+    ]
+    pages = []
+    question_number = 1
+    for page_number, count in zip(range(2, 8), (7, 7, 7, 7, 6, 6)):
+        lines = []
+        for slot in range(count):
+            y = 0.08 + slot * 0.115
+            lines.append(layout_line([f"{question_number}.", f"문제 {question_number}"], y, page_number))
+            choices = (
+                expected_q40_choices
+                if question_number == 40
+                else [f"{question_number}번 선택지 {index}" for index in range(1, 5)]
+            )
+            for offset, (marker, choice) in enumerate(zip(("①", "②", "③", "④"), choices), start=1):
+                lines.append(layout_line([marker, choice], y + offset * 0.018, page_number))
+            question_number += 1
+        pages.append(StructuredPage(page_number, 1, 1, "scanned", tuple(lines), ()))
+
+    scoped_questions = OfflineExamParser().parse_pages(pages)
+    assert [question.number for question in scoped_questions] == list(range(1, 41))
+    polluted_q40 = ParsedOfflineQuestion(
+        40,
+        scoped_questions[-1].stem + "\n모두 몇 개인가?\n<보기>\n3개 4개 5개 6개",
+        [],
+        7,
+        0.99,
+        ("invalid_choice_count",),
+    )
+    source_path = "questions.pdf"
+    full_result = OfflineParseResult(
+        Path(source_path),
+        DocumentRole.QUESTION,
+        {},
+        tuple(scoped_questions[:-1]),
+        (RejectedOfflineQuestion(polluted_q40, ("invalid_choice_count", "parser_diagnostic")),),
+        tuple(pages),
+    )
+    group = {
+        "answer_key": "2021|승진|경사",
+        "question_count": 40,
+        "year": 2021,
+        "period": "승진",
+        "session": "경사",
+        "category": "경사",
+        "pdf_id": "fixture",
+        "filename": source_path,
+        "pages": [
+            {"page": page_number, "source_path": source_path}
+            for page_number in range(2, 8)
+        ],
+    }
+
+    monkeypatch.setattr(provider, "KNOWN_GROUPS", {"fixture": [object()]})
+    monkeypatch.setattr(provider, "build_groups", lambda records: [group])
+    monkeypatch.setattr(provider, "build_answer_map", lambda input_dir: {group["answer_key"]: [1] * 40})
+    monkeypatch.setattr(provider, "read_analysis_rows", lambda output_dir: {})
+    monkeypatch.setattr(provider, "parse_subject_question_pdf", lambda path, metadata=None: full_result)
+
+    parsed, summary = provider.build_questions([{}], tmp_path, tmp_path)
+    q40 = next(item.question for item in parsed if item.question.number == 40)
+
+    assert len(parsed) == 40
+    assert summary["choice_split_review"] == 0
+    assert [choice.text for choice in q40.choices] == expected_q40_choices
+    assert "모두 몇 개인가?" not in q40.text
+
+
 def test_public_importer_ocr_required_adapter_uses_shared_parser(monkeypatch):
     import scripts.import_public_exam_pdf_folder as public_importer
     from src.parser.offline_exam import ParsedOfflineQuestion
