@@ -7,15 +7,23 @@ import os
 import io
 import contextlib
 import unicodedata
+import re
+import math
 from pathlib import Path
 from typing import Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import pypdf
 import logging
 
-from src.parser.layout import StructuredPage, build_structured_page
+from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+
+_VISUAL_QUESTION_START = re.compile(r"^\s*\d{1,3}\s*[.)]")
+_VISUAL_DAMAGED_MARKERS = {"㉦": 1, "㉨": 2, "㉭": 3}
+_VISUAL_EXPLICIT_MARKERS = {"①": 1, "②": 2, "③": 3, "④": 4}
+_VISUAL_CHOICE_SYMBOLS = ("①", "②", "③", "④")
 
 
 @dataclass
@@ -524,7 +532,7 @@ class PDFExtractor:
         result = await engine.recognize_async(bitmap)
 
         detected_split = self._detect_vertical_column_split(image)
-        return self._structured_page_from_ocr_result(
+        structured_page = self._structured_page_from_ocr_result(
             result,
             page_number=page_number,
             page_width=page_width,
@@ -532,6 +540,141 @@ class PDFExtractor:
             image_width=image.width,
             image_height=image.height,
             divider_x=detected_split,
+        )
+        return self._restore_visual_choice_markers(structured_page, image)
+
+    def _restore_visual_choice_markers(self, page: StructuredPage, image) -> StructuredPage:
+        """Restore a complete vertical ①-④ sequence only with raster evidence."""
+        gray = image.convert("L")
+        lines = list(page.lines)
+        replacements: dict[int, str] = {}
+        columns = sorted({line.column for line in lines})
+
+        for column in columns:
+            indexes = [index for index, line in enumerate(lines) if line.column == column]
+            starts = [
+                position
+                for position, index in enumerate(indexes)
+                if _VISUAL_QUESTION_START.match(lines[index].text)
+            ]
+            for start_offset, start_position in enumerate(starts):
+                end_position = starts[start_offset + 1] if start_offset + 1 < len(starts) else len(indexes)
+                region_indexes = indexes[start_position:end_position]
+                damaged_lines = [
+                    lines[index]
+                    for index in region_indexes
+                    if lines[index].words
+                    and str(lines[index].words[0].text).strip()[:1] in _VISUAL_DAMAGED_MARKERS
+                ]
+                if not damaged_lines:
+                    continue
+                marker_x = sum(line.words[0].bbox[0] for line in damaged_lines) / len(damaged_lines)
+
+                candidates: list[tuple[int, int | None]] = []
+                for index in region_indexes[1:]:
+                    line = lines[index]
+                    if not line.words:
+                        continue
+                    first_text = str(line.words[0].text).strip()
+                    known_number = _VISUAL_EXPLICIT_MARKERS.get(first_text[:1])
+                    has_damaged_anchor = first_text[:1] in _VISUAL_DAMAGED_MARKERS
+                    is_missing_marker_line = (
+                        marker_x + 0.018 <= float(line.bbox[0]) <= marker_x + 0.060
+                    )
+                    if known_number is None and not has_damaged_anchor and not is_missing_marker_line:
+                        continue
+                    if not self._has_visual_marker_ring(gray, marker_x, line.bbox):
+                        continue
+                    candidates.append((index, known_number))
+
+                if len(candidates) != 4:
+                    continue
+                if any(
+                    known_number is not None and known_number != choice_number
+                    for choice_number, (_, known_number) in enumerate(candidates, start=1)
+                ):
+                    continue
+                centers_y = [
+                    (float(lines[index].bbox[1]) + float(lines[index].bbox[3])) / 2
+                    for index, _ in candidates
+                ]
+                if any(right - left < 0.012 for left, right in zip(centers_y, centers_y[1:])):
+                    continue
+                for choice_number, (index, _) in enumerate(candidates, start=1):
+                    replacements[index] = _VISUAL_CHOICE_SYMBOLS[choice_number - 1]
+
+        if not replacements:
+            return page
+        for index, symbol in replacements.items():
+            lines[index] = self._line_with_visual_marker(lines[index], symbol)
+        return replace(page, lines=tuple(lines))
+
+    @classmethod
+    def _has_visual_marker_ring(cls, gray, marker_x: float, bbox) -> bool:
+        width, height = gray.size
+        center_x = (marker_x + 0.009) * width
+        center_y = ((float(bbox[1]) + float(bbox[3])) / 2) * height
+        crop = gray.crop((
+            max(0, int(round(center_x - 0.016 * width))),
+            max(0, int(round(center_y - 0.011 * height))),
+            min(width, int(round(center_x + 0.016 * width))),
+            min(height, int(round(center_y + 0.011 * height))),
+        ))
+        coverage, ring_pixels = cls._ring_coverage(crop)
+        return coverage >= 23 and ring_pixels >= 140
+
+    @staticmethod
+    def _ring_coverage(crop) -> tuple[int, int]:
+        gray = crop.convert("L").resize((80, 80))
+        pixels = gray.load()
+        buckets = set()
+        ring_pixels = 0
+        for y in range(12, 68):
+            for x in range(12, 68):
+                if pixels[x, y] >= 170:
+                    continue
+                radius = math.hypot(x - 40, y - 40)
+                if 13 <= radius <= 22:
+                    bucket = int(
+                        ((math.atan2(y - 40, x - 40) + math.pi) / (2 * math.pi)) * 24
+                    )
+                    buckets.add(bucket)
+                    ring_pixels += 1
+        return len(buckets), ring_pixels
+
+    @staticmethod
+    def _line_with_visual_marker(line: LayoutLine, symbol: str) -> LayoutLine:
+        words = list(line.words)
+        first_text = str(words[0].text).strip()
+        if first_text[:1] in _VISUAL_DAMAGED_MARKERS or first_text[:1] in _VISUAL_EXPLICIT_MARKERS:
+            words[0] = replace(
+                words[0],
+                text=symbol + first_text[1:],
+                visual_choice_marker=True,
+            )
+        else:
+            marker_x = max(float(line.bbox[0]) - 0.030, 0.0)
+            words.insert(
+                0,
+                LayoutWord(
+                    text=symbol,
+                    bbox=(marker_x, line.bbox[1], marker_x + 0.018, line.bbox[3]),
+                    confidence=0.95,
+                    column=line.column,
+                    visual_choice_marker=True,
+                ),
+            )
+        words.sort(key=lambda word: word.bbox[0])
+        return LayoutLine(
+            words=tuple(words),
+            bbox=(
+                min(word.bbox[0] for word in words),
+                line.bbox[1],
+                max(word.bbox[2] for word in words),
+                line.bbox[3],
+            ),
+            page=line.page,
+            column=line.column,
         )
 
     @staticmethod

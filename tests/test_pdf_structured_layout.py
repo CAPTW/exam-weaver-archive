@@ -4,10 +4,11 @@ from types import SimpleNamespace
 
 import fitz
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from src.parser.extractor import PDFExtractor
 from src.parser.layout import LayoutWord, StructuredPage, build_structured_page
+from src.parser.offline_exam import OfflineExamParser
 
 
 def _word(x0, y0, x1, text, *, height=12):
@@ -309,3 +310,164 @@ def test_winrt_adapter_scales_pixels_preserves_confidence_and_matches_text_order
     assert structured.lines[0].words[0].bbox == pytest.approx((0.1, 0.1, 0.2, 0.15))
     assert structured.lines[0].words[0].confidence == pytest.approx(0.83)
     assert extractor._structured_page_text(structured) == "A B\nC D\nE F"
+
+
+@pytest.mark.parametrize(
+    ("question_number", "known_markers", "line_counts"),
+    [
+        pytest.param(1, (1, 3), (4, 5, 3, 3), id="q1"),
+        pytest.param(5, (1, 3), (3, 4, 2, 3), id="q5"),
+        pytest.param(7, (3,), (3, 1, 3, 1), id="q7"),
+        pytest.param(12, (1, 3), (3, 5, 3, 2), id="q12"),
+        pytest.param(14, (1, 2, 3), (1, 1, 1, 2), id="q14"),
+        pytest.param(17, (1, 2, 3), (2, 1, 2, 2), id="q17"),
+        pytest.param(29, (2, 3), (4, 3, 2, 5), id="q29"),
+        pytest.param(30, (1, 2, 3), (3, 2, 2, 4), id="q30"),
+    ],
+)
+def test_visual_choice_markers_restore_all_rejected_ronpark_boundaries(
+    question_number, known_markers, line_counts
+):
+    damaged_markers = {1: "㉦", 2: "㉨", 3: "㉭"}
+    words = [
+        {"text": f"{question_number}.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "문제", "bbox": (52, 50, 92, 64), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    expected_choices = []
+    y = 100
+    for choice_number, line_count in enumerate(line_counts, start=1):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+        if choice_number in known_markers:
+            words.append({
+                "text": damaged_markers[choice_number],
+                "bbox": (50, y, 68, y + 14),
+                "confidence": 0.80,
+            })
+        choice_parts = [f"선택지{choice_number}-시작"]
+        words.append({
+            "text": choice_parts[0],
+            "bbox": (80, y, 450, y + 14),
+            "confidence": 0.98,
+        })
+        for continuation_number in range(1, line_count):
+            y += 20
+            text = f"선택지{choice_number}-연속{continuation_number}"
+            choice_parts.append(text)
+            words.append({
+                "text": text,
+                "bbox": (80, y, 300, y + 14),
+                "confidence": 0.98,
+            })
+        expected_choices.append(" ".join(choice_parts))
+        y += 20
+
+    structured = build_structured_page(
+        words,
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == expected_choices
+
+
+def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
+    words = [
+        {"text": "17.", "bbox": (20, 650, 42, 664), "confidence": 0.98},
+        {"text": "문제", "bbox": (52, 650, 92, 664), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    damaged_markers = ("㉦", "㉨", "㉭", None)
+    for choice_number, (marker, y) in enumerate(zip(damaged_markers, (700, 750, 800, 850)), start=1):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+        if marker:
+            words.append({"text": marker, "bbox": (50, y, 68, y + 14), "confidence": 0.80})
+        words.append({
+            "text": f"선택지{choice_number}",
+            "bbox": (80, y, 450, y + 14),
+            "confidence": 0.98,
+        })
+    words.append({
+        "text": "넷째선택지-연속",
+        "bbox": (80, 900, 300, 914),
+        "confidence": 0.98,
+    })
+    structured = build_structured_page(
+        words,
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices[-1] == "선택지4 넷째선택지-연속"
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+
+
+def test_incomplete_visual_marker_sequence_is_left_untouched():
+    words = [
+        {"text": "1.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "문제", "bbox": (52, 50, 92, 64), "confidence": 0.98},
+        {"text": "㉦", "bbox": (50, 100, 68, 114), "confidence": 0.80},
+        {"text": "첫째", "bbox": (80, 100, 450, 114), "confidence": 0.98},
+        {"text": "둘째", "bbox": (80, 150, 450, 164), "confidence": 0.98},
+        {"text": "㉭", "bbox": (50, 200, 68, 214), "confidence": 0.80},
+        {"text": "셋째", "bbox": (80, 200, 450, 214), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (100, 150, 200):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+    structured = build_structured_page(
+        words,
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+
+    assert restored == structured
+    assert not any(word.visual_choice_marker for line in restored.lines for word in line.words)
+
+
+def test_fused_damaged_marker_keeps_its_choice_text_when_visually_restored():
+    words = [
+        {"text": "5.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "문제", "bbox": (52, 50, 92, 64), "confidence": 0.98},
+        {"text": "㉦첫째", "bbox": (50, 100, 180, 114), "confidence": 0.80},
+        {"text": "둘째", "bbox": (80, 150, 450, 164), "confidence": 0.98},
+        {"text": "㉭셋째", "bbox": (50, 200, 180, 214), "confidence": 0.80},
+        {"text": "넷째", "bbox": (80, 250, 450, 264), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (100, 150, 200, 250):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+    structured = build_structured_page(
+        words,
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["첫째", "둘째", "셋째", "넷째"]

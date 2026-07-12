@@ -205,6 +205,7 @@ class OfflineExamParser:
         stem_parts = [first_stem_text] if first_stem_text else []
         explicit_choices: dict[int, str] = {}
         explicit_marker_numbers: list[int] = []
+        explicit_choice_indexes: set[int] = set()
         active_choice: int | None = None
 
         for index, record in enumerate(region[1:], start=1):
@@ -214,12 +215,14 @@ class OfflineExamParser:
                 continue
             pieces = self._explicit_choice_pieces(record.text)
             if pieces:
+                explicit_choice_indexes.add(index)
                 for choice_number, text in pieces:
                     explicit_marker_numbers.append(choice_number)
                     explicit_choices[choice_number] = text
                     active_choice = choice_number
                 continue
             if active_choice is not None:
+                explicit_choice_indexes.add(index)
                 continuation = record.text.strip()
                 if continuation:
                     previous = explicit_choices.get(active_choice, "")
@@ -230,11 +233,17 @@ class OfflineExamParser:
                 stem_parts.append(record.text)
 
         diagnostics: list[str] = []
+        explicit_sequence_valid = False
         if explicit_choices:
             choices = [explicit_choices[key].strip() for key in sorted(explicit_choices)]
             if len(set(explicit_marker_numbers)) != len(explicit_marker_numbers):
                 diagnostics.append("duplicate_choice_marker")
             expected_markers = list(range(1, len(explicit_marker_numbers) + 1))
+            explicit_sequence_valid = (
+                len(explicit_choices) in (4, 5)
+                and len(set(explicit_marker_numbers)) == len(explicit_marker_numbers)
+                and explicit_marker_numbers == expected_markers
+            )
             if explicit_marker_numbers != expected_markers:
                 diagnostics.append("invalid_choice_sequence")
         else:
@@ -252,6 +261,13 @@ class OfflineExamParser:
         recovered_margin_indexes = set(damaged_indexes)
         if use_recovery and recovered_index is not None:
             recovered_margin_indexes.add(recovered_index)
+        has_visual_choice_sequence = any(
+            getattr(word, "visual_choice_marker", False)
+            for record in region
+            for word in record.words
+        )
+        if has_visual_choice_sequence and explicit_sequence_valid:
+            recovered_margin_indexes.update(explicit_choice_indexes)
         if any(
             record.ambiguous_bottom_margin
             for index, record in enumerate(region)
@@ -299,6 +315,8 @@ class OfflineExamParser:
                 continue
             if self._is_sequential_proposition_row(groups):
                 continue
+            if not self._has_damaged_marker_evidence(records[index].words):
+                continue
             raw_values = [" ".join(str(word.text).strip() for word in group) for group in groups]
             values = [self._strip_damaged_marker(value) for value in raw_values]
             values = self._repair_fused_numeric_marker(values)
@@ -311,6 +329,8 @@ class OfflineExamParser:
             return True
         groups = self._horizontal_cells(words)
         if len(groups) != 4 or self._is_sequential_proposition_row(groups):
+            return False
+        if not self._has_damaged_marker_evidence(words):
             return False
         values = [
             self._strip_damaged_marker(" ".join(str(word.text).strip() for word in group))
@@ -341,6 +361,13 @@ class OfflineExamParser:
         ]
         return values if self._plausible_choice_values(values) else None
 
+    @staticmethod
+    def _has_damaged_marker_evidence(words: Sequence[LayoutWord]) -> bool:
+        return any(
+            _DAMAGED_MARKER.match(str(word.text).strip())
+            for word in words
+        )
+
     def _recover_damaged_vertical_choices(
         self, region: Sequence[_LineRecord]
     ) -> tuple[set[int], list[str]] | None:
@@ -370,8 +397,8 @@ class OfflineExamParser:
         if first_number == 1:
             choice_start = first_index
         else:
-            choice_start = first_index - (first_number - 1)
-            if choice_start < 0:
+            choice_start = self._leading_choice_block_start(records, first_index)
+            if choice_start is None:
                 return None
 
         choices: list[str] = []
@@ -396,6 +423,21 @@ class OfflineExamParser:
             return None
         return set(range(choice_start + 1, len(region))), choices
 
+    @staticmethod
+    def _leading_choice_block_start(
+        records: Sequence[_LineRecord], first_marker_index: int
+    ) -> int | None:
+        if first_marker_index <= 0:
+            return None
+        anchor_x = float(records[first_marker_index - 1].bbox[0])
+        choice_start = first_marker_index - 1
+        while choice_start > 0:
+            previous_x = float(records[choice_start - 1].bbox[0])
+            if abs(previous_x - anchor_x) > 0.008:
+                break
+            choice_start -= 1
+        return choice_start
+
     def _recover_two_by_two_choice_grid(
         self, region: Sequence[_LineRecord]
     ) -> tuple[set[int], list[str]] | None:
@@ -417,6 +459,8 @@ class OfflineExamParser:
             if first_cells is None or second_cells is None:
                 continue
             choices = first_cells + second_cells
+            if all(len(re.findall(r"[㉠-㉭]", choice)) == 1 for choice in choices):
+                continue
             if all(choices):
                 return {second_index - 1, second_index}, choices
         return None
@@ -450,24 +494,19 @@ class OfflineExamParser:
             return [" ".join(texts).strip()]
         if len(texts) == expected_count:
             return texts
-        groups: list[str] = []
-        current: list[str] = []
-        for text in texts:
-            current.append(text)
-            if len(groups) < expected_count - 1 and re.search(r"[.!?。]$", text):
-                groups.append(" ".join(current).strip())
-                current = []
-        if current:
-            groups.append(" ".join(current).strip())
-        if len(groups) != expected_count:
-            if expected_count == 2:
-                split_index = len(texts) // 2
-                if split_index:
-                    return [
-                        " ".join(texts[:split_index]).strip(),
-                        " ".join(texts[split_index:]).strip(),
-                    ]
+        boundaries = [
+            index
+            for index in range(1, len(records))
+            if float(records[index].bbox[2]) - float(records[index - 1].bbox[2])
+            >= 0.08
+        ]
+        if len(boundaries) != expected_count - 1:
             return None
+        groups: list[str] = []
+        start = 0
+        for boundary in boundaries + [len(texts)]:
+            groups.append(" ".join(texts[start:boundary]).strip())
+            start = boundary
         return groups
 
     def _is_sequential_proposition_row(

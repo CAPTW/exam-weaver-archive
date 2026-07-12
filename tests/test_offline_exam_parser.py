@@ -38,6 +38,21 @@ def _page(*lines, number=2):
     )
 
 
+def _bbox_line(text, *, y, x0, x1, page=2, column=0):
+    word = LayoutWord(
+        text=text,
+        bbox=(x0, y, x1, y + 0.025),
+        confidence=0.98,
+        column=column,
+    )
+    return LayoutLine(
+        words=(word,),
+        bbox=word.bbox,
+        page=page,
+        column=column,
+    )
+
+
 def test_ronpark_damaged_vertical_choices_recover_complete_40_question_group():
     pages = []
     number = 1
@@ -93,7 +108,7 @@ def test_ronpark_damaged_vertical_choices_recover_complete_40_question_group():
     assert "㉠ 첫째 명제" in questions[2].stem
 
 
-def test_damaged_vertical_choices_use_balanced_wrapped_lines_after_third_marker():
+def test_ambiguous_balanced_wrapped_lines_after_third_marker_fail_closed():
     page = _page(
         _line(["9.", "다음", "중", "옳지", "않은", "것은?"], y=0.12),
         _line(["㉦", "첫째 선택지"], y=0.22, xs=[0.05, 0.09]),
@@ -106,13 +121,9 @@ def test_damaged_vertical_choices_use_balanced_wrapped_lines_after_third_marker(
 
     question = OfflineExamParser().parse_pages([page])[0]
 
-    assert question.choices == [
-        "첫째 선택지",
-        "둘째 선택지",
-        "셋째 선택지는 길어서 두 줄로 이어진다",
-        "넷째 선택지도 길어서 두 줄로 이어진다",
-    ]
-    assert validate_offline_question(question).importable is True
+    assert question.choices == []
+    assert "셋째 선택지는 길어서" in question.stem
+    assert validate_offline_question(question).importable is False
 
 
 def test_damaged_two_by_two_choice_grid_is_recovered_without_promoting_view_rows():
@@ -170,6 +181,103 @@ def test_quality_gate_does_not_treat_slash_damaged_percentages_as_page_counters(
     result = validate_offline_question(question)
 
     assert result.importable is True
+
+
+def test_damaged_third_choice_wrap_is_not_split_in_the_middle_of_a_word():
+    page = _page(
+        _bbox_line("10. 조업보호본부의 사무로 옳지 않은 것은?", y=0.10, x0=0.02, x1=0.47),
+        _bbox_line("㉦ 조업보호를 위한 경비 및 단속", y=0.20, x0=0.05, x1=0.34),
+        _bbox_line("어선의 출입항 및 출어등록 현황과 출어선의", y=0.26, x0=0.08, x1=0.49),
+        _bbox_line("동태 파악", y=0.32, x0=0.08, x1=0.17),
+        _bbox_line("㉭ 조업자의 위법행위 적발, 처리 및 관", y=0.38, x0=0.05, x1=0.49),
+        _bbox_line("계 기관 통보", y=0.44, x0=0.08, x1=0.20),
+        _bbox_line("조업자제해역에 출입하는 어획물운반선의 통제", y=0.50, x0=0.08, x1=0.48),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "조업보호를 위한 경비 및 단속",
+        "어선의 출입항 및 출어등록 현황과 출어선의 동태 파악",
+        "조업자의 위법행위 적발, 처리 및 관 계 기관 통보",
+        "조업자제해역에 출입하는 어획물운반선의 통제",
+    ]
+
+
+def test_damaged_third_choice_continuation_stays_before_true_fourth_choice():
+    page = _page(
+        _bbox_line("15. 기본계획에 포함될 내용으로 옳지 않은 것은?", y=0.10, x0=0.02, x1=0.48),
+        _bbox_line("㉦ 정책의 기본방향 및 목표", y=0.20, x0=0.05, x1=0.41),
+        _bbox_line("㉨ 시설의 구축 및 유지, 관리에", y=0.26, x0=0.05, x1=0.49),
+        _bbox_line("관한 사항", y=0.32, x0=0.08, x1=0.16),
+        _bbox_line("㉭ 해양수산부장관이", y=0.38, x0=0.05, x1=0.49),
+        _bbox_line("필요하다고 인정하는 사항", y=0.44, x0=0.08, x1=0.30),
+        _bbox_line("선박교통관제사의 교육, 훈련에 관한 사항", y=0.50, x0=0.08, x1=0.44),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices[2:] == [
+        "해양수산부장관이 필요하다고 인정하는 사항",
+        "선박교통관제사의 교육, 훈련에 관한 사항",
+    ]
+
+
+def test_marker_three_only_recovers_complete_multiline_first_and_second_choices():
+    page = _page(
+        _bbox_line("33. 법률의 목적으로 옳은 것은?", y=0.10, x0=0.50, x1=0.90),
+        _bbox_line("첫째 선택지는 여러 줄로", y=0.20, x0=0.56, x1=0.97),
+        _bbox_line("이어지고 마지막 줄은", y=0.26, x0=0.56, x1=0.95),
+        _bbox_line("짧게 끝난다.", y=0.32, x0=0.56, x1=0.68),
+        _bbox_line("둘째 선택지도 여러 줄로", y=0.38, x0=0.56, x1=0.97),
+        _bbox_line("이어진 뒤 짧게 끝난다.", y=0.44, x0=0.56, x1=0.69),
+        _bbox_line("㉭ 셋째 선택지는", y=0.50, x0=0.53, x1=0.97),
+        _bbox_line("짧게 끝난다.", y=0.56, x0=0.56, x1=0.69),
+        _bbox_line("넷째 선택지는 여러 줄로", y=0.62, x0=0.56, x1=0.97),
+        _bbox_line("온전하게 이어진다.", y=0.68, x0=0.56, x1=0.75),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째 선택지는 여러 줄로 이어지고 마지막 줄은 짧게 끝난다.",
+        "둘째 선택지도 여러 줄로 이어진 뒤 짧게 끝난다.",
+        "셋째 선택지는 짧게 끝난다.",
+        "넷째 선택지는 여러 줄로 온전하게 이어진다.",
+    ]
+
+
+def test_plain_four_year_table_is_not_promoted_to_choices():
+    page = _page(
+        _line(["7.", "다음", "연도별", "자료를", "검토하시오."], y=0.12),
+        _line(["2019", "2020", "2021", "2022"], y=0.34, xs=[0.08, 0.31, 0.54, 0.77]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == []
+    assert "2019 2020 2021 2022" in question.stem
+    assert "coordinate_choice_recovery" not in question.diagnostics
+    assert validate_offline_question(question).importable is False
+
+
+def test_vertical_mapping_choices_are_not_split_into_single_field_grid_cells():
+    page = _page(
+        _line(["2.", "빈칸에", "들어갈", "조합으로", "옳은", "것은?"], y=0.12),
+        _line(["㉠", "15년", "㉡", "치안정감"], y=0.28, xs=[0.08, 0.11, 0.27, 0.30]),
+        _line(["㉠", "15년", "㉡", "치안감"], y=0.34, xs=[0.08, 0.11, 0.27, 0.30]),
+        _line(["㉭", "㉠", "20년", "㉡", "치안정감"], y=0.40, xs=[0.05, 0.08, 0.11, 0.27, 0.30]),
+        _line(["㉠", "20년", "㉡", "치안감"], y=0.46, xs=[0.08, 0.11, 0.27, 0.30]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "㉠ 15년 ㉡ 치안정감",
+        "㉠ 15년 ㉡ 치안감",
+        "㉠ 20년 ㉡ 치안정감",
+        "㉠ 20년 ㉡ 치안감",
+    ]
 
 
 def test_parses_explicit_circled_choices_and_stops_at_next_question():
