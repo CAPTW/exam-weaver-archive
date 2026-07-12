@@ -164,11 +164,12 @@ def test_shared_adapter_rejects_incomplete_candidates_without_generic_choice_syn
     assert "원문 보기 참조" not in repr(result)
 
 
-def test_group_selector_filters_by_source_page_and_reuses_cached_parse_result():
+def test_group_selector_fails_closed_and_reuses_cache_without_registered_structured_page():
     from src.parser.offline_exam import ParsedOfflineQuestion
     from src.parser.offline_sources import (
         DocumentRole,
         OfflineParseResult,
+        OfflineSetValidationError,
         RejectedOfflineQuestion,
         select_group_questions,
     )
@@ -195,13 +196,42 @@ def test_group_selector_filters_by_source_page_and_reuses_cached_parse_result():
     group = {"pages": [{"page": 2, "source_path": "questions.pdf"}]}
     cache = {}
 
-    selected, rejected_count = select_group_questions(group, parse_source, cache)
-    selected_again, _ = select_group_questions(group, parse_source, cache)
+    with pytest.raises(OfflineSetValidationError, match="structured_scope_incomplete"):
+        select_group_questions(group, parse_source, cache)
+    with pytest.raises(OfflineSetValidationError, match="structured_scope_incomplete"):
+        select_group_questions(group, parse_source, cache)
 
-    assert selected == {1: page_two}
-    assert selected_again == selected
-    assert rejected_count == 1
     assert calls == [(Path("questions.pdf"), None)]
+
+
+def test_registered_group_never_accepts_polluted_full_document_fallback():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_sources import (
+        DocumentRole,
+        OfflineParseResult,
+        OfflineSetValidationError,
+        select_group_questions,
+    )
+
+    polluted = ParsedOfflineQuestion(
+        40,
+        "Q40 법률 문제\n다음 페이지 모두 몇 개인가?",
+        ["법률 선택지1", "법률 선택지2", "법률 선택지3", "법률 선택지4"],
+        7,
+        0.99,
+        (),
+    )
+    result = OfflineParseResult(
+        Path("questions.pdf"),
+        DocumentRole.QUESTION,
+        {},
+        (polluted,),
+        (),
+    )
+    group = {"pages": [{"page": 7, "source_path": "questions.pdf"}]}
+
+    with pytest.raises(OfflineSetValidationError, match="structured_scope_incomplete"):
+        select_group_questions(group, lambda path, metadata: result, {})
 
 
 @pytest.mark.parametrize(

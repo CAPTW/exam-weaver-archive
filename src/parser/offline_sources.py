@@ -202,11 +202,6 @@ def select_group_questions(
     """Select shared-parser questions whose source pages belong to one exam group."""
 
     raw_pages = list(group.get("pages", []) or [])
-    page_numbers = {
-        int(page.get("page", 0) or 0)
-        for page in raw_pages
-        if isinstance(page, Mapping)
-    }
     source_paths = sorted(
         {
             str(page.get("source_path", "") or "")
@@ -227,17 +222,22 @@ def select_group_questions(
             for page in raw_pages
             if isinstance(page, Mapping)
             and str(page.get("source_path", "") or "") == source_path
+            and int(page.get("page", 0) or 0) > 0
         }
         scoped_pages = tuple(
             page
             for page in result.structured_pages
             if page.number in source_page_numbers
         )
-        has_complete_scope = (
-            bool(source_page_numbers)
-            and {page.number for page in scoped_pages} == source_page_numbers
-        )
-        if has_complete_scope:
+        available_page_numbers = {page.number for page in result.structured_pages}
+        if source_page_numbers and not source_page_numbers <= available_page_numbers:
+            missing = sorted(source_page_numbers - available_page_numbers)
+            raise OfflineSetValidationError(
+                "structured_scope_incomplete: "
+                f"source={source_path} requested={sorted(source_page_numbers)} "
+                f"available={sorted(available_page_numbers)} missing={missing}"
+            )
+        if source_page_numbers:
             candidates = OfflineExamParser().parse_pages(list(scoped_pages))
             scoped_questions: list[ParsedOfflineQuestion] = []
             for candidate in candidates:
@@ -247,15 +247,8 @@ def select_group_questions(
                 else:
                     rejected_count += 1
         else:
-            rejected_count += sum(
-                rejected.question.source_page in page_numbers
-                for rejected in result.rejected
-            )
-            scoped_questions = [
-                question
-                for question in result.questions
-                if question.source_page in page_numbers
-            ]
+            rejected_count += len(result.rejected)
+            scoped_questions = list(result.questions)
         for question in scoped_questions:
             current = selected.get(question.number)
             if current is None or question.confidence > current.confidence:
