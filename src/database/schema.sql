@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS questions (
     has_image BOOLEAN DEFAULT 0,         -- 이미지 포함 여부
     image_path TEXT,                     -- 이미지 경로
     correct_answer INTEGER NOT NULL,     -- 1, 2, 3, 4
+    answer_available BOOLEAN NOT NULL DEFAULT 1, -- 0 when the official source provides no answer
     source_page INTEGER,                 -- 원본 PDF 페이지
     tags TEXT,                           -- 태그 (comma separated)
     group_id INTEGER REFERENCES question_groups(id),

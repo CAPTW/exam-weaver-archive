@@ -9,6 +9,7 @@ from types import MappingProxyType, SimpleNamespace
 import pytest
 
 from src.database.repository import ExamRepository
+from src.database.validator import QuestionValidator
 from src.database.staging import (
     ExpectedExamSet,
     InventoryContract,
@@ -315,10 +316,9 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
     root = tmp_path / "pdfs"
     root.mkdir()
     first_pdf = root / "first_문제.pdf"
-    second_pdf = root / "second_문제.pdf"
     first_answer = root / "first_정답.pdf"
     second_answer = root / "second_정답.pdf"
-    for path in (first_pdf, second_pdf, first_answer, second_answer):
+    for path in (first_pdf, first_answer, second_answer):
         path.write_bytes(path.name.encode())
 
     def provider(_root, _reports, _inventory):
@@ -338,7 +338,7 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
             RegisteredExamSet(
                 ExpectedExamSet("해경", "항해", 2024, 1, (1,)),
                 (second_question,),
-                second_pdf,
+                first_pdf,
                 second_answer,
             ),
         )
@@ -347,7 +347,7 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
         root,
         tmp_path / "staging.db",
         tmp_path / "reports",
-        inventory_contract=InventoryContract(4, 2, 2, 0),
+        inventory_contract=InventoryContract(3, 1, 2, 0),
         registered_set_provider=provider,
     )
 
@@ -356,6 +356,23 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
             (1,),
             (1,),
         ]
+        rows = conn.execute(
+            """
+            SELECT q.year, q.source_id, qs.attachment_filename
+            FROM questions q JOIN question_sources qs ON qs.id = q.source_id
+            ORDER BY q.year
+            """
+        ).fetchall()
+        assert rows[0][1] != rows[1][1]
+        assert [row[2] for row in rows] == [first_answer.name, second_answer.name]
+        conn.execute(
+            "UPDATE questions SET source_id = ? WHERE year = 2024",
+            (rows[0][1],),
+        )
+
+    tampered = validate_staging_database(summary.staging_db, summary.expected_sets)
+    assert tampered.valid is False
+    assert "provenance_mismatch" in tampered.error_codes
 
 
 def test_validation_checks_expected_numbers_answers_placeholders_and_provenance(tmp_path):
@@ -622,13 +639,16 @@ def test_sqlite_backup_includes_committed_wal_rows(tmp_path):
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
-def test_no_source_answer_registered_set_persists_null_and_explicit_state(tmp_path):
+def test_no_source_answer_registered_set_uses_canonical_sentinel_and_explicit_state(tmp_path):
     root = tmp_path / "pdfs"
     root.mkdir()
     source = root / "engineering_문제.pdf"
     source.write_bytes(b"question")
     question = _question(1)
-    question.correct_answer = None
+    question.correct_answer = 0
+    question.answer_available = False
+    for choice, symbol in zip(question.choices, ("㉮", "㉯", "㉴", "㉵")):
+        choice.symbol = symbol
 
     summary = build_staging_database(
         root,
@@ -653,10 +673,21 @@ def test_no_source_answer_registered_set_persists_null_and_explicit_state(tmp_pa
     )
 
     with sqlite3.connect(summary.staging_db) as conn:
-        assert conn.execute("SELECT correct_answer FROM questions").fetchone()[0] is None
+        assert conn.execute("SELECT correct_answer FROM questions").fetchone()[0] == 0
+        assert conn.execute("SELECT answer_available FROM questions").fetchone()[0] == 0
+        correct_answer_column = next(
+            row for row in conn.execute("PRAGMA table_info(questions)") if row[1] == "correct_answer"
+        )
+        assert correct_answer_column[3] == 1
         assert conn.execute(
             "SELECT answer_state, answer_relative_path FROM offline_rebuild_set_provenance"
         ).fetchone() == ("not_required", None)
+    findings = QuestionValidator(ExamRepository(str(summary.staging_db))).scan()
+    assert all(
+        issue["code"] != "invalid_correct_answer"
+        for finding in findings
+        for issue in finding["issues"]
+    )
 
 
 def test_native_2023_specs_are_explicit_distinct_official_associations():
@@ -675,6 +706,41 @@ def test_real_provider_preflight_enumerates_registered_contract_without_ocr():
     assert report["engineering_no_answer_sets"] == 1
     assert report["standalone_sets"] == 2
     assert report["missing_answer_associations"] == 0
+
+
+def test_production_build_runs_registration_preflight_before_provider_or_writes(tmp_path, monkeypatch):
+    from src.database import staging
+
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    for index in range(12):
+        (root / f"q{index}_문제.pdf").write_bytes(b"q")
+    for index in range(15):
+        (root / f"a{index}_정답.pdf").write_bytes(b"a")
+    for index in range(3):
+        (root / f"n{index}_채용시험_공고.pdf").write_bytes(b"n")
+    events = []
+
+    def fail_preflight():
+        events.append("preflight")
+        raise RuntimeError("registration preflight failed")
+
+    def provider(*_args):
+        events.append("provider")
+        return ()
+
+    monkeypatch.setattr(staging, "registered_provider_preflight", fail_preflight)
+
+    with pytest.raises(RuntimeError, match="preflight"):
+        build_staging_database(
+            root,
+            tmp_path / "staging.db",
+            tmp_path / "reports",
+            registered_set_provider=provider,
+        )
+
+    assert events == ["preflight"]
+    assert not (tmp_path / "staging.db").exists()
 
 
 def test_plain_database_is_not_replaceable_without_explicit_synthetic_trust(tmp_path):

@@ -283,6 +283,9 @@ class ExamRepository:
             if 'explanation' not in columns:
                 cursor.execute("ALTER TABLE questions ADD COLUMN explanation TEXT")
                 logger.info("Migrated: Added 'explanation' column to questions table")
+            if 'answer_available' not in columns:
+                cursor.execute("ALTER TABLE questions ADD COLUMN answer_available BOOLEAN NOT NULL DEFAULT 1")
+                logger.info("Migrated: Added 'answer_available' column to questions table")
             question_column_migrations = {
                 'group_id': 'INTEGER',
                 'group_order': 'INTEGER',
@@ -472,12 +475,13 @@ class ExamRepository:
                     cursor.execute("""
                         INSERT INTO questions (
                             exam_subject_id, year, session, question_number, 
-                            question_text, question_format_json, has_image, image_path, correct_answer, source_page, tags
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            question_text, question_format_json, has_image, image_path, correct_answer,
+                            answer_available, source_page, tags
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         exam_subject_id, year, session, q.number,
-                        q.text, getattr(q, 'format_json', None), q.has_image, getattr(q, 'image_path', None), 
-                        q.correct_answer, q.source_page, tags
+                        q.text, getattr(q, 'format_json', None), q.has_image, getattr(q, 'image_path', None),
+                        q.correct_answer, bool(getattr(q, 'answer_available', True)), q.source_page, tags
                     ))
                     question_id = cursor.lastrowid
                     saved_count += 1
@@ -542,6 +546,7 @@ class ExamRepository:
                             has_image = ?,
                             image_path = ?,
                             correct_answer = ?,
+                            answer_available = ?,
                             source_page = ?,
                             tags = ?
                         WHERE id = ?
@@ -551,6 +556,7 @@ class ExamRepository:
                         bool(getattr(q, 'has_image', False)),
                         getattr(q, 'image_path', None),
                         q.correct_answer,
+                        bool(getattr(q, 'answer_available', True)),
                         q.source_page,
                         tags,
                         question_id,

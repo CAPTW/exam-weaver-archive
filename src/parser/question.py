@@ -54,6 +54,7 @@ class Question:
     text: str
     choices: List[Choice] = field(default_factory=list)
     correct_answer: Optional[int] = None
+    answer_available: bool = True
     has_image: bool = False
     image_path: Optional[str] = None  # Added image_path
     source_page: Optional[int] = None

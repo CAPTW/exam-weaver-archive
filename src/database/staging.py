@@ -45,6 +45,7 @@ REQUIRED_SCHEMA: Mapping[str, frozenset[str]] = {
             "question_number",
             "question_text",
             "correct_answer",
+            "answer_available",
             "source_id",
         }
     ),
@@ -331,13 +332,20 @@ def build_staging_database(
         mismatches = inventory_contract.mismatches(counts)
         if mismatches:
             raise ValueError("offline corpus inventory mismatch: " + "; ".join(mismatches))
+    if inventory_contract == STRICT_CORPUS_INVENTORY:
+        preflight = registered_provider_preflight()
+        if (
+            preflight["set_count"] != STRICT_EXPECTED_SET_COUNT
+            or preflight["question_count"] != STRICT_EXPECTED_QUESTION_COUNT
+            or preflight["missing_answer_associations"]
+        ):
+            raise ValueError(f"registered provider preflight failed: {preflight}")
 
     database_path.parent.mkdir(parents=True, exist_ok=True)
     reports.mkdir(parents=True, exist_ok=True)
     if database_path.exists():
         database_path.unlink()
 
-    _initialize_nullable_answer_schema(database_path)
     repository = ExamRepository(str(database_path))
     repository.init_database()
     _initialize_rebuild_schema(database_path)
@@ -617,17 +625,38 @@ def validate_staging_database(
                         key = (str(row[0]), str(row[1]), int(row[2]), int(row[3]))
                         expected_item = expected_by_key.get(key)
                         source_inventory = inventory_by_relative.get(str(row[4]))
-                        answer_inventory = inventory_by_relative.get(str(row[7])) if row[7] else None
+                        answer_inventory = inventory_by_relative.get(str(row[8])) if row[8] else None
+                        linked_sources = connection.execute(
+                            """
+                            SELECT DISTINCT qs.source_url, qs.content_hash,
+                                            qs.attachment_url, qs.attachment_filename
+                            FROM questions q
+                            JOIN exam_subjects es ON es.id = q.exam_subject_id
+                            JOIN exams e ON e.id = es.exam_id
+                            JOIN subjects s ON s.id = es.subject_id
+                            JOIN question_sources qs ON qs.id = q.source_id
+                            WHERE e.code = ? AND s.name_ko = ? AND q.year = ? AND q.session = ?
+                            """,
+                            key,
+                        ).fetchall()
+                        linked = linked_sources[0] if len(linked_sources) == 1 else None
                         if (
                             expected_item is None
                             or source_inventory != (DocumentRole.QUESTION.value, str(row[5]))
+                            or linked is None
+                            or _url_filename(str(linked[0] or "")) != Path(str(row[4])).name
+                            or str(linked[1] or "") != str(row[6])
                             or (expected_item.require_answers and (
-                                str(row[6]) != "required"
-                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[8]))
-                                or Path(str(row[7])).name != str(row[9])
+                                str(row[7]) != "required"
+                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[9]))
+                                or Path(str(row[8])).name != str(row[10])
+                                or _url_filename(str(linked[2] or "")) != Path(str(row[8])).name
+                                or str(linked[3] or "") != str(row[10])
                             ))
                             or (not expected_item.require_answers and (
-                                str(row[6]) != "not_required" or row[7] is not None or row[8] is not None
+                                str(row[7]) != "not_required"
+                                or row[8] is not None or row[9] is not None
+                                or linked[2] is not None or linked[3] is not None
                             ))
                         ):
                             provenance_mismatch = True
@@ -884,21 +913,13 @@ def _initialize_rebuild_schema(path: Path) -> None:
                 exam_type TEXT NOT NULL, subject_name TEXT NOT NULL,
                 year INTEGER NOT NULL, session INTEGER NOT NULL,
                 source_relative_path TEXT NOT NULL, source_sha256 TEXT NOT NULL,
+                source_record_hash TEXT NOT NULL,
                 answer_state TEXT NOT NULL, answer_relative_path TEXT,
                 answer_sha256 TEXT, answer_filename TEXT,
                 PRIMARY KEY (exam_type, subject_name, year, session)
             );
             """
         )
-
-
-def _initialize_nullable_answer_schema(path: Path) -> None:
-    schema_path = Path(__file__).with_name("schema.sql")
-    schema = schema_path.read_text(encoding="utf-8").replace(
-        "correct_answer INTEGER NOT NULL", "correct_answer INTEGER"
-    )
-    with sqlite3.connect(path) as connection:
-        connection.executescript(schema)
 
 
 def _record_set_rejections(path: Path, expected: ExpectedExamSet, count: int) -> None:
@@ -940,11 +961,21 @@ def _persist_registered_set(
         "year": expected.year,
         "session": expected.session,
     }
+    answer_sha256 = str(answer_row["sha256"]) if answer_row else "not-required"
+    source_record_hash = hashlib.sha256(
+        (
+            str(source_row["sha256"])
+            + "|"
+            + answer_sha256
+            + "|"
+            + json.dumps(expected.key, ensure_ascii=False)
+        ).encode("utf-8")
+    ).hexdigest()
     source_id = _insert_question_source(
         database_path,
         source,
         registered.official_key or source.stem,
-        str(source_row["sha256"]),
+        source_record_hash,
         answer,
     )
     repository.save_questions(
@@ -956,12 +987,13 @@ def _persist_registered_set(
         connection.execute(
             """
             INSERT OR REPLACE INTO offline_rebuild_set_provenance VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 *expected.key,
                 str(source_row["relative_path"]),
                 str(source_row["sha256"]),
+                source_record_hash,
                 "required" if expected.require_answers else "not_required",
                 str(answer_row["relative_path"]) if answer_row else None,
                 str(answer_row["sha256"]) if answer_row else None,
@@ -1068,7 +1100,8 @@ def _build_registered_corpus_sets(
             )
             if no_source_answer:
                 for item in items:
-                    item.question.correct_answer = None
+                    item.question.correct_answer = 0
+                    item.question.answer_available = False
             answer_path = None if no_source_answer else _registered_answer_path(
                 module, group, group_index, root
             )
@@ -1310,7 +1343,7 @@ def _insert_question_source(
                 question_path.resolve().as_uri(),
                 document_id,
                 answer_path.resolve().as_uri() if answer_path else None,
-                answer_path.name if answer_path else question_path.name,
+                answer_path.name if answer_path else None,
                 content_hash,
             ),
         )
