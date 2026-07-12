@@ -369,6 +369,7 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
             "UPDATE questions SET source_id = ? WHERE year = 2024",
             (rows[0][1],),
         )
+        conn.execute("UPDATE question_sources SET provider = 'evil' WHERE id = ?", (rows[0][1],))
 
     tampered = validate_staging_database(summary.staging_db, summary.expected_sets)
     assert tampered.valid is False
@@ -377,7 +378,9 @@ def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp
 
 def test_validation_checks_expected_numbers_answers_placeholders_and_provenance(tmp_path):
     staging_db = tmp_path / "staging.db"
-    _database(staging_db, [_question(1, answer=0, placeholder=True)], provenance=False)
+    _database(staging_db, [_question(1, answer=1, placeholder=True)], provenance=False)
+    with sqlite3.connect(staging_db) as conn:
+        conn.execute("UPDATE questions SET correct_answer = 0")
 
     report = validate_staging_database(staging_db, [_expected(1, 2)])
 
@@ -647,6 +650,10 @@ def test_no_source_answer_registered_set_uses_canonical_sentinel_and_explicit_st
     question = _question(1)
     question.correct_answer = 0
     question.answer_available = False
+    question.exam_type = "해양경찰 경찰직 기관학"
+    question.subject_name = "기관학"
+    question.year = 2020
+    question.session = 1
     for choice, symbol in zip(question.choices, ("㉮", "㉯", "㉴", "㉵")):
         choice.symbol = symbol
 
@@ -682,6 +689,10 @@ def test_no_source_answer_registered_set_uses_canonical_sentinel_and_explicit_st
         assert conn.execute(
             "SELECT answer_state, answer_relative_path FROM offline_rebuild_set_provenance"
         ).fetchone() == ("not_required", None)
+    assert summary.expected_sets[0].require_answers is False
+    validation = validate_staging_database(summary.staging_db, summary.expected_sets)
+    assert validation.valid is True
+    assert validation.sets[0].missing_answers == ()
     findings = QuestionValidator(ExamRepository(str(summary.staging_db))).scan()
     assert all(
         issue["code"] != "invalid_correct_answer"
@@ -721,17 +732,11 @@ def test_production_build_runs_registration_preflight_before_provider_or_writes(
         (root / f"n{index}_채용시험_공고.pdf").write_bytes(b"n")
     events = []
 
-    def fail_preflight():
-        events.append("preflight")
-        raise RuntimeError("registration preflight failed")
-
     def provider(*_args):
         events.append("provider")
         return ()
 
-    monkeypatch.setattr(staging, "registered_provider_preflight", fail_preflight)
-
-    with pytest.raises(RuntimeError, match="preflight"):
+    with pytest.raises(ValueError, match="preflight"):
         build_staging_database(
             root,
             tmp_path / "staging.db",
@@ -739,7 +744,7 @@ def test_production_build_runs_registration_preflight_before_provider_or_writes(
             registered_set_provider=provider,
         )
 
-    assert events == ["preflight"]
+    assert events == []
     assert not (tmp_path / "staging.db").exists()
 
 

@@ -109,6 +109,19 @@ class ExamRepository:
         return getattr(choice, 'choice_text', None) or getattr(choice, 'text', None) or ''
 
     @classmethod
+    def _validate_answer_state(cls, answer_available: bool, correct_answer: Any, choices: List[Any]) -> None:
+        choice_numbers = {cls._choice_number(choice) for choice in choices}
+        if not answer_available:
+            if correct_answer != 0:
+                raise ValueError("answer_available=False requires correct_answer=0")
+            return
+        # Legacy/editor workflows deliberately persist other invalid positive
+        # answers so QuestionValidator can surface them. Zero, however, is the
+        # reserved no-source sentinel and may never be marked available.
+        if correct_answer == 0:
+            raise ValueError("answer_available=True requires a valid choice answer")
+
+    @classmethod
     def _merge_reparsed_choices_with_existing(
         cls,
         incoming_choices: List[Any],
@@ -285,6 +298,7 @@ class ExamRepository:
                 logger.info("Migrated: Added 'explanation' column to questions table")
             if 'answer_available' not in columns:
                 cursor.execute("ALTER TABLE questions ADD COLUMN answer_available BOOLEAN NOT NULL DEFAULT 1")
+                cursor.execute("UPDATE questions SET answer_available = 0 WHERE correct_answer = 0")
                 logger.info("Migrated: Added 'answer_available' column to questions table")
             question_column_migrations = {
                 'group_id': 'INTEGER',
@@ -455,6 +469,8 @@ class ExamRepository:
                 return exam_subject_id_cache[key]
 
             for q in questions:
+                answer_available = bool(getattr(q, 'answer_available', True))
+                self._validate_answer_state(answer_available, q.correct_answer, list(q.choices or []))
                 exam_type = getattr(q, 'exam_type', None) or metadata.exam_type
                 exam_id = get_exam_id(exam_type)
                 subject_name = getattr(q, 'subject_name', None) or '미분류'
@@ -481,7 +497,7 @@ class ExamRepository:
                     """, (
                         exam_subject_id, year, session, q.number,
                         q.text, getattr(q, 'format_json', None), q.has_image, getattr(q, 'image_path', None),
-                        q.correct_answer, bool(getattr(q, 'answer_available', True)), q.source_page, tags
+                        q.correct_answer, answer_available, q.source_page, tags
                     ))
                     question_id = cursor.lastrowid
                     saved_count += 1
@@ -556,7 +572,7 @@ class ExamRepository:
                         bool(getattr(q, 'has_image', False)),
                         getattr(q, 'image_path', None),
                         q.correct_answer,
-                        bool(getattr(q, 'answer_available', True)),
+                        answer_available,
                         q.source_page,
                         tags,
                         question_id,
@@ -875,7 +891,8 @@ class ExamRepository:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT exam_subject_id, year, session, question_number, question_format_json, explanation
+                    SELECT exam_subject_id, year, session, question_number, question_format_json,
+                           explanation, correct_answer, answer_available
                     FROM questions
                     WHERE id = ?
                 """, (question_id,))
@@ -902,6 +919,17 @@ class ExamRepository:
                     exam_subject_id = current[0]
 
                 has_image = 1 if data.get('image_path') else 0
+                answer_available = bool(data.get('answer_available', current[7]))
+                correct_answer = data.get('correct_answer', current[6])
+                if 'choices' in data:
+                    answer_choices = list(data.get('choices') or [])
+                else:
+                    cursor.execute(
+                        "SELECT choice_number FROM question_choices WHERE question_id = ?",
+                        (question_id,),
+                    )
+                    answer_choices = [{'choice_number': row[0]} for row in cursor.fetchall()]
+                self._validate_answer_state(answer_available, correct_answer, answer_choices)
                 cursor.execute("""
                     UPDATE questions 
                     SET
@@ -913,6 +941,7 @@ class ExamRepository:
                         question_format_json = ?,
                         explanation = ?,
                         correct_answer = ?,
+                        answer_available = ?,
                         tags = ?,
                         image_path = ?,
                         has_image = ?
@@ -925,7 +954,8 @@ class ExamRepository:
                     data['question_text'],
                     data.get('question_format_json', current[4]),
                     data.get('explanation', current[5]),
-                    data.get('correct_answer'),
+                    correct_answer,
+                    answer_available,
                     data.get('tags', ''),
                     data.get('image_path'),
                     has_image,

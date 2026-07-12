@@ -333,7 +333,7 @@ def build_staging_database(
         if mismatches:
             raise ValueError("offline corpus inventory mismatch: " + "; ".join(mismatches))
     if inventory_contract == STRICT_CORPUS_INVENTORY:
-        preflight = registered_provider_preflight()
+        preflight = registered_provider_preflight(inventory)
         if (
             preflight["set_count"] != STRICT_EXPECTED_SET_COUNT
             or preflight["question_count"] != STRICT_EXPECTED_QUESTION_COUNT
@@ -352,6 +352,7 @@ def build_staging_database(
     _write_inventory(database_path, inventory)
 
     expected_by_key: dict[tuple[str, str, int, int], set[int]] = {}
+    expected_definitions: dict[tuple[str, str, int, int], ExpectedExamSet] = {}
     rejected_count = 0
     errors: list[str] = []
     if inventory_contract is not None:
@@ -380,6 +381,10 @@ def build_staging_database(
             if registered.rejected_count:
                 _record_set_rejections(database_path, expected, registered.rejected_count)
             expected_by_key.setdefault(expected.key, set()).update(expected.question_numbers)
+            previous = expected_definitions.get(expected.key)
+            if previous is not None and previous != expected:
+                raise ValueError(f"conflicting registered set definition: {expected.key}")
+            expected_definitions[expected.key] = expected
             rejected_count += registered.rejected_count
 
     for row, path in zip(inventory, pdf_paths):
@@ -441,6 +446,7 @@ def build_staging_database(
                 int(metadata["session"]),
             )
             expected_by_key.setdefault(key, set()).update(expected_numbers)
+            expected_definitions[key] = ExpectedExamSet(*key, expected_numbers)
             rejected_count += len(parsed.rejected)
             _mark_document_build(
                 database_path,
@@ -458,8 +464,8 @@ def build_staging_database(
             )
 
     expected_sets = tuple(
-        ExpectedExamSet(*key, tuple(sorted(numbers)))
-        for key, numbers in sorted(expected_by_key.items())
+        expected_definitions[key]
+        for key in sorted(expected_definitions)
     )
     _store_expected_sets(database_path, expected_sets)
     if inventory_contract == STRICT_CORPUS_INVENTORY:
@@ -573,6 +579,10 @@ def validate_staging_database(
                           != (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id)
                        OR (SELECT COUNT(DISTINCT choice_number) FROM question_choices c WHERE c.question_id = q.id)
                           != (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id)
+                       OR q.answer_available NOT IN (0, 1)
+                       OR (q.answer_available = 0 AND q.correct_answer != 0)
+                       OR (q.answer_available = 1 AND q.correct_answer NOT IN
+                           (SELECT choice_number FROM question_choices c WHERE c.question_id = q.id))
                     """
                 ).fetchone()[0]
             )
@@ -628,7 +638,7 @@ def validate_staging_database(
                         answer_inventory = inventory_by_relative.get(str(row[8])) if row[8] else None
                         linked_sources = connection.execute(
                             """
-                            SELECT DISTINCT qs.source_url, qs.content_hash,
+                            SELECT DISTINCT qs.provider, qs.document_id, qs.source_url, qs.content_hash,
                                             qs.attachment_url, qs.attachment_filename
                             FROM questions q
                             JOIN exam_subjects es ON es.id = q.exam_subject_id
@@ -644,19 +654,21 @@ def validate_staging_database(
                             expected_item is None
                             or source_inventory != (DocumentRole.QUESTION.value, str(row[5]))
                             or linked is None
-                            or _url_filename(str(linked[0] or "")) != Path(str(row[4])).name
-                            or str(linked[1] or "") != str(row[6])
+                            or str(linked[0] or "") != str(row[7])
+                            or str(linked[1] or "") != str(row[8])
+                            or _url_filename(str(linked[2] or "")) != Path(str(row[4])).name
+                            or str(linked[3] or "") != str(row[6])
                             or (expected_item.require_answers and (
-                                str(row[7]) != "required"
-                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[9]))
-                                or Path(str(row[8])).name != str(row[10])
-                                or _url_filename(str(linked[2] or "")) != Path(str(row[8])).name
-                                or str(linked[3] or "") != str(row[10])
+                                str(row[9]) != "required"
+                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[11]))
+                                or Path(str(row[10])).name != str(row[12])
+                                or _url_filename(str(linked[4] or "")) != Path(str(row[10])).name
+                                or str(linked[5] or "") != str(row[12])
                             ))
                             or (not expected_item.require_answers and (
-                                str(row[7]) != "not_required"
-                                or row[8] is not None or row[9] is not None
-                                or linked[2] is not None or linked[3] is not None
+                                str(row[9]) != "not_required"
+                                or row[10] is not None or row[11] is not None
+                                or linked[4] is not None or linked[5] is not None
                             ))
                         ):
                             provenance_mismatch = True
@@ -914,6 +926,7 @@ def _initialize_rebuild_schema(path: Path) -> None:
                 year INTEGER NOT NULL, session INTEGER NOT NULL,
                 source_relative_path TEXT NOT NULL, source_sha256 TEXT NOT NULL,
                 source_record_hash TEXT NOT NULL,
+                provider TEXT NOT NULL, document_id TEXT NOT NULL,
                 answer_state TEXT NOT NULL, answer_relative_path TEXT,
                 answer_sha256 TEXT, answer_filename TEXT,
                 PRIMARY KEY (exam_type, subject_name, year, session)
@@ -971,10 +984,13 @@ def _persist_registered_set(
             + json.dumps(expected.key, ensure_ascii=False)
         ).encode("utf-8")
     ).hexdigest()
+    document_id = registered.official_key or "|".join(
+        (source.stem, expected.exam_type, expected.subject_name, str(expected.year), str(expected.session))
+    )
     source_id = _insert_question_source(
         database_path,
         source,
-        registered.official_key or source.stem,
+        document_id,
         source_record_hash,
         answer,
     )
@@ -987,13 +1003,15 @@ def _persist_registered_set(
         connection.execute(
             """
             INSERT OR REPLACE INTO offline_rebuild_set_provenance VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 *expected.key,
                 str(source_row["relative_path"]),
                 str(source_row["sha256"]),
                 source_record_hash,
+                "offline_pdf",
+                document_id,
                 "required" if expected.require_answers else "not_required",
                 str(answer_row["relative_path"]) if answer_row else None,
                 str(answer_row["sha256"]) if answer_row else None,
@@ -1175,10 +1193,13 @@ def _build_registered_corpus_sets(
     return registered
 
 
-def registered_provider_preflight() -> dict[str, int]:
+def registered_provider_preflight(
+    inventory: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, int]:
     """Enumerate independent provider contracts without opening or OCRing PDFs."""
 
     from scripts import import_maritime_law_pdf as law
+    from scripts import import_maritime_english_pdf as english
     from scripts import import_police_engineering_pdf as engineering
     from scripts import import_police_navigation_pdf as navigation
 
@@ -1198,6 +1219,36 @@ def registered_provider_preflight() -> dict[str, int]:
             group.answer_key not in associated and group.answer_key not in no_source
             for group in groups
         )
+    if inventory is not None:
+        required_questions = {
+            *law.KNOWN_GROUPS.keys(),
+            *navigation.KNOWN_GROUPS.keys(),
+            *engineering.KNOWN_GROUPS.keys(),
+            "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+            "[기출문제]해사영어(24년-13년).pdf",
+            *(spec.question_filename for spec in STANDALONE_SPECS),
+        }
+        required_answers = {
+            *law.ANSWER_FILENAMES.values(),
+            *navigation.ANSWER_FILENAMES.values(),
+            *engineering.ANSWER_FILENAMES.values(),
+            *english.ANSWER_FILENAMES.values(),
+            *(spec.answer_filename for spec in STANDALONE_SPECS),
+        }
+        actual_questions = {
+            Path(str(row["relative_path"])).name
+            for row in inventory if row.get("role") == DocumentRole.QUESTION.value
+        }
+        actual_answers = {
+            Path(str(row["relative_path"])).name
+            for row in inventory if row.get("role") == DocumentRole.ANSWER.value
+        }
+        invalid_hashes = sum(
+            len(str(row.get("sha256") or "")) != 64 for row in inventory
+        )
+        missing_associations += len(required_questions - actual_questions)
+        missing_associations += len(required_answers - actual_answers)
+        missing_associations += invalid_hashes
     return {
         "set_count": set_count,
         "question_count": question_count,
@@ -1473,7 +1524,7 @@ def _validate_expected_set(
 ) -> ExamSetValidation:
     rows = connection.execute(
         """
-        SELECT q.question_number, q.correct_answer, q.source_id,
+        SELECT q.question_number, q.correct_answer, q.answer_available, q.source_id,
                COUNT(qc.id) AS choice_count
         FROM questions q
         JOIN exam_subjects es ON q.exam_subject_id = es.id
@@ -1481,7 +1532,7 @@ def _validate_expected_set(
         JOIN subjects s ON es.subject_id = s.id
         LEFT JOIN question_choices qc ON qc.question_id = q.id
         WHERE e.code = ? AND s.name_ko = ? AND q.year = ? AND q.session = ?
-        GROUP BY q.id, q.question_number, q.correct_answer, q.source_id
+        GROUP BY q.id, q.question_number, q.correct_answer, q.answer_available, q.source_id
         ORDER BY q.question_number
         """,
         expected.key,
@@ -1496,17 +1547,25 @@ def _validate_expected_set(
         if expected.require_answers
         and (
             number not in by_number
+            or int(by_number[number][2]) != 1
             or not isinstance(by_number[number][1], int)
             or int(by_number[number][1]) < 1
-            or int(by_number[number][1]) > int(by_number[number][3])
+            or int(by_number[number][1]) > int(by_number[number][4])
         )
     )
+    if not expected.require_answers:
+        missing_answers = tuple(
+            number for number in expected.question_numbers
+            if number not in by_number
+            or int(by_number[number][2]) != 0
+            or int(by_number[number][1]) != 0
+        )
     missing_provenance = tuple(
         number
         for number in expected.question_numbers
         if expected.require_provenance
         and number in by_number
-        and by_number[number][2] is None
+        and by_number[number][3] is None
     )
     return ExamSetValidation(
         expected=expected,

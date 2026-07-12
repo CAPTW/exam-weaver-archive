@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import pytest
 
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
@@ -899,3 +900,48 @@ def test_validate_handles_questions_without_embedded_metadata():
 
     assert result.is_valid is False
     assert any('기관1' in error for error in result.errors)
+
+
+def test_repository_enforces_answer_availability_invariant(repo, sample_metadata, sample_question):
+    sample_question.answer_available = False
+    sample_question.correct_answer = 2
+    with pytest.raises(ValueError, match="requires correct_answer=0"):
+        repo.save_questions([sample_question], sample_metadata)
+
+    sample_question.correct_answer = 0
+    repo.save_questions([sample_question], sample_metadata)
+    saved = repo.search_questions(limit=1)[0]
+    assert repo.update_question(saved['id'], {
+        'question_text': saved['question_text'],
+        'answer_available': True,
+        'correct_answer': 0,
+    }) is False
+
+
+def test_answer_available_migration_backfills_only_legacy_zero_answers(tmp_path, sample_metadata, sample_question):
+    path = tmp_path / "legacy-answer-state.db"
+    repo = ExamRepository(str(path))
+    repo.init_database()
+    sample_question.answer_available = False
+    sample_question.correct_answer = 0
+    repo.save_questions([sample_question], sample_metadata)
+    normal = Question(
+        number=2,
+        text="정답 있는 문제",
+        choices=sample_question.choices,
+        correct_answer=1,
+        subject_name=sample_question.subject_name,
+        year=sample_question.year,
+        session=sample_question.session,
+        exam_type=sample_question.exam_type,
+    )
+    repo.save_questions([normal], sample_metadata)
+    with sqlite3.connect(path) as conn:
+        conn.execute("ALTER TABLE questions DROP COLUMN answer_available")
+
+    migrated = ExamRepository(str(path))
+    migrated.init_database()
+    with sqlite3.connect(path) as conn:
+        assert conn.execute(
+            "SELECT question_number, answer_available FROM questions ORDER BY question_number"
+        ).fetchall() == [(1, 0), (2, 1)]

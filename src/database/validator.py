@@ -90,8 +90,11 @@ class QuestionValidator:
             for choice in choices
             if choice.get('choice_number') is not None
         }
-        if question.get('answer_available', True) and question.get('correct_answer') not in choice_numbers:
+        answer_available = bool(question.get('answer_available', True))
+        if answer_available and question.get('correct_answer') not in choice_numbers:
             issues.append(self._issue('invalid_correct_answer', '정답 번호 이상', 'error'))
+        elif not answer_available and question.get('correct_answer') != 0:
+            issues.append(self._issue('invalid_answer_state', '정답 제공 상태 이상', 'error'))
 
         image_state = self._image_state(question)
         self._validate_choices(choices, issues, image_state)
