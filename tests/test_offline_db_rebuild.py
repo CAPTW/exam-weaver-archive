@@ -11,6 +11,8 @@ import pytest
 from src.database.repository import ExamRepository
 from src.database.staging import (
     ExpectedExamSet,
+    InventoryContract,
+    RegisteredExamSet,
     ReplacementError,
     build_staging_database,
     replace_mounted_database,
@@ -124,6 +126,7 @@ def test_build_inventories_documents_writes_reports_schema_and_provenance(tmp_pa
             "year": 2024,
             "session": 2,
             "document_id": path.stem,
+            "expected_question_count": 2,
         },
     )
     monkeypatch.setattr(
@@ -134,7 +137,7 @@ def test_build_inventories_documents_writes_reports_schema_and_provenance(tmp_pa
 
     staging_db = tmp_path / "build" / "staging.db"
     report_dir = tmp_path / "reports"
-    summary = build_staging_database(root, staging_db, report_dir)
+    summary = build_staging_database(root, staging_db, report_dir, inventory_contract=None)
 
     assert summary.inventory_counts == {
         "question": 1,
@@ -203,11 +206,14 @@ def test_inventoried_question_pdf_with_no_parsed_set_fails_closed(tmp_path, monk
             "year": 2024,
             "session": 2,
             "document_id": path.stem,
+            "expected_question_count": 1,
         },
     )
     monkeypatch.setattr(staging, "_resolve_answer_key", lambda *_args: ({}, None))
 
-    summary = build_staging_database(root, tmp_path / "staging.db", tmp_path / "reports")
+    summary = build_staging_database(
+        root, tmp_path / "staging.db", tmp_path / "reports", inventory_contract=None
+    )
     report = validate_staging_database(summary.staging_db, summary.expected_sets)
 
     assert summary.inventory_counts["question"] == 1
@@ -248,17 +254,106 @@ def test_one_failed_question_document_blocks_otherwise_valid_staging(tmp_path, m
             "year": 2024,
             "session": 2,
             "document_id": path.stem,
+            "expected_question_count": 1,
         },
     )
     monkeypatch.setattr(staging, "_resolve_answer_key", lambda *_args: ({1: 1}, None))
 
-    summary = build_staging_database(root, tmp_path / "staging.db", tmp_path / "reports")
+    summary = build_staging_database(
+        root, tmp_path / "staging.db", tmp_path / "reports", inventory_contract=None
+    )
     report = validate_staging_database(summary.staging_db, summary.expected_sets)
 
     assert summary.question_count == 1
     assert summary.errors
     assert report.valid is False
     assert "unparsed_question_documents" in report.error_codes
+
+
+def test_expected_coverage_comes_from_registered_metadata_not_accepted_output(tmp_path, monkeypatch):
+    from src.database import staging
+
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    pdf = root / "trusted_문제.pdf"
+    pdf.write_bytes(b"trusted")
+    candidate = ParsedOfflineQuestion(1, "문제", ["하나", "둘", "셋", "넷"], 1, 1.0, ())
+    monkeypatch.setattr(
+        staging,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(
+            path, DocumentRole.QUESTION, MappingProxyType(dict(metadata)), (candidate,), ()
+        ),
+    )
+    monkeypatch.setattr(
+        staging,
+        "_infer_document_metadata",
+        lambda path, _root: {
+            "exam_type": "해경",
+            "subject_name": "항해",
+            "year": 2024,
+            "session": 2,
+            "document_id": path.stem,
+            "expected_question_count": 2,
+        },
+    )
+    monkeypatch.setattr(staging, "_resolve_answer_key", lambda *_args: ({1: 1, 2: 2}, None))
+
+    summary = build_staging_database(
+        root, tmp_path / "staging.db", tmp_path / "reports", inventory_contract=None
+    )
+    report = validate_staging_database(summary.staging_db, summary.expected_sets)
+
+    assert summary.expected_sets[0].question_numbers == (1, 2)
+    assert report.valid is False
+    assert report.sets[0].missing_numbers == (2,)
+
+
+def test_registered_provider_preserves_repeated_question_numbers_across_sets(tmp_path):
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    first_pdf = root / "first_문제.pdf"
+    second_pdf = root / "second_문제.pdf"
+    first_answer = root / "first_정답.pdf"
+    second_answer = root / "second_정답.pdf"
+    for path in (first_pdf, second_pdf, first_answer, second_answer):
+        path.write_bytes(path.name.encode())
+
+    def provider(_root, _reports, _inventory):
+        first_question = _question(1)
+        first_question.year = 2023
+        first_question.session = 1
+        second_question = _question(1)
+        second_question.year = 2024
+        second_question.session = 1
+        return (
+            RegisteredExamSet(
+                ExpectedExamSet("해경", "항해", 2023, 1, (1,)),
+                (first_question,),
+                first_pdf,
+                first_answer,
+            ),
+            RegisteredExamSet(
+                ExpectedExamSet("해경", "항해", 2024, 1, (1,)),
+                (second_question,),
+                second_pdf,
+                second_answer,
+            ),
+        )
+
+    summary = build_staging_database(
+        root,
+        tmp_path / "staging.db",
+        tmp_path / "reports",
+        inventory_contract=InventoryContract(4, 2, 2, 0),
+        registered_set_provider=provider,
+    )
+
+    with sqlite3.connect(summary.staging_db) as conn:
+        assert conn.execute("SELECT question_number FROM questions ORDER BY year").fetchall() == [
+            (1,),
+            (1,),
+        ]
 
 
 def test_validation_checks_expected_numbers_answers_placeholders_and_provenance(tmp_path):
@@ -340,8 +435,8 @@ def test_replacement_creates_backup_atomic_receipt_hashes_and_readable_mount(tmp
     )
 
     assert receipt.backup_path.is_file()
-    assert _sha256(receipt.backup_path) == old_hash
     assert receipt.previous_sha256 == old_hash
+    assert receipt.backup_sha256 == _sha256(receipt.backup_path)
     assert receipt.staging_sha256 == staging_hash
     assert receipt.mounted_sha256 == _sha256(mounted) == staging_hash
     assert receipt.counts["questions"] == 2
@@ -411,3 +506,111 @@ def test_cli_is_dry_run_by_default_and_requires_explicit_replace(tmp_path, monke
     calls.clear()
     assert cli.main([*common, "--replace"]) == 0
     assert calls == ["build", "validate", "replace"]
+
+
+def test_strict_inventory_contract_rejects_partial_corpus_before_staging_write(tmp_path):
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    (root / "one_문제.pdf").write_bytes(b"one")
+    staging_db = tmp_path / "staging.db"
+    staging_db.write_bytes(b"preserve me")
+
+    with pytest.raises(ValueError, match="inventory mismatch"):
+        build_staging_database(root, staging_db, tmp_path / "reports")
+
+    assert staging_db.read_bytes() == b"preserve me"
+    assert not (tmp_path / "reports").exists()
+
+
+@pytest.mark.parametrize("alias", ["mounted", "staging", "backup"])
+def test_replacement_rejects_receipt_path_aliases_before_writes(tmp_path, alias):
+    mounted = tmp_path / "mounted.db"
+    staging_db = tmp_path / "staging.db"
+    backup_dir = tmp_path / "backups"
+    _database(mounted, [_question(1)])
+    _database(staging_db, [_question(1)])
+    before = mounted.read_bytes()
+    aliases = {"mounted": mounted, "staging": staging_db, "backup": backup_dir}
+
+    with pytest.raises(ReplacementError, match="alias"):
+        replace_mounted_database(staging_db, mounted, backup_dir, aliases[alias])
+
+    assert mounted.read_bytes() == before
+    assert not backup_dir.exists()
+
+
+def test_validation_rejects_nonblank_stem_choice_structure_and_sequence(tmp_path):
+    path = tmp_path / "invalid-structure.db"
+    _database(path, [_question(1)])
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE questions SET question_text = '   '")
+        conn.execute(
+            "UPDATE question_choices SET choice_text = '' WHERE choice_number = 2"
+        )
+        conn.execute(
+            "UPDATE question_choices SET choice_number = 5 WHERE choice_number = 4"
+        )
+
+    report = validate_staging_database(path, [_expected(1)])
+
+    assert report.valid is False
+    assert "invalid_question_structure" in report.error_codes
+
+
+def test_validation_rejects_provenance_not_matching_inventory(tmp_path):
+    path = tmp_path / "provenance.db"
+    _database(path, [_question(1)])
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE offline_rebuild_documents (
+                relative_path TEXT PRIMARY KEY, role TEXT, sha256 TEXT, size INTEGER,
+                parsed_question_count INTEGER DEFAULT 0, build_error TEXT
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO offline_rebuild_documents VALUES (?, ?, ?, 1, 1, NULL)",
+            [
+                ("question.pdf", "question", "b" * 64),
+                ("answer.pdf", "answer", "c" * 64),
+            ],
+        )
+        conn.execute(
+            """
+            UPDATE question_sources
+            SET source_url = 'file:///wrong.pdf', content_hash = ?,
+                attachment_url = 'file:///missing-answer.pdf',
+                attachment_filename = 'missing-answer.pdf'
+            """,
+            ("d" * 64,),
+        )
+
+    report = validate_staging_database(path, [_expected(1)])
+
+    assert report.valid is False
+    assert "provenance_mismatch" in report.error_codes
+
+
+def test_sqlite_backup_includes_committed_wal_rows(tmp_path):
+    mounted = tmp_path / "mounted.db"
+    staging_db = tmp_path / "staging.db"
+    _database(mounted, [_question(1)])
+    _database(staging_db, [_question(1), _question(2)])
+    writer = sqlite3.connect(mounted)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("UPDATE questions SET question_text = 'WAL 최신값'")
+    writer.commit()
+    try:
+        with pytest.raises(ReplacementError, match="access|액세스|process|프로세스"):
+            replace_mounted_database(
+                staging_db, mounted, tmp_path / "backups", tmp_path / "receipt.json"
+            )
+    finally:
+        writer.close()
+
+    backups = list((tmp_path / "backups").glob("*.db"))
+    assert len(backups) == 1
+    with sqlite3.connect(backups[0]) as conn:
+        assert conn.execute("SELECT question_text FROM questions").fetchone()[0] == "WAL 최신값"
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

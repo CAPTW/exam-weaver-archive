@@ -17,7 +17,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Callable, Iterable, Iterator, Mapping, Sequence
+from urllib.parse import unquote, urlparse
 
 from src.database.repository import ExamRepository
 from src.parser.offline_sources import (
@@ -54,6 +55,28 @@ REQUIRED_SCHEMA: Mapping[str, frozenset[str]] = {
 
 
 @dataclass(frozen=True)
+class InventoryContract:
+    total: int
+    question: int
+    answer: int
+    notice: int
+    unknown: int = 0
+
+    def mismatches(self, counts: Mapping[str, int]) -> tuple[str, ...]:
+        expected = asdict(self)
+        return tuple(
+            f"{key}: expected={value} actual={int(counts.get(key, 0))}"
+            for key, value in expected.items()
+            if int(counts.get(key, 0)) != value
+        )
+
+
+STRICT_CORPUS_INVENTORY = InventoryContract(30, 12, 15, 3, 0)
+STRICT_EXPECTED_SET_COUNT = 135
+STRICT_EXPECTED_QUESTION_COUNT = 3280
+
+
+@dataclass(frozen=True)
 class ExpectedExamSet:
     exam_type: str
     subject_name: str
@@ -75,6 +98,17 @@ class ExpectedExamSet:
         value = asdict(self)
         value["question_numbers"] = list(self.question_numbers)
         return value
+
+
+@dataclass(frozen=True)
+class RegisteredExamSet:
+    """Trusted provider output; coverage is registered independently of parser output."""
+
+    expected: ExpectedExamSet
+    questions: tuple[Question, ...]
+    source_path: Path
+    answer_path: Path
+    rejected_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -177,6 +211,7 @@ class ReplacementReceipt:
     backup_path: Path
     receipt_path: Path
     previous_sha256: str
+    backup_sha256: str
     staging_sha256: str
     mounted_sha256: str
     counts: Mapping[str, int]
@@ -190,6 +225,7 @@ class ReplacementReceipt:
             "backup_path": str(self.backup_path),
             "receipt_path": str(self.receipt_path),
             "previous_sha256": self.previous_sha256,
+            "backup_sha256": self.backup_sha256,
             "staging_sha256": self.staging_sha256,
             "mounted_sha256": self.mounted_sha256,
             "counts": dict(self.counts),
@@ -201,10 +237,39 @@ class ReplacementError(RuntimeError):
     """Raised when validation or replacement cannot complete safely."""
 
 
+def validate_rebuild_paths(
+    staging: str | Path,
+    mounted: str | Path,
+    backup_dir: str | Path,
+    receipt_path: str | Path,
+) -> None:
+    """Reject destructive path aliases before a staging file can be unlinked."""
+
+    aliases = {
+        "staging": Path(staging).resolve(),
+        "mounted": Path(mounted).resolve(),
+        "backup": Path(backup_dir).resolve(),
+        "receipt": Path(receipt_path).resolve(),
+    }
+    names = tuple(aliases)
+    for index, left in enumerate(names):
+        for right in names[index + 1 :]:
+            if aliases[left] == aliases[right]:
+                raise ReplacementError(
+                    f"path alias: {left} and {right} resolve to {aliases[left]}"
+                )
+
+
 def build_staging_database(
     root: str | Path,
     staging_db: str | Path,
     report_dir: str | Path,
+    *,
+    inventory_contract: InventoryContract | None = STRICT_CORPUS_INVENTORY,
+    registered_set_provider: Callable[
+        [Path, Path, Sequence[Mapping[str, object]]], Sequence[RegisteredExamSet]
+    ]
+    | None = None,
 ) -> RebuildSummary:
     """Inventory PDFs and build a new database without touching a mounted DB."""
 
@@ -213,15 +278,6 @@ def build_staging_database(
     reports = Path(report_dir).resolve()
     if not source_root.is_dir():
         raise FileNotFoundError(f"offline PDF root does not exist: {source_root}")
-
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    reports.mkdir(parents=True, exist_ok=True)
-    if database_path.exists():
-        database_path.unlink()
-
-    repository = ExamRepository(str(database_path))
-    repository.init_database()
-    _initialize_rebuild_schema(database_path)
 
     inventory: list[dict[str, object]] = []
     counts: Counter[str] = Counter()
@@ -246,18 +302,64 @@ def build_staging_database(
     for role in DocumentRole:
         counts.setdefault(role.value, 0)
     counts["total"] = len(inventory)
+    if inventory_contract is not None:
+        mismatches = inventory_contract.mismatches(counts)
+        if mismatches:
+            raise ValueError("offline corpus inventory mismatch: " + "; ".join(mismatches))
+
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
+    if database_path.exists():
+        database_path.unlink()
+
+    repository = ExamRepository(str(database_path))
+    repository.init_database()
+    _initialize_rebuild_schema(database_path)
     _write_inventory(database_path, inventory)
 
     expected_by_key: dict[tuple[str, str, int, int], set[int]] = {}
     rejected_count = 0
     errors: list[str] = []
+    if inventory_contract is not None:
+        provider = registered_set_provider or _build_registered_corpus_sets
+        registered_sets = tuple(provider(source_root, reports, inventory))
+        if not registered_sets:
+            raise ValueError("registered corpus provider returned no expected exam sets")
+        if inventory_contract == STRICT_CORPUS_INVENTORY:
+            registered_question_count = sum(
+                len(item.expected.question_numbers) for item in registered_sets
+            )
+            if (
+                len(registered_sets) != STRICT_EXPECTED_SET_COUNT
+                or registered_question_count != STRICT_EXPECTED_QUESTION_COUNT
+            ):
+                raise ValueError(
+                    "registered corpus coverage mismatch: "
+                    f"sets={len(registered_sets)}/{STRICT_EXPECTED_SET_COUNT} "
+                    f"questions={registered_question_count}/{STRICT_EXPECTED_QUESTION_COUNT}"
+                )
+        for registered in registered_sets:
+            expected = registered.expected
+            if not expected.question_numbers:
+                raise ValueError(f"registered set has empty coverage: {expected.key}")
+            _persist_registered_set(database_path, repository, registered, inventory)
+            if registered.rejected_count:
+                _record_set_rejections(database_path, expected, registered.rejected_count)
+            expected_by_key.setdefault(expected.key, set()).update(expected.question_numbers)
+            rejected_count += registered.rejected_count
+
     for row, path in zip(inventory, pdf_paths):
+        if inventory_contract is not None:
+            continue
         if row["role"] != DocumentRole.QUESTION.value:
             continue
         try:
             metadata = _infer_document_metadata(path, source_root)
             parsed = parse_offline_question_pdf(path, metadata)
-            expected_numbers = tuple(sorted({item.number for item in parsed.questions}))
+            expected_count = metadata.get("expected_question_count")
+            if not isinstance(expected_count, int) or expected_count < 1:
+                raise ValueError("question coverage is not registered independently")
+            expected_numbers = tuple(range(1, expected_count + 1))
             answer_key, answer_path = _resolve_answer_key(
                 path, source_root, metadata, expected_numbers
             )
@@ -423,6 +525,23 @@ def validate_staging_database(
             )
             if duplicate_count:
                 errors.append("duplicate_questions")
+            invalid_structure_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM questions q
+                    WHERE TRIM(COALESCE(q.question_text, '')) = ''
+                       OR (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id) NOT IN (4, 5)
+                       OR (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id AND TRIM(COALESCE(c.choice_text, '')) = '') > 0
+                       OR (SELECT MIN(choice_number) FROM question_choices c WHERE c.question_id = q.id) != 1
+                       OR (SELECT MAX(choice_number) FROM question_choices c WHERE c.question_id = q.id)
+                          != (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id)
+                       OR (SELECT COUNT(DISTINCT choice_number) FROM question_choices c WHERE c.question_id = q.id)
+                          != (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id)
+                    """
+                ).fetchone()[0]
+            )
+            if invalid_structure_count:
+                errors.append("invalid_question_structure")
 
             rebuild_inventory_exists = connection.execute(
                 """
@@ -442,6 +561,48 @@ def validate_staging_database(
                 )
                 if unparsed_question_count:
                     errors.append("unparsed_question_documents")
+                inventory_rows = connection.execute(
+                    "SELECT relative_path, role, sha256 FROM offline_rebuild_documents"
+                ).fetchall()
+                inventory_by_name = {
+                    Path(str(row[0])).name: (str(row[1]), str(row[2]))
+                    for row in inventory_rows
+                }
+                provenance_rows = connection.execute(
+                    """
+                    SELECT DISTINCT qs.source_url, qs.content_hash,
+                           qs.attachment_url, qs.attachment_filename
+                    FROM questions q
+                    JOIN question_sources qs ON qs.id = q.source_id
+                    """
+                ).fetchall()
+                provenance_mismatch = False
+                for source_url, content_hash, attachment_url, attachment_filename in provenance_rows:
+                    source_name = _url_filename(str(source_url or ""))
+                    source_inventory = inventory_by_name.get(source_name)
+                    answer_name = _url_filename(str(attachment_url or ""))
+                    answer_inventory = inventory_by_name.get(answer_name)
+                    if (
+                        source_inventory is None
+                        or source_inventory[0] != DocumentRole.QUESTION.value
+                        or source_inventory[1] != str(content_hash or "")
+                        or answer_inventory is None
+                        or answer_inventory[0] != DocumentRole.ANSWER.value
+                        or answer_name != str(attachment_filename or "")
+                    ):
+                        provenance_mismatch = True
+                        break
+                if provenance_mismatch:
+                    errors.append("provenance_mismatch")
+                rejection_table = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='offline_rebuild_rejections'"
+                ).fetchone()
+                if rejection_table and int(
+                    connection.execute(
+                        "SELECT COALESCE(SUM(rejected_count), 0) FROM offline_rebuild_rejections"
+                    ).fetchone()[0]
+                ):
+                    errors.append("rejected_candidates")
 
             set_reports = tuple(
                 _validate_expected_set(connection, expected) for expected in normalized_sets
@@ -497,8 +658,7 @@ def replace_mounted_database(
     receipt_file = Path(receipt_path).resolve()
     if not mounted_path.is_file():
         raise ReplacementError(f"mounted database does not exist: {mounted_path}")
-    if staging_path == mounted_path:
-        raise ReplacementError("staging and mounted database paths must differ")
+    validate_rebuild_paths(staging_path, mounted_path, backups, receipt_file)
 
     expected_sets = _load_expected_sets(staging_path)
     validation = validate_staging_database(staging_path, expected_sets)
@@ -512,8 +672,11 @@ def replace_mounted_database(
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     backups.mkdir(parents=True, exist_ok=True)
     backup_path = backups / f"{mounted_path.stem}.{stamp}{mounted_path.suffix}"
-    shutil.copy2(mounted_path, backup_path)
-    _fsync_file(backup_path)
+    if backup_path in {staging_path, mounted_path, receipt_file} or backup_path.exists():
+        raise ReplacementError(f"path alias or collision for backup: {backup_path}")
+    _backup_sqlite_database(mounted_path, backup_path)
+    _validate_backup_database(backup_path)
+    backup_hash = _sha256_file(backup_path)
 
     mounted_path.parent.mkdir(parents=True, exist_ok=True)
     replacement_temp = mounted_path.with_name(f".{mounted_path.name}.{stamp}.replacement.tmp")
@@ -541,6 +704,7 @@ def replace_mounted_database(
         mounted_hash = _sha256_file(mounted_path)
         if mounted_hash != staging_hash:
             raise ReplacementError("mounted database hash differs from validated staging hash")
+        _smoke_mounted_repository(mounted_path)
 
         receipt = ReplacementReceipt(
             replaced_at=datetime.now(timezone.utc).isoformat(),
@@ -549,6 +713,7 @@ def replace_mounted_database(
             backup_path=backup_path,
             receipt_path=receipt_file,
             previous_sha256=previous_hash,
+            backup_sha256=backup_hash,
             staging_sha256=staging_hash,
             mounted_sha256=mounted_hash,
             counts=validation.counts,
@@ -599,8 +764,235 @@ def _initialize_rebuild_schema(path: Path) -> None:
                 require_provenance INTEGER NOT NULL,
                 PRIMARY KEY (exam_type, subject_name, year, session)
             );
+            CREATE TABLE IF NOT EXISTS offline_rebuild_rejections (
+                exam_type TEXT NOT NULL, subject_name TEXT NOT NULL,
+                year INTEGER NOT NULL, session INTEGER NOT NULL,
+                rejected_count INTEGER NOT NULL,
+                PRIMARY KEY (exam_type, subject_name, year, session)
+            );
             """
         )
+
+
+def _record_set_rejections(path: Path, expected: ExpectedExamSet, count: int) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO offline_rebuild_rejections VALUES (?, ?, ?, ?, ?)",
+            (*expected.key, int(count)),
+        )
+
+
+def _persist_registered_set(
+    database_path: Path,
+    repository: ExamRepository,
+    registered: RegisteredExamSet,
+    inventory: Sequence[Mapping[str, object]],
+) -> None:
+    source = registered.source_path.resolve()
+    answer = registered.answer_path.resolve()
+    source_row = next(
+        (row for row in inventory if Path(str(row["relative_path"])).name == source.name), None
+    )
+    answer_row = next(
+        (row for row in inventory if Path(str(row["relative_path"])).name == answer.name), None
+    )
+    if source_row is None or source_row.get("role") != DocumentRole.QUESTION.value:
+        raise ValueError(f"registered source is absent from question inventory: {source}")
+    if answer_row is None or answer_row.get("role") != DocumentRole.ANSWER.value:
+        raise ValueError(f"registered answer is absent from answer inventory: {answer}")
+    expected = registered.expected
+    metadata = {
+        "exam_type": expected.exam_type,
+        "subject_name": expected.subject_name,
+        "year": expected.year,
+        "session": expected.session,
+    }
+    source_id = _insert_question_source(
+        database_path,
+        source,
+        source.stem,
+        str(source_row["sha256"]),
+        answer,
+    )
+    repository.save_questions(
+        list(registered.questions),
+        SimpleNamespace(year=expected.year, session=expected.session, exam_type=expected.exam_type),
+    )
+    _attach_provenance(database_path, metadata, expected.question_numbers, source_id)
+    _mark_document_build(
+        database_path,
+        str(source_row["relative_path"]),
+        parsed_question_count=len(registered.questions),
+        build_error=None,
+    )
+
+
+def _build_registered_corpus_sets(
+    root: Path,
+    report_dir: Path,
+    inventory: Sequence[Mapping[str, object]],
+) -> Sequence[RegisteredExamSet]:
+    """Run the registered Ronpark subject builders plus native-2023 adapters."""
+
+    question_paths = [
+        root / str(row["relative_path"])
+        for row in inventory
+        if row["role"] == DocumentRole.QUESTION.value
+    ]
+    page_records: list[dict[str, object]] = []
+    native_paths: list[Path] = []
+    for path in question_paths:
+        if path.name in {"2023 2차 - 물리.pdf", "2023 2차 - 항해.pdf"}:
+            native_paths.append(path)
+            continue
+        parsed = parse_offline_question_pdf(path, {"probe": {"role": "question"}})
+        for page in parsed.structured_pages:
+            text_value = "\n".join(
+                " ".join(str(word.text) for word in line.words) for line in page.lines
+            )
+            page_records.append(
+                {
+                    "filename": path.name,
+                    "pdf_id": path.stem,
+                    "page": page.number,
+                    "text": text_value,
+                    "source_path": str(path),
+                }
+            )
+
+    from scripts import import_maritime_english_pdf as maritime_english
+    from scripts import import_maritime_law_pdf as maritime_law
+    from scripts import import_police_engineering_pdf as police_engineering
+    from scripts import import_police_navigation_pdf as police_navigation
+
+    modules = (maritime_law, maritime_english, police_navigation, police_engineering)
+    registered: list[RegisteredExamSet] = []
+    for module in modules:
+        if hasattr(module, "KNOWN_GROUPS"):
+            filenames = set(module.KNOWN_GROUPS)
+            records = [row for row in page_records if row["filename"] in filenames]
+        else:
+            records = [row for row in page_records if "해사영어" in str(row["filename"])]
+        if not records:
+            continue
+        source_paths = [Path(str(row["source_path"])) for row in records]
+        input_dir = Path(os.path.commonpath([str(path.parent) for path in source_paths]))
+        module_report = report_dir / f"provider_{module.__name__.split('.')[-1]}"
+        module_report.mkdir(parents=True, exist_ok=True)
+        if module is police_engineering:
+            original_gate = module.require_complete_offline_set
+
+            def engineering_gate(questions, *, expected_numbers, answers, rejected_count, choice_counts):
+                if answers and all(int(answer) == 0 for answer in answers):
+                    expected_values = tuple(int(number) for number in expected_numbers)
+                    if set(questions) != set(expected_values) or rejected_count:
+                        raise ValueError("registered no-answer engineering set is incomplete")
+                    if any(int(choice_counts.get(number, 0)) not in (4, 5) for number in expected_values):
+                        raise ValueError("registered no-answer engineering set has invalid choices")
+                    return
+                original_gate(
+                    questions,
+                    expected_numbers=expected_numbers,
+                    answers=answers,
+                    rejected_count=rejected_count,
+                    choice_counts=choice_counts,
+                )
+
+            module.require_complete_offline_set = engineering_gate
+            try:
+                parsed_items, _summary = module.build_questions(records, module_report, input_dir)
+            finally:
+                module.require_complete_offline_set = original_gate
+        else:
+            parsed_items, _summary = module.build_questions(records, module_report, input_dir)
+        groups = module.build_groups(records)
+        sessions = module.build_session_map(groups)
+        items_by_group: dict[int, list[object]] = {}
+        for item in parsed_items:
+            items_by_group.setdefault(int(item.group_index), []).append(item)
+        for group_index, group in enumerate(groups, start=1):
+            items = items_by_group.get(group_index, [])
+            expected_count = int(group.get("question_count") or (20 if module is maritime_english else 0))
+            answer_path = _registered_answer_path(module, group, group_index, root)
+            source_path = Path(str(group["pages"][0]["source_path"]))
+            expected = ExpectedExamSet(
+                module.EXAM_CODE,
+                module.SUBJECT_NAME,
+                int(group["year"]),
+                int(sessions[group_index]),
+                tuple(range(1, expected_count + 1)),
+                require_answers=not (
+                    module is police_engineering
+                    and str(group.get("answer_key") or "") in module.NO_SOURCE_ANSWER_KEYS
+                ),
+            )
+            registered.append(
+                RegisteredExamSet(
+                    expected,
+                    tuple(item.question for item in items),
+                    source_path,
+                    answer_path,
+                )
+            )
+
+    for path in native_paths:
+        metadata = _infer_document_metadata(path, root)
+        expected_count = metadata.get("expected_question_count")
+        if not isinstance(expected_count, int) or expected_count < 1:
+            raise ValueError(f"native 2023 coverage is not registered: {path.name}")
+        parsed = parse_offline_question_pdf(path, metadata)
+        expected_numbers = tuple(range(1, expected_count + 1))
+        answers, answer_path = _resolve_answer_key(path, root, metadata, expected_numbers)
+        if answer_path is None:
+            raise ValueError(f"native 2023 answer association missing: {path.name}")
+        questions = tuple(
+            Question(
+                item.number,
+                item.stem,
+                [Choice(index, CHOICE_SYMBOLS[index - 1], text) for index, text in enumerate(item.choices, 1)],
+                int(answers.get(item.number, 0)),
+                source_page=item.source_page,
+                subject_name=str(metadata["subject_name"]),
+                year=int(metadata["year"]),
+                session=int(metadata["session"]),
+                exam_type=str(metadata["exam_type"]),
+            )
+            for item in parsed.questions
+        )
+        registered.append(
+            RegisteredExamSet(
+                ExpectedExamSet(
+                    str(metadata["exam_type"]), str(metadata["subject_name"]),
+                    int(metadata["year"]), int(metadata["session"]), expected_numbers,
+                ),
+                questions,
+                path,
+                answer_path,
+                len(parsed.rejected),
+            )
+        )
+    return registered
+
+
+def _registered_answer_path(module: object, group: Mapping[str, object], group_index: int, root: Path) -> Path:
+    filenames = getattr(module, "ANSWER_FILENAMES")
+    bucket: str | None = None
+    answer_key = str(group.get("answer_key") or "")
+    answer_keys = getattr(module, "ANSWER_KEYS", {})
+    for candidate, keys in answer_keys.items():
+        if answer_key in keys:
+            bucket = candidate
+            break
+    if bucket is None and "english" in str(getattr(module, "__name__", "")):
+        bucket = "recent_2025_h2" if group_index == 1 else (
+            "recent_2024_h2_2025_h1" if group_index <= 4 else "archive_2024_2013"
+        )
+    if bucket is None:
+        raise ValueError(f"registered answer association missing for group {group_index}")
+    matches = list(root.rglob(str(filenames[bucket])))
+    if len(matches) != 1:
+        raise ValueError(f"registered answer file missing or ambiguous: {filenames[bucket]}")
+    return matches[0]
 
 
 def _write_inventory(path: Path, inventory: Sequence[Mapping[str, object]]) -> None:
@@ -645,6 +1037,7 @@ def _infer_document_metadata(path: Path, root: Path) -> dict[str, object]:
         "year": metadata.year,
         "session": metadata.session,
         "document_id": metadata.document_id,
+        "expected_question_count": metadata.expected_question_count,
         "probe": {"role": metadata.role},
     }
 
@@ -683,9 +1076,9 @@ def _insert_question_source(
     answer_path: Path | None,
 ) -> int:
     with sqlite3.connect(database_path) as connection:
-        cursor = connection.execute(
+        connection.execute(
             """
-            INSERT INTO question_sources (
+            INSERT OR IGNORE INTO question_sources (
                 provider, source_url, document_id, attachment_url,
                 attachment_filename, content_hash
             ) VALUES (?, ?, ?, ?, ?, ?)
@@ -699,7 +1092,16 @@ def _insert_question_source(
                 content_hash,
             ),
         )
-        return int(cursor.lastrowid)
+        row = connection.execute(
+            """
+            SELECT id FROM question_sources
+            WHERE provider = 'offline_pdf' AND source_url = ? AND content_hash = ?
+            """,
+            (question_path.resolve().as_uri(), content_hash),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"failed to register source provenance: {question_path}")
+        return int(row[0])
 
 
 def _attach_provenance(
@@ -922,10 +1324,66 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _url_filename(value: str) -> str:
+    parsed = urlparse(value)
+    raw_path = parsed.path if parsed.scheme else value
+    return Path(unquote(raw_path.replace("\\", "/"))).name
+
+
 def _fsync_file(path: Path) -> None:
     # Windows' CRT rejects fsync on some read-only descriptors.
     with path.open("r+b") as stream:
         os.fsync(stream.fileno())
+
+
+def _backup_sqlite_database(source: Path, destination: Path) -> None:
+    """Create a transactionally consistent snapshot, including committed WAL pages."""
+
+    source_connection = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
+    destination_connection = sqlite3.connect(destination)
+    try:
+        source_connection.backup(destination_connection)
+        destination_connection.commit()
+    finally:
+        destination_connection.close()
+        source_connection.close()
+    _fsync_file(destination)
+
+
+def _validate_backup_database(path: Path) -> None:
+    """Verify snapshot transport without applying new-staging content policy to legacy data."""
+
+    with _readonly_connection(path) as connection:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
+        schema_valid, details = _validate_application_schema(connection)
+    if integrity != "ok" or foreign_keys or not schema_valid:
+        raise ReplacementError(
+            f"backup validation failed: integrity={integrity} "
+            f"foreign_keys={len(foreign_keys)} schema={details}"
+        )
+
+
+def _smoke_mounted_repository(database_path: Path) -> None:
+    """Exercise the production mounted-repository adapter through a temporary manifest."""
+
+    from experiments.db_mount_prototype.mount_repo import (
+        MountedDatabase,
+        MountedExamRepository,
+        write_manifest,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="offline-mounted-smoke-") as raw_dir:
+        manifest = Path(raw_dir) / "mount_manifest.json"
+        write_manifest(
+            manifest,
+            [MountedDatabase(id="staging_smoke", label="Staging Smoke", path=database_path)],
+        )
+        repository = MountedExamRepository(manifest)
+        rows = repository.search_questions(limit=1)
+        expected_count = _database_counts(database_path).get("questions", 0)
+        if expected_count and not rows:
+            raise ReplacementError("mounted repository smoke query returned no questions")
 
 
 def _atomic_replace(source: Path, target: Path) -> None:

@@ -15,6 +15,7 @@ from src.database.staging import (  # noqa: E402
     ReplacementError,
     build_staging_database,
     replace_mounted_database,
+    validate_rebuild_paths,
     validate_staging_database,
 )
 
@@ -57,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     staging_db = Path(args.staging_db)
     report_dir = Path(args.report_dir)
     mounted_db = Path(args.mounted_db)
+    backup_dir = Path(args.backup_dir) if args.backup_dir else mounted_db.parent / "backups"
+    receipt_path = Path(args.receipt) if args.receipt else report_dir / "replacement_receipt.json"
+    validate_rebuild_paths(staging_db, mounted_db, backup_dir, receipt_path)
 
     summary = build_staging_database(root, staging_db, report_dir)
     validation = validate_staging_database(staging_db, summary.expected_sets)
@@ -78,8 +82,6 @@ def main(argv: list[str] | None = None) -> int:
         print("mounted database unchanged; pass --replace to replace it")
         return 0
 
-    backup_dir = Path(args.backup_dir) if args.backup_dir else mounted_db.parent / "backups"
-    receipt_path = Path(args.receipt) if args.receipt else report_dir / "replacement_receipt.json"
     try:
         receipt = replace_mounted_database(
             staging_db,
