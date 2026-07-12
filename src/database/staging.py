@@ -521,6 +521,7 @@ def validate_staging_database(
 
     try:
         with _readonly_connection(database_path) as connection:
+            connection.row_factory = sqlite3.Row
             integrity_rows = connection.execute("PRAGMA integrity_check").fetchall()
             integrity = "; ".join(str(row[0]) for row in integrity_rows) or "unknown"
             if integrity != "ok":
@@ -632,10 +633,18 @@ def validate_staging_database(
                     if len(provenance_rows) != len(normalized_sets):
                         provenance_mismatch = True
                     for row in provenance_rows:
-                        key = (str(row[0]), str(row[1]), int(row[2]), int(row[3]))
+                        key = (
+                            str(row["exam_type"]), str(row["subject_name"]),
+                            int(row["year"]), int(row["session"]),
+                        )
                         expected_item = expected_by_key.get(key)
-                        source_inventory = inventory_by_relative.get(str(row[4]))
-                        answer_inventory = inventory_by_relative.get(str(row[8])) if row[8] else None
+                        source_relative = str(row["source_relative_path"])
+                        answer_relative = row["answer_relative_path"]
+                        source_inventory = inventory_by_relative.get(source_relative)
+                        answer_inventory = (
+                            inventory_by_relative.get(str(answer_relative))
+                            if answer_relative else None
+                        )
                         linked_sources = connection.execute(
                             """
                             SELECT DISTINCT qs.provider, qs.document_id, qs.source_url, qs.content_hash,
@@ -652,23 +661,30 @@ def validate_staging_database(
                         linked = linked_sources[0] if len(linked_sources) == 1 else None
                         if (
                             expected_item is None
-                            or source_inventory != (DocumentRole.QUESTION.value, str(row[5]))
+                            or source_inventory != (
+                                DocumentRole.QUESTION.value, str(row["source_sha256"])
+                            )
                             or linked is None
-                            or str(linked[0] or "") != str(row[7])
-                            or str(linked[1] or "") != str(row[8])
-                            or _url_filename(str(linked[2] or "")) != Path(str(row[4])).name
-                            or str(linked[3] or "") != str(row[6])
+                            or str(linked["provider"] or "") != str(row["provider"])
+                            or str(linked["document_id"] or "") != str(row["document_id"])
+                            or _url_filename(str(linked["source_url"] or "")) != Path(source_relative).name
+                            or str(linked["content_hash"] or "") != str(row["source_record_hash"])
                             or (expected_item.require_answers and (
-                                str(row[9]) != "required"
-                                or answer_inventory != (DocumentRole.ANSWER.value, str(row[11]))
-                                or Path(str(row[10])).name != str(row[12])
-                                or _url_filename(str(linked[4] or "")) != Path(str(row[10])).name
-                                or str(linked[5] or "") != str(row[12])
+                                str(row["answer_state"]) != "required"
+                                or answer_inventory != (
+                                    DocumentRole.ANSWER.value, str(row["answer_sha256"])
+                                )
+                                or Path(str(answer_relative)).name != str(row["answer_filename"])
+                                or _url_filename(str(linked["attachment_url"] or ""))
+                                   != Path(str(answer_relative)).name
+                                or str(linked["attachment_filename"] or "")
+                                   != str(row["answer_filename"])
                             ))
                             or (not expected_item.require_answers and (
-                                str(row[9]) != "not_required"
-                                or row[10] is not None or row[11] is not None
-                                or linked[4] is not None or linked[5] is not None
+                                str(row["answer_state"]) != "not_required"
+                                or answer_relative is not None or row["answer_sha256"] is not None
+                                or linked["attachment_url"] is not None
+                                or linked["attachment_filename"] is not None
                             ))
                         ):
                             provenance_mismatch = True
@@ -1253,6 +1269,7 @@ def registered_provider_preflight(
         "set_count": set_count,
         "question_count": question_count,
         "engineering_no_answer_sets": no_answer_sets,
+        "required_answer_sets": set_count - no_answer_sets,
         "standalone_sets": len(STANDALONE_SPECS),
         "missing_answer_associations": int(missing_associations),
     }

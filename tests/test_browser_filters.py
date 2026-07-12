@@ -1,4 +1,5 @@
 import os
+import sqlite3
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -60,8 +61,10 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
 def test_validator_scan_accepts_subject_filter(repo, sample_metadata):
     repo.save_questions([
         _question(1, '기관1', '정상 문제'),
-        _question(2, '기관2', '정답 번호가 잘못된 문제', correct_answer=5),
+        _question(2, '기관2', '정답 번호가 잘못된 문제'),
     ], sample_metadata)
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute("UPDATE questions SET correct_answer = 5 WHERE question_number = 2")
 
     findings = QuestionValidator(repo).scan(
         exam_code='3급기관사',

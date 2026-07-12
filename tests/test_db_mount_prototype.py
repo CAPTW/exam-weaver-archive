@@ -160,6 +160,25 @@ def test_mounted_repository_routes_writes_to_read_only_marked_owner(tmp_path):
     assert ExamRepository(str(second_db)).get_question(1) is not None
 
 
+def test_mounted_crud_rejects_invalid_available_answer_pair(tmp_path):
+    db_path = tmp_path / "main.db"
+    _make_db(db_path, "보존할 문제")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [MountedDatabase(id="main", label="Main", path=db_path)],
+    )
+
+    with pytest.raises(RuntimeError, match="수정하지 못했습니다"):
+        MountedExamRepository(manifest).update_question("main::1", {
+            "question_text": "저장되면 안 되는 문제",
+            "answer_available": True,
+            "correct_answer": 5,
+        })
+
+    assert ExamRepository(str(db_path)).get_question(1)["question_text"] == "보존할 문제"
+
+
 def test_mounted_repository_bulk_delete_groups_ids_by_owner(tmp_path):
     first_db = tmp_path / "first.db"
     second_db = tmp_path / "second.db"

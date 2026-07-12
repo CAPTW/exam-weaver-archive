@@ -908,6 +908,12 @@ def test_repository_enforces_answer_availability_invariant(repo, sample_metadata
     with pytest.raises(ValueError, match="requires correct_answer=0"):
         repo.save_questions([sample_question], sample_metadata)
 
+    sample_question.answer_available = True
+    sample_question.correct_answer = 5
+    with pytest.raises(ValueError, match="requires a valid choice answer"):
+        repo.save_questions([sample_question], sample_metadata)
+
+    sample_question.answer_available = False
     sample_question.correct_answer = 0
     repo.save_questions([sample_question], sample_metadata)
     saved = repo.search_questions(limit=1)[0]
@@ -915,6 +921,11 @@ def test_repository_enforces_answer_availability_invariant(repo, sample_metadata
         'question_text': saved['question_text'],
         'answer_available': True,
         'correct_answer': 0,
+    }) is False
+    assert repo.update_question(saved['id'], {
+        'question_text': saved['question_text'],
+        'answer_available': True,
+        'correct_answer': 5,
     }) is False
 
 

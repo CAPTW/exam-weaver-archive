@@ -115,10 +115,7 @@ class ExamRepository:
             if correct_answer != 0:
                 raise ValueError("answer_available=False requires correct_answer=0")
             return
-        # Legacy/editor workflows deliberately persist other invalid positive
-        # answers so QuestionValidator can surface them. Zero, however, is the
-        # reserved no-source sentinel and may never be marked available.
-        if correct_answer == 0:
+        if correct_answer not in choice_numbers:
             raise ValueError("answer_available=True requires a valid choice answer")
 
     @classmethod

@@ -160,7 +160,7 @@ def _save_group_with_invalid_child(repo, sample_metadata):
         number=2,
         text='정답 오류가 있는 공통 하위 문제',
         choices=_group_choice_set(),
-        correct_answer=5,
+        correct_answer=1,
         subject_name='기관1',
         year=2024,
         session=1,
@@ -182,6 +182,7 @@ def _save_group_with_invalid_child(repo, sample_metadata):
     )
 
     with sqlite3.connect(repo.db_path) as conn:
+        conn.execute("UPDATE questions SET correct_answer = 5 WHERE question_number = 2")
         rows = conn.execute("""
             SELECT id, question_number, exam_subject_id
             FROM questions
@@ -215,7 +216,7 @@ def _save_invalid_then_valid_duplicate_groups(repo, sample_metadata):
         number=1,
         text='다음 중 옳은 것은?',
         choices=_group_choice_set(),
-        correct_answer=5,
+        correct_answer=1,
         subject_name='기관1',
         year=2024,
         session=1,
@@ -234,6 +235,7 @@ def _save_invalid_then_valid_duplicate_groups(repo, sample_metadata):
     repo.save_questions([invalid_group, valid_group], sample_metadata)
 
     with sqlite3.connect(repo.db_path) as conn:
+        conn.execute("UPDATE questions SET correct_answer = 5 WHERE question_number = 1")
         rows = conn.execute("""
             SELECT id, question_number, exam_subject_id
             FROM questions
@@ -300,13 +302,15 @@ def test_mock_exam_random_pool_excludes_invalid_questions(repo, sample_metadata,
             Choice(number=3, symbol='㉴', text='사'),
             Choice(number=4, symbol='㉵', text='아'),
         ],
-        correct_answer=5,
+        correct_answer=1,
         subject_name='기관1',
         year=2024,
         session=1,
         exam_type='3급기관사',
     )
     repo.save_questions([sample_question, invalid_question], sample_metadata)
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute("UPDATE questions SET correct_answer = 5 WHERE question_number = 2")
     generator = MockExamGenerator(repo)
 
     with pytest.raises(ValueError, match="Not enough questions available"):

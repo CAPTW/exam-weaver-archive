@@ -701,6 +701,39 @@ def test_no_source_answer_registered_set_uses_canonical_sentinel_and_explicit_st
     )
 
 
+def test_answer_required_registered_set_builds_with_matching_provenance(tmp_path):
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    source = root / "required_문제.pdf"
+    answer = root / "required_정답.pdf"
+    source.write_bytes(b"question")
+    answer.write_bytes(b"answer")
+    question = _question(1)
+    question.exam_type = "해경"
+    question.subject_name = "항해"
+    question.year = 2024
+    question.session = 1
+
+    summary = build_staging_database(
+        root,
+        tmp_path / "staging.db",
+        tmp_path / "reports",
+        inventory_contract=InventoryContract(2, 1, 1, 0),
+        registered_set_provider=lambda *_args: (
+            RegisteredExamSet(
+                ExpectedExamSet("해경", "항해", 2024, 1, (1,)),
+                (question,),
+                source,
+                answer,
+            ),
+        ),
+    )
+
+    validation = validate_staging_database(summary.staging_db, summary.expected_sets)
+    assert validation.valid is True
+    assert validation.sets[0].missing_answers == ()
+
+
 def test_native_2023_specs_are_explicit_distinct_official_associations():
     assert {spec.subject_name for spec in STANDALONE_SPECS} == {"물리", "항해"}
     assert {spec.exam_type for spec in STANDALONE_SPECS} == {"해양경찰 일반직 9급"}
@@ -715,6 +748,7 @@ def test_real_provider_preflight_enumerates_registered_contract_without_ocr():
     assert report["set_count"] == 135
     assert report["question_count"] == 3280
     assert report["engineering_no_answer_sets"] == 1
+    assert report["required_answer_sets"] == 134
     assert report["standalone_sets"] == 2
     assert report["missing_answer_associations"] == 0
 
