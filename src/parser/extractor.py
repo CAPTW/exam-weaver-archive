@@ -39,35 +39,95 @@ _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:[?？]|고려하지\s*아니한다[.)])\s*$"
 )
 _VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭]\)?\s*")
+_TARGETED_OCR_STATE_LOCK = threading.Lock()
+_TARGETED_OCR_ACTIVE_TOKEN: object | None = None
+_TARGETED_OCR_CIRCUIT_OPEN = False
+
+
+class _TargetedOcrTimeout(TimeoutError):
+    """The sole targeted OCR worker exceeded its caller deadline."""
+
+
+class _TargetedOcrUnavailable(RuntimeError):
+    """Targeted OCR is busy or disabled after an earlier timeout."""
+
+
+def _reset_targeted_ocr_circuit_for_tests() -> None:
+    """Reset process-global OCR state after a test has released its worker."""
+    global _TARGETED_OCR_CIRCUIT_OPEN
+    with _TARGETED_OCR_STATE_LOCK:
+        if _TARGETED_OCR_ACTIVE_TOKEN is not None:
+            raise RuntimeError("cannot reset targeted OCR while a worker is running")
+        _TARGETED_OCR_CIRCUIT_OPEN = False
 
 
 def _run_with_timeout(
     worker: Callable[[], Any], *, timeout_seconds: float
-) -> Any | None:
-    """Run a best-effort worker without making its caller wait on shutdown.
+) -> Any:
+    """Run one process-wide OCR worker without waiting on a stalled shutdown.
 
     Some WinRT OCR operations cannot be synchronously cancelled once entered.
-    A daemon thread keeps the parsing call bounded even when such an operation
-    never returns; successful results and ordinary exceptions are forwarded.
+    The first timeout opens a process-wide circuit so subsequent attempts fail
+    closed without allocating more threads. Successful results and ordinary
+    exceptions release the single worker slot for later attempts.
     """
+    global _TARGETED_OCR_ACTIVE_TOKEN, _TARGETED_OCR_CIRCUIT_OPEN
+    token = object()
+    with _TARGETED_OCR_STATE_LOCK:
+        if _TARGETED_OCR_CIRCUIT_OPEN:
+            raise _TargetedOcrUnavailable(
+                "targeted OCR disabled after an earlier timeout"
+            )
+        if _TARGETED_OCR_ACTIVE_TOKEN is not None:
+            raise _TargetedOcrUnavailable("targeted OCR worker already running")
+        _TARGETED_OCR_ACTIVE_TOKEN = token
+
     result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+    worker_finished = threading.Event()
 
     def run() -> None:
+        global _TARGETED_OCR_ACTIVE_TOKEN
         try:
-            result_queue.put_nowait((True, worker()))
-        except Exception as exc:
-            result_queue.put_nowait((False, exc))
+            result = (True, worker())
+        except BaseException as exc:
+            result = (False, exc)
+        result_queue.put_nowait(result)
+        worker_finished.set()
+        with _TARGETED_OCR_STATE_LOCK:
+            if (
+                _TARGETED_OCR_CIRCUIT_OPEN
+                and _TARGETED_OCR_ACTIVE_TOKEN is token
+            ):
+                _TARGETED_OCR_ACTIVE_TOKEN = None
 
     thread = threading.Thread(
         target=run,
         name="exam-weaver-targeted-ocr",
         daemon=True,
     )
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        with _TARGETED_OCR_STATE_LOCK:
+            if _TARGETED_OCR_ACTIVE_TOKEN is token:
+                _TARGETED_OCR_ACTIVE_TOKEN = None
+        raise
     try:
         succeeded, value = result_queue.get(timeout=timeout_seconds)
     except queue.Empty:
-        return None
+        with _TARGETED_OCR_STATE_LOCK:
+            _TARGETED_OCR_CIRCUIT_OPEN = True
+            if (
+                worker_finished.is_set()
+                and _TARGETED_OCR_ACTIVE_TOKEN is token
+            ):
+                _TARGETED_OCR_ACTIVE_TOKEN = None
+        raise _TargetedOcrTimeout(
+            f"targeted OCR exceeded {timeout_seconds:g} seconds"
+        )
+    with _TARGETED_OCR_STATE_LOCK:
+        if _TARGETED_OCR_ACTIVE_TOKEN is token:
+            _TARGETED_OCR_ACTIVE_TOKEN = None
     if not succeeded:
         raise value
     return value

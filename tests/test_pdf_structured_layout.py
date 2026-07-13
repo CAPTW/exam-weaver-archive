@@ -1,5 +1,6 @@
 import io
 import re
+import threading
 import time
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
@@ -222,13 +223,44 @@ def test_targeted_training_rows_requires_exact_first_and_tail_ocr(monkeypatch):
     assert restored.lines[3].words[1].text.endswith("대응 훈련")
 
 
-def test_targeted_ocr_timeout_returns_without_waiting_for_hung_worker():
-    started = time.monotonic()
+def test_targeted_ocr_timeout_opens_circuit_without_leaking_workers():
+    release = threading.Event()
+    invocations = []
 
-    result = extractor_module._run_with_timeout(lambda: time.sleep(1), timeout_seconds=0.02)
+    def blocked_worker():
+        invocations.append(1)
+        release.wait()
 
-    assert result is None
-    assert time.monotonic() - started < 0.30
+    try:
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            extractor_module._run_with_timeout(blocked_worker, timeout_seconds=0.02)
+        for _ in range(24):
+            with pytest.raises(RuntimeError):
+                extractor_module._run_with_timeout(blocked_worker, timeout_seconds=0.02)
+
+        live_workers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "exam-weaver-targeted-ocr" and thread.is_alive()
+        ]
+        assert invocations == [1]
+        assert len(live_workers) <= 1
+        assert time.monotonic() - started < 0.30
+    finally:
+        release.set()
+        deadline = time.monotonic() + 1
+        while (
+            any(
+                thread.name == "exam-weaver-targeted-ocr" and thread.is_alive()
+                for thread in threading.enumerate()
+            )
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        reset = getattr(extractor_module, "_reset_targeted_ocr_circuit_for_tests", None)
+        if reset is not None:
+            reset()
 
 
 def test_targeted_percentage_length_rows_prefer_clean_raw_percent_cells(monkeypatch):
