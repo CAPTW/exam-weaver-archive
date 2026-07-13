@@ -1477,6 +1477,55 @@ def test_four_wrapped_mixed_value_rows_recover_by_aligned_geometry():
     assert validate_offline_question(question).importable is True
 
 
+def test_wrapped_labeled_table_overrides_compact_fragmented_markers():
+    page = _page(
+        _line(["7.", "빈칸의", "조합을", "고르시오?"], y=0.12),
+        _line(["①", "㉦", "장관", "②", ":", "10"], y=0.30,
+              xs=[0.05, 0.08, 0.12, 0.30, 0.33, 0.36], visual_indexes={0}),
+        _line(["@", ".", "청장"], y=0.33, xs=[0.08, 0.10, 0.12]),
+        _line(["③", "㉦", "청장", "④", ":", "5"], y=0.36,
+              xs=[0.05, 0.08, 0.12, 0.30, 0.33, 0.36], visual_indexes={0}),
+        _line(["@", ":", "장관"], y=0.39, xs=[0.08, 0.10, 0.12]),
+        _line(["•", "시•도지사", "10"], y=0.42, xs=[0.08, 0.12, 0.36]),
+        _line(["@", ".", "장관"], y=0.45, xs=[0.08, 0.10, 0.12]),
+        _line(["㉦", "㉦", ".", "청장", "㉭", ":", "5"], y=0.48,
+              xs=[0.05, 0.08, 0.10, 0.12, 0.30, 0.33, 0.36]),
+        _line(["@", ":", "청장"], y=0.51, xs=[0.08, 0.10, 0.12]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "장관 10 청장",
+        "청장 5 장관",
+        "시•도지사 10 장관",
+        "청장 5 청장",
+    ]
+    assert "table_choice_recovery" in question.diagnostics
+
+
+def test_spurious_digit_before_fourth_marker_keeps_complete_choice_sequence():
+    page = _page(
+        _line(["2.", "다음", "중", "옳은", "것은?"], y=0.12),
+        _line(["①", "첫째", "선지"], y=0.24),
+        _line(["계속"], y=0.27, xs=[0.105]),
+        _line(["②", "둘째", "선지"], y=0.32),
+        _line(["③", "셋째", "선지"], y=0.40),
+        _line(["3", "④", "넷째", "선지"], y=0.48,
+              xs=[0.05, 0.08, 0.12, 0.20]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째 선지 계속",
+        "둘째 선지",
+        "셋째 선지",
+        "넷째 선지",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
 def test_two_prompt_overlays_shift_three_four_into_two_by_two_choice_grid():
     page = _page(
         _line(["13.", "법규", "질문"], y=0.12),

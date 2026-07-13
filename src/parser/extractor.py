@@ -3289,6 +3289,11 @@ class PDFExtractor:
                 text = str(word.text).strip()
                 word_x = float(word.bbox[0])
                 damaged_prefix = _VISUAL_DAMAGED_PREFIX.match(text)
+                parenthesized_damaged_prefix = bool(
+                    text.startswith("(")
+                    and damaged_prefix is not None
+                    and damaged_prefix.end() < len(text)
+                )
                 if (
                     line.text.rstrip().endswith("?")
                     and (not text or text[:1] not in markerish)
@@ -3300,7 +3305,7 @@ class PDFExtractor:
                     and (
                         text[:1] in markerish
                         or len(text) <= 2
-                        or damaged_prefix is not None
+                        or parenthesized_damaged_prefix
                     )
                 ):
                     scored_positions = [
@@ -3312,10 +3317,7 @@ class PDFExtractor:
                     ]
                     score, scored_x = max(scored_positions)
                     trusted_damaged_ring = (
-                        (
-                            text[:1] in _VISUAL_DAMAGED_MARKERS
-                            or damaged_prefix is not None
-                        )
+                        text[:1] in _VISUAL_DAMAGED_MARKERS
                         and score[0] >= 22
                         and score[1] >= 140
                     )
@@ -3610,7 +3612,6 @@ class PDFExtractor:
                     | {"@", "O"}
                 )
                 or token in {"1", "2", "3", "4", "5"}
-                or _VISUAL_DAMAGED_PREFIX.match(token) is not None
             )
 
         def fused_choice_content(anchor, offset, word):
@@ -3844,10 +3845,6 @@ class PDFExtractor:
             if (
                 compact_grid is not None
                 and compact_grid[0][0] >= chosen_vertical[0][0]
-                and sum(
-                    trusted_anchor(anchor) and anchor[2] == 0
-                    for anchor in chosen_vertical
-                ) < 4
                 and vertical_span >= 3 * max(
                     0.001,
                     float(lines[compact_grid[-1][0]].bbox[1])

@@ -573,10 +573,13 @@ class OfflineExamParser:
                 or self._recover_two_field_proposition_rows(region[1:])
             )
             labeled_numeric_recovery = two_field_recovery or numeric_table_recovery
+            if labeled_numeric_recovery is None:
+                labeled_numeric_recovery = self._recover_wrapped_labeled_table(
+                    region[1:]
+                )
             if labeled_numeric_recovery is None and not compact_explicit_sequence:
                 labeled_numeric_recovery = (
-                    self._recover_wrapped_labeled_table(region[1:])
-                    or self._recover_proposition_header_choice_table(region[1:])
+                    self._recover_proposition_header_choice_table(region[1:])
                     or self._recover_headerless_four_by_four_table(region[1:])
                 )
             shifted_grid_recovery = self._recover_shifted_two_by_two_grid(region)
@@ -632,7 +635,10 @@ class OfflineExamParser:
         )
         use_legacy_recovery = (
             bool(legacy_indexes)
-            and not has_explicit_choices
+            and (
+                not has_explicit_choices
+                or compact_explicit_numbers != [1, 2, 3, 4]
+            )
             and not labeled_numeric_choices
             and not shifted_grid_choices
             and not shifted_choices
@@ -1872,7 +1878,16 @@ class OfflineExamParser:
         if not has_prompt_boundary:
             return None
 
-        layouts = ((4, 1, 2), (2, 2, 1), (1, 4, 1))
+        tail_rows = region[-4:] if len(region) >= 5 else ()
+        repeated_a_b_fields = bool(tail_rows) and all(
+            re.search(r"\bA\s*:?.*\bB\s*:?", row.text, re.IGNORECASE)
+            for row in tail_rows
+        )
+        layouts = (
+            ((4, 1, 2), (2, 2, 1), (1, 4, 1))
+            if repeated_a_b_fields
+            else ((2, 2, 1), (1, 4, 1), (4, 1, 2))
+        )
         for row_count, cells_per_row, minimum_markers in layouts:
             if len(region) - 1 < row_count:
                 continue
@@ -2026,6 +2041,11 @@ class OfflineExamParser:
             token = str(region[start].words[0].text).strip()
             if self._is_legacy_choice_marker(token):
                 parts[0] = _LEGACY_CHOICE_PREFIX.sub("", parts[0], count=1).strip()
+                if (
+                    re.fullmatch(r"[0-4]", token)
+                    and parts[0][:1] in _CHOICE_MARKERS
+                ):
+                    parts[0] = _CHOICE_PATTERN.sub("", parts[0], count=1).strip()
             elif re.fullmatch(r"\S{1,2}\)", token):
                 parts[0] = re.sub(r"^\S{1,2}\)\s*", "", parts[0], count=1).strip()
             value = " ".join(part for part in parts if part).strip()
