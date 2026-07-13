@@ -1057,7 +1057,95 @@ class PDFExtractor:
         page = self._recover_missing_proposition_combination_row(page, gray)
         page = self._recover_legacy_abc_choice_rows(page, gray)
         page = self._recover_indented_duplicate_grid_cell(page, gray)
+        page = self._recover_missing_legacy_two_by_two_cell(page, gray)
         return self._mark_raster_underlined_choice_words(page, gray)
+
+    @classmethod
+    def _recover_missing_legacy_two_by_two_cell(cls, page, gray):
+        """Re-OCR one empty fourth cell in a legacy two-by-two choice grid.
+
+        Old Ronpark scans can retain the first/third/fourth OCR markers while
+        dropping the second marker and the entire fourth choice text.  The two
+        aligned row gaps prove the grid; the peer row supplies a safe crop end.
+        """
+
+        lines = list(page.lines)
+        legacy_prefix = re.compile(r"^\([^\s)]{1,2}\)?$")
+        fourth_marker = re.compile(r"^(?:④|4\))$")
+
+        def split_at_grid_gap(line):
+            ordered = sorted(line.words, key=lambda word: word.bbox[0])
+            if len(ordered) < 4:
+                return None
+            gaps = [
+                float(ordered[index].bbox[0])
+                - float(ordered[index - 1].bbox[2])
+                for index in range(1, len(ordered))
+            ]
+            split_index = max(
+                range(1, len(ordered)), key=lambda index: gaps[index - 1]
+            )
+            if gaps[split_index - 1] < 0.075:
+                return None
+            return ordered[:split_index], ordered[split_index:]
+
+        for first_index in range(len(lines) - 1):
+            first, second = lines[first_index], lines[first_index + 1]
+            if first.column != second.column or first.page != second.page:
+                continue
+            row_gap = float(second.bbox[1]) - float(first.bbox[1])
+            if not 0.010 <= row_gap <= 0.060:
+                continue
+            first_cells = split_at_grid_gap(first)
+            second_cells = split_at_grid_gap(second)
+            if first_cells is None or second_cells is None:
+                continue
+            first_left, first_right = first_cells
+            second_left, second_right = second_cells
+            if not first_left or not first_right or not second_left:
+                continue
+            if not legacy_prefix.fullmatch(str(first_left[0].text).strip()):
+                continue
+            if not legacy_prefix.fullmatch(str(second_left[0].text).strip()):
+                continue
+            if len(first_left) < 3 or len(first_right) < 2 or len(second_left) < 3:
+                continue
+            if len(second_right) != 1:
+                continue
+            marker = second_right[0]
+            if not fourth_marker.fullmatch(str(marker.text).strip()):
+                continue
+            peer_column_x = float(first_right[0].bbox[0])
+            marker_x = float(marker.bbox[0])
+            if abs(peer_column_x - marker_x) > 0.045:
+                continue
+
+            cell_end_x = min(
+                0.995,
+                max(float(first.bbox[2]), marker_x + 0.10) + 0.012,
+            )
+            width, height = gray.size
+            crop = gray.crop((
+                max(0, int((float(marker.bbox[2]) - 0.005) * width)),
+                max(0, int((float(second.bbox[1]) - 0.006) * height)),
+                min(width, int(cell_end_x * width)),
+                min(height, int((float(second.bbox[3]) + 0.008) * height)),
+            ))
+            recovered = cls._targeted_english_choice_crop_text(crop) or ""
+            recovered = re.sub(
+                r"^\s*(?:(?:[①-④]|[1-4])[.)]?|[.)])\s*", "", recovered
+            ).strip(" .)")
+            recovered = re.sub(r"[-‐‑‒–—―¯]+", "-", recovered)
+            if len(re.sub(r"[^0-9A-Za-z]", "", recovered)) < 3:
+                continue
+            lines[first_index + 1] = cls._line_with_recovered_choice_text(
+                second,
+                recovered,
+                marker_x,
+                cell_end_x,
+            )
+            return replace(page, lines=tuple(lines))
+        return page
 
     @classmethod
     def _recover_indented_duplicate_grid_cell(cls, page, gray):

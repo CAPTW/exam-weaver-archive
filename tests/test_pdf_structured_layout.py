@@ -1542,6 +1542,48 @@ def test_empty_right_grid_cell_uses_the_other_row_width_for_targeted_ocr(monkeyp
     assert question.choices[-1] == "super-refraction"
 
 
+def test_legacy_grid_reocrs_fourth_cell_when_only_its_marker_survives(monkeypatch):
+    structured = build_structured_page(
+        [
+            {"text": "7.", "bbox": (510, 720, 523, 734), "confidence": 0.98},
+            {"text": "빈칸에 들어갈 것은?", "bbox": (535, 720, 720, 734), "confidence": 0.98},
+            {"text": "(1)", "bbox": (535, 885, 552, 897), "confidence": 0.70},
+            {"text": "scanning", "bbox": (564, 885, 638, 897), "confidence": 0.98},
+            {"text": "zone", "bbox": (647, 885, 685, 897), "confidence": 0.98},
+            {"text": "side", "bbox": (801, 885, 835, 897), "confidence": 0.98},
+            {"text": "lobe", "bbox": (846, 885, 880, 897), "confidence": 0.98},
+            {"text": "effect", "bbox": (892, 885, 942, 897), "confidence": 0.98},
+            {"text": "(의", "bbox": (535, 904, 552, 916), "confidence": 0.70},
+            {"text": "blind", "bbox": (563, 904, 604, 916), "confidence": 0.98},
+            {"text": "sector", "bbox": (615, 904, 668, 916), "confidence": 0.98},
+            {"text": "4)", "bbox": (773, 904, 790, 916), "confidence": 0.70},
+        ],
+        page_number=2,
+        width=1000,
+        height=1000,
+        source="ocr",
+        images=((0, 0, 1000, 1000),),
+    )
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_english_choice_crop_text",
+        staticmethod(lambda _crop: "④) super—-refraction"),
+    )
+
+    restored = PDFExtractor._recover_missing_legacy_two_by_two_cell(
+        structured, Image.new("L", (1000, 1000), 255)
+    )
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "scanning zone",
+        "side lobe effect",
+        "blind sector",
+        "super-refraction",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
 def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
     words = [
         {"text": "17.", "bbox": (20, 650, 42, 664), "confidence": 0.98},

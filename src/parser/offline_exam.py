@@ -464,6 +464,47 @@ class OfflineExamParser:
                     removed_indexes.add(index)
                     break
                 continue
+            fused_choice_marker = None
+            if start is not None and record.words:
+                fused_choice_marker = re.fullmatch(
+                    rf"{re.escape(start.group(1))}[.)]?([㉦㉨㉭])",
+                    str(record.words[0].text).strip(),
+                )
+            if (
+                start is not None
+                and aligned
+                and fused_choice_marker is not None
+                and any(
+                    str(word.text).strip() in _DAMAGED_VERTICAL_MARKERS
+                    for word in record.words[1:]
+                )
+            ):
+                target_index = next((
+                    candidate_index
+                    for candidate_index in range(index + 1, min(index + 3, len(relocated)))
+                    if relocated[candidate_index].page == record.page
+                    and relocated[candidate_index].column == record.column
+                    and _QUESTION_LEAD.match(relocated[candidate_index].text)
+                ), None)
+                if target_index is not None:
+                    first_word = replace(
+                        record.words[0],
+                        text=fused_choice_marker.group(1),
+                    )
+                    words = (first_word, *record.words[1:])
+                    relocated[index] = replace(
+                        record,
+                        text=" ".join(str(word.text).strip() for word in words),
+                        words=words,
+                        bbox=(first_word.bbox[0], record.bbox[1], record.bbox[2], record.bbox[3]),
+                    )
+                    target = relocated[target_index]
+                    relocated[target_index] = replace(
+                        target,
+                        text=f"{start.group(1)}. {target.text}",
+                        bbox=(gutter, target.bbox[1], target.bbox[2], target.bbox[3]),
+                    )
+                    continue
             if (
                 start is not None
                 and aligned
@@ -558,6 +599,9 @@ class OfflineExamParser:
         )
         underlined_recovery = self._recover_underlined_choice_phrases(region)
         numeric_table_recovery = self._recover_labeled_numeric_table(region[1:])
+        proposition_table_recovery = self._recover_proposition_header_choice_table(
+            region[1:]
+        )
         two_field_recovery = None
 
         if visual_choice_start is not None:
@@ -582,9 +626,20 @@ class OfflineExamParser:
                 and compact_explicit_numbers != [1, 2, 3, 4]
             ):
                 labeled_numeric_recovery = (
-                    self._recover_proposition_header_choice_table(region[1:])
+                    proposition_table_recovery
                     or self._recover_headerless_four_by_four_table(region[1:])
                 )
+            elif (
+                labeled_numeric_recovery is None
+                and proposition_table_recovery is not None
+                and explicit_records_for_precedence
+                and min(proposition_table_recovery[0]) + 1
+                > max(index for index, _pieces in explicit_records_for_precedence)
+            ):
+                # Circled Hangul proposition labels can be raster-classified
+                # as ①-④.  A complete answer table that starts after every
+                # such definition is stronger evidence than those false rings.
+                labeled_numeric_recovery = proposition_table_recovery
             shifted_grid_recovery = self._recover_shifted_two_by_two_grid(region)
             shifted_recovery = self._recover_shifted_visual_choices(region)
             table_recovery = self._recover_transposed_percentage_table(region[1:])
@@ -626,6 +681,10 @@ class OfflineExamParser:
         legacy_choices: list[str] = []
         if legacy_recovery is not None:
             legacy_indexes, legacy_choices = legacy_recovery
+        legacy_two_field_table = bool(legacy_choices) and all(
+            choice.startswith("㉠ ") and " ㉡ " in choice
+            for choice in legacy_choices
+        )
         underlined_indexes: set[int] = set()
         underlined_choices: list[str] = []
         if underlined_recovery is not None:
@@ -641,6 +700,7 @@ class OfflineExamParser:
             and (
                 not has_explicit_choices
                 or compact_explicit_numbers != [1, 2, 3, 4]
+                or legacy_two_field_table
             )
             and not labeled_numeric_choices
             and not shifted_grid_choices
@@ -818,6 +878,16 @@ class OfflineExamParser:
             elif damaged_choices:
                 diagnostics.append("damaged_choice_recovery")
 
+        if explicit_choices:
+            choices = [
+                re.sub(
+                    rf"^\(\s*{choice_number}\s*\)\s*",
+                    "",
+                    choice,
+                    count=1,
+                ).strip()
+                for choice_number, choice in enumerate(choices, start=1)
+            ]
         choices = [self._repair_choice_ocr_spacing(choice) for choice in choices]
         if len(choices) not in (4, 5):
             diagnostics.append("invalid_choice_count")
@@ -1859,16 +1929,28 @@ class OfflineExamParser:
 
         if len(region) < 2:
             return None
-        question_start = _QUESTION_START.match(region[0].text)
-        has_prompt_boundary = any("?" in record.text for record in region)
+        working_region = list(region)
+        ignored_spillover_indexes: set[int] = set()
+        if len(working_region) >= 4:
+            previous, trailing = working_region[-2:]
+            if (
+                len(trailing.words) <= 2
+                and float(trailing.bbox[1]) + 0.20 < float(previous.bbox[1])
+                and float(trailing.bbox[0]) > float(previous.bbox[2]) + 0.20
+            ):
+                ignored_spillover_indexes.add(len(working_region) - 1)
+                working_region = working_region[:-1]
+
+        question_start = _QUESTION_START.match(working_region[0].text)
+        has_prompt_boundary = any("?" in record.text for record in working_region)
         has_prompt_boundary = has_prompt_boundary or any(
-            re.search(r"\(\s*\)", record.text) for record in region
+            re.search(r"\(\s*\)", record.text) for record in working_region
         )
         if question_start is not None:
             has_prompt_boundary = has_prompt_boundary or bool(
                 _QUESTION_LEAD.match(question_start.group(2))
             )
-        prompt_prefixes = [record.text for record in region[:3]]
+        prompt_prefixes = [record.text for record in working_region[:3]]
         if question_start is not None and question_start.group(2).strip():
             prompt_prefixes.insert(0, question_start.group(2).strip())
         has_prompt_boundary = has_prompt_boundary or any(
@@ -1879,24 +1961,71 @@ class OfflineExamParser:
             )
             for text in prompt_prefixes
         )
-        if not has_prompt_boundary:
+        complete_marked_tail = False
+        if len(working_region) >= 5:
+            tail_tokens = [
+                str(sorted(row.words, key=lambda word: word.bbox[0])[0].text).strip()
+                if row.words else ""
+                for row in working_region[-4:]
+            ]
+            known_numbers = []
+            for token in tail_tokens:
+                if token[:1] in _CHOICE_MARKERS:
+                    known_numbers.append(_CHOICE_MARKERS[token[:1]])
+                    continue
+                digit = re.search(r"[1-5]", token)
+                known_numbers.append(int(digit.group()) if digit else None)
+            complete_marked_tail = all(
+                token
+                and self._has_legacy_choice_prefix(token)
+                and (known is None or known == position)
+                for position, (token, known) in enumerate(
+                    zip(tail_tokens, known_numbers), start=1
+                )
+            )
+        if not has_prompt_boundary and not complete_marked_tail:
             return None
 
-        tail_rows = region[-4:] if len(region) >= 5 else ()
+        tail_rows = working_region[-4:] if len(working_region) >= 5 else ()
         repeated_a_b_fields = bool(tail_rows) and all(
             re.search(r"\bA\s*:?.*\bB\s*:?", row.text, re.IGNORECASE)
             for row in tail_rows
         )
+        preceding_field_header = working_region[-5] if len(working_region) >= 6 else None
+        has_two_field_header = bool(
+            tail_rows
+            and preceding_field_header is not None
+            and len(preceding_field_header.words) == 2
+            and all(
+                re.fullmatch(r"[㉠-㉭]", str(word.text).strip())
+                for word in preceding_field_header.words
+            )
+            and all(
+                row.words
+                and self._has_legacy_choice_prefix(
+                    str(sorted(row.words, key=lambda word: word.bbox[0])[0].text).strip()
+                )
+                for row in tail_rows
+            )
+        )
+        has_damaged_two_field_rows = bool(tail_rows) and all(
+            sum(
+                self._has_legacy_choice_prefix(str(word.text).strip())
+                for word in sorted(row.words, key=lambda word: word.bbox[0])[1:]
+            )
+            >= 2
+            for row in tail_rows
+        )
         layouts = (
             ((4, 1, 2), (2, 2, 1), (1, 4, 1))
-            if repeated_a_b_fields
+            if repeated_a_b_fields or has_two_field_header or has_damaged_two_field_rows
             else ((2, 2, 1), (1, 4, 1), (4, 1, 2))
         )
         for row_count, cells_per_row, minimum_markers in layouts:
-            if len(region) - 1 < row_count:
+            if len(working_region) - 1 < row_count:
                 continue
-            start = len(region) - row_count
-            rows = list(region[start:])
+            start = len(working_region) - row_count
+            rows = list(working_region[start:])
             if len({(row.page, row.column) for row in rows}) != 1:
                 continue
             if row_count > 1:
@@ -1948,8 +2077,20 @@ class OfflineExamParser:
                         for offset in (0, 1)
                     ):
                         continue
-                leading_xs = [float(row.words[0].bbox[0]) for row in rows if row.words]
-                if len(leading_xs) != row_count or max(leading_xs) - min(leading_xs) > 0.035:
+                marker_xs = [
+                    float(rows[offset].words[0].bbox[0])
+                    for offset in marker_positions
+                ]
+                if not marker_xs or max(marker_xs) - min(marker_xs) > 0.012:
+                    continue
+                marker_x = sum(marker_xs) / len(marker_xs)
+                if any(
+                    offset not in marker_positions
+                    and not marker_x + 0.015
+                    <= float(row.words[0].bbox[0])
+                    <= marker_x + 0.060
+                    for offset, row in enumerate(rows)
+                ):
                     continue
                 row_cells = [list(row.words) for row in rows]
             else:
@@ -1976,8 +2117,33 @@ class OfflineExamParser:
                     break
                 choices.append(value)
             if valid and len(choices) == 4:
-                return set(range(start, len(region))), choices
-        return self._recover_legacy_wrapped_vertical_choices(region)
+                choices = self._normalize_legacy_two_field_labels(choices)
+                return (
+                    set(range(start, len(working_region)))
+                    | ignored_spillover_indexes,
+                    choices,
+                )
+        wrapped = self._recover_legacy_wrapped_vertical_choices(working_region)
+        if wrapped is None:
+            return None
+        indexes, choices = wrapped
+        return indexes | ignored_spillover_indexes, choices
+
+    @staticmethod
+    def _normalize_legacy_two_field_labels(choices: list[str]) -> list[str]:
+        field_marker = re.compile(
+            r"(?<!\S)(?:\([^\s)]{1,2}\)?|[①-⑤㉠-㉭])(?=\s|$)"
+        )
+        matches_by_choice = [list(field_marker.finditer(choice)) for choice in choices]
+        if not matches_by_choice or any(len(matches) != 2 for matches in matches_by_choice):
+            return choices
+        normalized = []
+        for choice, matches in zip(choices, matches_by_choice):
+            value = choice
+            for match, label in zip(reversed(matches), ("㉡", "㉠")):
+                value = value[:match.start()] + label + value[match.end():]
+            normalized.append(re.sub(r"\s+", " ", value).strip())
+        return normalized
 
     def _recover_legacy_wrapped_vertical_choices(
         self, region: Sequence[_LineRecord]
@@ -2077,7 +2243,15 @@ class OfflineExamParser:
         for word in ordered[1:]:
             text = str(word.text).strip()
             gap = float(word.bbox[0]) - float(groups[-1][-1].bbox[2])
-            if self._has_legacy_choice_prefix(text) or gap >= 0.035:
+            current_is_bare_marker = (
+                len(groups[-1]) == 1
+                and self._is_legacy_choice_marker(
+                    str(groups[-1][0].text).strip()
+                )
+            )
+            if self._has_legacy_choice_prefix(text) or (
+                gap >= 0.035 and not current_is_bare_marker
+            ):
                 groups.append([word])
             else:
                 groups[-1].append(word)

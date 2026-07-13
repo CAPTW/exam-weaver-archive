@@ -1003,6 +1003,47 @@ def test_english_imperative_prompt_allows_damaged_two_by_two_choices():
     assert validate_offline_question(question).importable is True
 
 
+def test_two_field_header_prefers_four_complete_vertical_rows_over_tail_grid():
+    page = _page(
+        _line(
+            ["13.", "다음", "표에서", "옳은", "조합은?"],
+            y=0.12,
+            xs=[0.02, 0.052, 0.11, 0.18, 0.24],
+        ),
+        _line(["㉠", "㉡"], y=0.20, xs=[0.18, 0.37]),
+        _line(
+            ["(1)", "vessel", "aground", "100", "meters", "or", "more"],
+            y=0.24,
+            xs=[0.05, 0.095, 0.16, 0.285, 0.326, 0.397, 0.424],
+        ),
+        _line(
+            ["(2)", "vessel", "at", "anchor", "100", "meters", "or", "more"],
+            y=0.28,
+            xs=[0.05, 0.095, 0.16, 0.187, 0.285, 0.326, 0.397, 0.424],
+        ),
+        _line(
+            ["(의", "pushing", "vessel", "100", "meters", "or", "less"],
+            y=0.32,
+            xs=[0.05, 0.095, 0.171, 0.285, 0.326, 0.397, 0.424],
+        ),
+        _line(
+            ["4)", "vessel", "towed", "100", "meters", "or", "less"],
+            y=0.36,
+            xs=[0.05, 0.095, 0.16, 0.285, 0.326, 0.397, 0.424],
+        ),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "vessel aground 100 meters or more",
+        "vessel at anchor 100 meters or more",
+        "pushing vessel 100 meters or less",
+        "vessel towed 100 meters or less",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
 def test_damaged_vertical_choices_keep_internal_a_b_fields_together():
     page = _page(
         _line(["16.", "Choose", "the", "most", "appropriate", "group."], y=0.12),
@@ -1236,6 +1277,176 @@ def test_prompt_ring_overlay_shifts_visual_two_three_four_and_recovers_fourth():
     ]
     assert "damaged_choice_recovery" in question.diagnostics
     assert validate_offline_question(question).importable is True
+
+
+def test_duplicate_legacy_marker_after_explicit_fourth_is_removed():
+    page = _page(
+        _line(["2.", "다음", "빈칸에", "들어갈", "것은?"], y=0.10,
+              xs=[0.02, 0.05, 0.11, 0.18, 0.25]),
+        _line(
+            ["①", "small", "②", "right", "③", "large", "④", "(4)", "acute"],
+            y=0.20,
+            xs=[0.05, 0.08, 0.25, 0.28, 0.45, 0.48, 0.65, 0.68, 0.72],
+        ),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["small", "right", "large", "acute"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_later_proposition_header_table_beats_false_definition_rings():
+    lines = [
+        _line(["19.", "다음", "표의", "조합은?"], y=0.08,
+              xs=[0.02, 0.05, 0.11, 0.18]),
+    ]
+    for offset, label in enumerate(("㉠", "㉡", "㉢", "㉣"), start=1):
+        lines.append(
+            _line(
+                [("①", "②", "③", "④")[offset - 1], label, f"definition-{offset}"],
+                y=0.10 + offset * 0.04,
+                xs=[0.05, 0.08, 0.11],
+            )
+        )
+    lines.append(_line(["㉠", "㉡", "㉢", "㉣"], y=0.32,
+                       xs=[0.12, 0.30, 0.48, 0.66]))
+    expected = []
+    for row in range(1, 5):
+        values = [f"r{row}c{column}" for column in range(1, 5)]
+        expected.append(" ".join(values))
+        lines.append(_line(values, y=0.32 + row * 0.04,
+                           xs=[0.12, 0.30, 0.48, 0.66]))
+
+    question = OfflineExamParser().parse_pages([_page(*lines)])[0]
+
+    assert question.choices == expected
+    assert "definition-1" in question.stem
+    assert validate_offline_question(question).importable is True
+
+
+def test_damaged_two_field_table_beats_fragmented_explicit_markers():
+    page = _page(
+        _line(["16.", "빈칸에", "들어갈", "조합은?"], y=0.10,
+              xs=[0.02, 0.05, 0.12, 0.19]),
+        _line(["(9", "(하", "INFORMATION", "(비", "WARNING"], y=0.20,
+              xs=[0.05, 0.08, 0.11, 0.34, 0.37]),
+        _line(["①", "(하", "INSTRUCTION", "②", "ADVICE"], y=0.24,
+              xs=[0.05, 0.08, 0.11, 0.34, 0.37]),
+        _line(["③", "㉦", "REQUEST", "④", "WARNING"], y=0.28,
+              xs=[0.05, 0.08, 0.11, 0.34, 0.37]),
+        _line(["㉦", "㉦", "INTENTION", "㉧", "ADVICE"], y=0.32,
+              xs=[0.05, 0.08, 0.11, 0.34, 0.37]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "㉠ INFORMATION ㉡ WARNING",
+        "㉠ INSTRUCTION ㉡ ADVICE",
+        "㉠ REQUEST ㉡ WARNING",
+        "㉠ INTENTION ㉡ ADVICE",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_overlaid_next_number_returns_damaged_grid_row_to_previous_question():
+    page = _page(
+        _line(["8.", "Choose", "the", "best", "one."], y=0.10,
+              xs=[0.50, 0.53, 0.60, 0.65, 0.70]),
+        _line(["(1)", "sounding", "cross", "bearing"], y=0.20,
+              xs=[0.526, 0.554, 0.756, 0.81]),
+        _line(["9.㉭", "danger", "angle", "㉦", "transit"], y=0.24,
+              xs=[0.51, 0.554, 0.62, 0.734, 0.76]),
+        _line(["다음", "박스의", "질문은?"], y=0.30,
+              xs=[0.53, 0.59, 0.66]),
+        _line(["Fairway", "㉩", "Bitt", "㉭", "Fair", "leader", "BoIIard"], y=0.38,
+              xs=[0.55, 0.63, 0.66, 0.71, 0.735, 0.78, 0.87]),
+    )
+
+    questions = OfflineExamParser().parse_pages([page])
+
+    assert [question.number for question in questions] == [8, 9]
+    assert questions[0].choices == ["sounding", "cross bearing", "danger angle", "transit"]
+    assert questions[1].stem.startswith("다음 박스의 질문은?")
+
+
+def test_legacy_grid_ignores_short_spillover_from_the_next_page_column():
+    page = _page(
+        _line(["5.", "다음", "빈칸은?"], y=0.70, xs=[0.02, 0.05, 0.11], column=0),
+        _line(["(1)", "corrosion", "(2)", "erosion"], y=0.82,
+              xs=[0.05, 0.08, 0.30, 0.33], column=0),
+        _line(["(9", "scuffing", "㉦", "abrasion"], y=0.86,
+              xs=[0.05, 0.08, 0.30, 0.33], column=0),
+        _line(["AH", "여"], y=0.09, xs=[0.69, 0.73], column=1),
+        _line(["6.", "다음", "문제는?"], y=0.15, xs=[0.51, 0.54, 0.61], column=1),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.22,
+              xs=[0.54, 0.57, 0.64, 0.67, 0.74, 0.77, 0.84, 0.87], column=1),
+    )
+
+    questions = OfflineExamParser().parse_pages([page])
+
+    assert questions[0].choices == ["corrosion", "erosion", "scuffing", "abrasion"]
+    assert "AH" not in questions[0].stem
+
+
+def test_vertical_legacy_rows_allow_one_missing_marker_at_content_indent():
+    page = _page(
+        _line(["15.", "빈칸에", "들어갈", "말은?"], y=0.10,
+              xs=[0.50, 0.53, 0.60, 0.67]),
+        _line(["(1)", "A", "vessel", "restricted"], y=0.20,
+              xs=[0.533, 0.558, 0.578, 0.64]),
+        _line(["(2)", "vessel", "constrained"], y=0.24,
+              xs=[0.533, 0.578, 0.65]),
+        _line(["vessel", "not", "under", "command"], y=0.28,
+              xs=[0.579, 0.64, 0.68, 0.73]),
+        _line(["㉦", "A", "vessel", "aground"], y=0.32,
+              xs=[0.533, 0.558, 0.578, 0.64]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "A vessel restricted",
+        "vessel constrained",
+        "vessel not under command",
+        "A vessel aground",
+    ]
+
+
+def test_four_complete_legacy_rows_do_not_require_question_punctuation():
+    page = _page(
+        _line(["17.", "I", "have", "lost", "a", "man", "overboard,", "please", "help"],
+              y=0.10, xs=[0.02, 0.05, 0.07, 0.11, 0.15, 0.17, 0.21, 0.30, 0.37]),
+        _line(["(1)", "emergency", "anchorage"], y=0.16, xs=[0.05, 0.08, 0.18]),
+        _line(["(2)", "with", "search", "and", "rescue"], y=0.20,
+              xs=[0.05, 0.08, 0.13, 0.20, 0.25]),
+        _line(["(㉦", "I", "am", "sinking"], y=0.24, xs=[0.05, 0.08, 0.10, 0.13]),
+        _line(["(4)", "medical", "assistance"], y=0.28, xs=[0.05, 0.08, 0.16]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "emergency anchorage", "with search and rescue", "I am sinking", "medical assistance"
+    ]
+
+
+def test_two_by_two_grid_keeps_marker_with_content_across_wide_ocr_gap():
+    page = _page(
+        _line(["13.", "Choose", "the", "best", "one."], y=0.10,
+              xs=[0.02, 0.05, 0.12, 0.16, 0.21]),
+        _line(["(1)", "on", "an", "even", "keel", "1n", "ballast"], y=0.20,
+              xs=[0.05, 0.08, 0.11, 0.14, 0.18, 0.32, 0.35]),
+        _line(["(3)", "free", "surface", "㉦", "trim", "by", "the", "stern"], y=0.24,
+              xs=[0.05, 0.085, 0.14, 0.30, 0.33, 0.37, 0.40, 0.43]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "on an even keel", "1n ballast", "free surface", "trim by the stern"
+    ]
 
 
 def test_lines_above_next_page_question_number_leave_completed_prior_question():
