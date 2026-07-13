@@ -577,7 +577,10 @@ class OfflineExamParser:
                 labeled_numeric_recovery = self._recover_wrapped_labeled_table(
                     region[1:]
                 )
-            if labeled_numeric_recovery is None and not compact_explicit_sequence:
+            if (
+                labeled_numeric_recovery is None
+                and compact_explicit_numbers != [1, 2, 3, 4]
+            ):
                 labeled_numeric_recovery = (
                     self._recover_proposition_header_choice_table(region[1:])
                     or self._recover_headerless_four_by_four_table(region[1:])
@@ -1335,6 +1338,7 @@ class OfflineExamParser:
             return (
                 0 < len(text) <= 3
                 and re.search(r"[A-Za-z0-9]", text) is None
+                and re.fullmatch(r"[①-⑤㉠-㉭@年]", text) is not None
                 and float(word.bbox[2]) - float(word.bbox[0]) <= 0.04
             )
 

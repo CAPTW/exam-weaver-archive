@@ -1526,6 +1526,29 @@ def test_spurious_digit_before_fourth_marker_keeps_complete_choice_sequence():
     assert validate_offline_question(question).importable is True
 
 
+def test_repeated_korean_particle_is_not_a_two_field_label():
+    page = _page(
+        _line(["10.", "다음", "중", "옳은", "것은?"], y=0.12),
+        _line(["①", "첫째법", "에", "따른", "첫째구역"], y=0.24,
+              xs=[0.05, 0.08, 0.20, 0.23, 0.31]),
+        _line(["②", "둘째법", "에", "따른", "둘째구역"], y=0.27,
+              xs=[0.05, 0.08, 0.20, 0.23, 0.31]),
+        _line(["③", "셋째법", "에", "따른", "셋째구역"], y=0.30,
+              xs=[0.05, 0.08, 0.20, 0.23, 0.31]),
+        _line(["④", "넷째법", "에", "따른", "넷째구역"], y=0.33,
+              xs=[0.05, 0.08, 0.20, 0.23, 0.31]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째법 에 따른 첫째구역",
+        "둘째법 에 따른 둘째구역",
+        "셋째법 에 따른 셋째구역",
+        "넷째법 에 따른 넷째구역",
+    ]
+
+
 def test_two_prompt_overlays_shift_three_four_into_two_by_two_choice_grid():
     page = _page(
         _line(["13.", "법규", "질문"], y=0.12),
