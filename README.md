@@ -92,9 +92,9 @@ Related high-volume import helpers are included under `scripts/`, especially:
 
 The app uses SQLite. `src/database/schema.sql` defines exams, subjects,
 exam-subject mappings, question sources, grouped passages, questions, choices,
-mock exams, and results. `ExamRepository` applies migrations on startup, seeds
-reference metadata, saves parsed questions, exposes search/filter APIs, updates
-editor changes, and deletes question records safely.
+descriptive model answers, mock exams, and results. `ExamRepository` applies
+migrations on startup, seeds reference metadata, saves parsed questions, exposes
+search/filter APIs, updates editor changes, and deletes question records safely.
 
 The default source-mode writable database path is:
 
@@ -117,7 +117,10 @@ The main window title is:
 Primary screens:
 
 - Home: overview landing screen.
-- Question Management: browse, filter, validate, edit, explain, and delete.
+- Question Management: browse, filter, validate, edit, manually add
+  user-authored questions, clone existing questions into customizable personal
+  copies, support 4-10 multiple-choice options, store descriptive
+  question/model-answer pairs, explain, and delete.
 - Practice: generate and take mock exams with grading modes.
 - Exam Export: sample questions and export DOCX exam sheets.
 - Import: parse question/answer PDFs into the local database.
@@ -133,6 +136,13 @@ Codex SDK support is included through:
 - `openai-codex` in `requirements.txt`
 - `openai_codex` and `codex_cli_bin` collection in `ExamGenerator.spec`
 - `src/gui/interface/codex_panel.py`
+
+The side panel renders Codex responses as safe rich text. When Qt WebEngine is
+available, it uses bundled MathJax to render LaTeX/TeX and MathML expressions
+such as `\( ... \)`, `\[ ... \]`, `$$ ... $$`, `\sqrt{}`, `\frac{}{}`,
+`\overline{}`, and HTML-style formula markup like `<sup>`, `<sub>`, and safe
+MathML tags. If WebEngine is unavailable, it falls back to the lightweight
+renderer for common formulas and symbols.
 
 Personal authentication is not included. Each user can open the app, use the
 Codex panel's **로그인** button, and connect their own account. Local Codex state
@@ -305,10 +315,10 @@ PDF parser의 핵심은 `src/parser`입니다.
 ### 데이터베이스
 
 앱은 SQLite를 사용합니다. `src/database/schema.sql`에는 시험, 과목, 시험-과목
-관계, 문제 출처, 공통 지문/그룹, 문제, 선지, 모의고사, 풀이 결과 테이블이
-정의되어 있습니다. `ExamRepository`는 앱 시작 시 schema/migration을 적용하고,
-reference metadata를 seed하며, parsing된 문제 저장, 검색/필터, 수정, 삭제
-기능을 제공합니다.
+관계, 문제 출처, 공통 지문/그룹, 문제, 선지, 서술형 모범답안, 모의고사,
+풀이 결과 테이블이 정의되어 있습니다. `ExamRepository`는 앱 시작 시
+schema/migration을 적용하고, reference metadata를 seed하며, parsing된 문제
+저장, 검색/필터, 수정, 삭제 기능을 제공합니다.
 
 기본 source 실행 DB 경로:
 
@@ -331,7 +341,9 @@ DB가 포함되어 있지 않습니다.
 주요 화면:
 
 - 홈: 앱 시작 화면.
-- 문제 관리: 문제 검색, 필터링, 검증, 수정, 해설 작성, 삭제.
+- 문제 관리: 문제 검색, 필터링, 검증, 수정, 개인 제작 문제 수동 추가,
+  기존 문제를 개인 제작 문제로 복제해 커스터마이징, 4-10개 객관식 선지,
+  서술형 문제/모범답안 저장, 해설 작성, 삭제.
 - 문제 풀이: 조건별 문제 선택과 모의고사 풀이.
 - 시험지 출력: 조건별 문제 샘플링 후 DOCX 생성.
 - 문제 가져오기: 문제 PDF/정답 PDF parsing 후 DB 저장.
@@ -347,6 +359,13 @@ Codex SDK 연결은 다음 파일에 준비되어 있습니다.
 - `requirements.txt`의 `openai-codex`
 - `ExamGenerator.spec`의 `openai_codex`, `codex_cli_bin` 번들 설정
 - `src/gui/interface/codex_panel.py`
+
+Codex 사이드 패널은 응답을 안전한 rich text로 렌더링합니다. Qt WebEngine을
+사용할 수 있으면 bundled MathJax로 `\( ... \)`, `\[ ... \]`,
+`$$ ... $$`, `\sqrt{}`, `\frac{}{}`, `\overline{}` 같은 LaTeX/TeX 수식과
+`<sup>`, `<sub>`, 안전한 MathML tag 기반 HTML 스타일 수식을 표시합니다.
+WebEngine을 사용할 수 없는 환경에서는 주요 수식/특수기호용 lightweight
+renderer로 자동 fallback됩니다.
 
 개인 인증은 저장소에 포함하지 않습니다. 사용자는 앱의 Codex 패널에서
 **로그인** 버튼을 눌러 자기 계정으로 연결하면 됩니다. 로컬 Codex 상태는 아래

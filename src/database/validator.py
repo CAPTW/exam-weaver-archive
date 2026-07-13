@@ -14,7 +14,9 @@ class QuestionValidator:
     MAX_SESSION = 99
     MIN_QUESTION_NUMBER = 1
     MAX_QUESTION_NUMBER = 500
-    VALID_ANSWERS = set(range(1, 6))
+    MIN_CHOICE_COUNT = 4
+    MAX_CHOICE_COUNT = 10
+    VALID_ANSWERS = set(range(1, MAX_CHOICE_COUNT + 1))
     IMAGE_HINT_PATTERN = re.compile(
         r'(그림|사진|그래프|(?<!해)도표|'
         r'다음과\s*같은|다음\s*(?:그림|회로|선도|기호|도표|파형|진리표|타임차트)|'
@@ -63,6 +65,7 @@ class QuestionValidator:
 
     def _validate_question(self, question: Dict) -> List[Dict]:
         issues = []
+        is_descriptive = question.get('question_type') == 'descriptive'
 
         if not str(question.get('question_text') or '').strip():
             issues.append(self._issue('empty_question_text', '발문 없음', 'error'))
@@ -85,6 +88,17 @@ class QuestionValidator:
         ):
             issues.append(self._issue('invalid_question_number', '문제번호 범위 이상', 'error'))
 
+        image_state = self._image_state(question)
+        if is_descriptive:
+            model_answer = str(question.get('model_answer') or '').strip()
+            if not model_answer:
+                issues.append(self._issue('missing_model_answer', '모범답안 없음', 'error'))
+            else:
+                self._validate_text_quality(model_answer, '모범답안', issues)
+            self._validate_image(question, issues)
+            self._validate_tags(question, issues)
+            return issues
+
         choices = question.get('choices') or []
         choice_numbers = {
             choice.get('choice_number')
@@ -101,7 +115,6 @@ class QuestionValidator:
         elif not answer_available and question.get('correct_answer') != 0:
             issues.append(self._issue('invalid_answer_state', '정답 제공 상태 이상', 'error'))
 
-        image_state = self._image_state(question)
         self._validate_choices(choices, issues, image_state)
         self._validate_image(question, issues)
         self._validate_tags(question, issues)
@@ -115,11 +128,17 @@ class QuestionValidator:
         )
 
     def is_random_eligible(self, question: Dict) -> bool:
+        if question.get('question_type') == 'descriptive':
+            return False
         return not self.has_blocking_errors(question)
 
     def _validate_choices(self, choices: List[Dict], issues: List[Dict], image_state: Dict):
         numbers = [choice.get('choice_number') for choice in choices]
-        if len(numbers) not in (4, 5) or sorted(numbers) != list(range(1, len(numbers) + 1)):
+        if (
+            len(numbers) < self.MIN_CHOICE_COUNT
+            or len(numbers) > self.MAX_CHOICE_COUNT
+            or sorted(numbers) != list(range(1, len(numbers) + 1))
+        ):
             issues.append(self._issue('choice_count', '선지 번호/개수 이상', 'error'))
 
         for choice in choices:
@@ -218,7 +237,7 @@ class QuestionValidator:
             issues.append(self._issue('missing_exam_tag', '시험 태그 누락', 'warning'))
 
         subject_name = question.get('subject_name')
-        if subject_name and f"#{subject_name}" not in tags:
+        if subject_name and f"#{str(subject_name).replace(' ', '')}" not in tags.replace(' ', ''):
             issues.append(self._issue('missing_subject_tag', '과목 태그 누락', 'warning'))
 
     def _severity(self, issues: List[Dict]) -> str:

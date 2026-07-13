@@ -51,6 +51,25 @@ def test_github_portable_launcher_builds_no_db_zip():
     assert "without a question DB" in content
 
 
+def test_pyinstaller_spec_declares_app_icon_asset():
+    spec = ROOT / "ExamGenerator.spec"
+
+    content = spec.read_text(encoding="utf-8")
+
+    assert r"assets\\icons\\exam_generator_icon.ico" in content
+    assert r"icon='assets\\icons\\exam_generator_icon.ico'" in content
+
+
+def test_pyinstaller_spec_bundles_mathjax_and_webengine_support():
+    spec = ROOT / "ExamGenerator.spec"
+
+    content = spec.read_text(encoding="utf-8")
+
+    assert r"assets\\mathjax\\tex-mml-svg.js" in content
+    assert r"assets\\mathjax\\LICENSE" in content
+    assert "PyQt5.QtWebEngineWidgets" in content
+
+
 def test_run_readme_explains_both_non_programmer_paths():
     readme = ROOT / "README_APP_RUN.txt"
 

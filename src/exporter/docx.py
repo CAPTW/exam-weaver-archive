@@ -180,6 +180,19 @@ class DocxExporter:
             keep_together=True,
         )
 
+        if q.get('question_type') == 'descriptive':
+            model_answer = str(q.get('model_answer') or '').strip()
+            if model_answer:
+                p = doc.add_paragraph()
+                self._format_paragraph(p)
+                self._add_formatted_text(
+                    p,
+                    model_answer,
+                    prefix="모범답안: ",
+                    size_pt=10,
+                )
+            return "서술형"
+
         answer_number = q.get('correct_answer')
 
         # Choices

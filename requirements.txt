@@ -4,6 +4,7 @@ pypdf
 PyMuPDF
 Pillow
 PyQt5
+PyQtWebEngine
 PyQt-Fluent-Widgets
 python-docx
 openai-codex

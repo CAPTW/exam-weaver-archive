@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import html
 import os
+import re
 import shutil
+import sys
 import traceback
 import uuid
 import webbrowser
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
     QApplication,
@@ -32,6 +35,9 @@ CODEX_PANEL_INSTRUCTIONS = """
 You are running inside the Exam Generator desktop app as an embedded Codex panel.
 The working directory is this branched project copy. Keep answers concise and
 ask before making broad changes unless the user explicitly requests edits.
+Use Unicode symbols where they improve readability. For mathematical expressions,
+prefer LaTeX delimiters such as \\( ... \\), \\[ ... \\], or $$ ... $$ so the app can
+render formulas cleanly in the side panel.
 """.strip()
 
 
@@ -44,6 +50,176 @@ PROGRESS_MESSAGES = [
     "프로젝트 문맥을 확인하고 있습니다.",
     "응답 이벤트를 기다리고 있습니다.",
 ]
+CODEX_TEXT_FONT_FAMILY = '"Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", sans-serif'
+CODEX_MATH_FONT_FAMILY = (
+    '"Cambria Math", "STIX Two Math", "Segoe UI Symbol", '
+    '"Noto Sans Math", "Malgun Gothic", serif'
+)
+CODEX_MONOSPACE_FONT_FAMILY = '"Cascadia Mono", Consolas, "D2Coding", monospace'
+CODEX_CHAT_STYLES = f"""
+body {{
+    font-family: {CODEX_TEXT_FONT_FAMILY};
+    font-size: 12px;
+    line-height: 1.42;
+    color: #222;
+}}
+.codex-message {{
+    margin-bottom: 12px;
+}}
+.codex-title {{
+    font-weight: 700;
+    color: #2f5f8f;
+    margin-bottom: 4px;
+}}
+.codex-body div {{
+    margin: 2px 0;
+}}
+.math-inline {{
+    font-family: {CODEX_MATH_FONT_FAMILY};
+    background: #f5f7fb;
+    border: 1px solid #e5e9f2;
+    border-radius: 4px;
+    padding: 1px 4px;
+    white-space: nowrap;
+}}
+.math-display {{
+    display: block;
+    font-family: {CODEX_MATH_FONT_FAMILY};
+    background: #f5f7fb;
+    border: 1px solid #e5e9f2;
+    border-radius: 5px;
+    margin: 6px 0;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 13px;
+}}
+.math-frac sup {{
+    font-size: 80%;
+    vertical-align: super;
+}}
+.math-frac sub {{
+    font-size: 80%;
+    vertical-align: sub;
+}}
+code {{
+    font-family: {CODEX_MONOSPACE_FONT_FAMILY};
+    background: #f4f4f4;
+    border-radius: 3px;
+    padding: 1px 3px;
+}}
+pre {{
+    font-family: {CODEX_MONOSPACE_FONT_FAMILY};
+    background: #f4f4f4;
+    border: 1px solid #e1e1e1;
+    border-radius: 5px;
+    padding: 7px;
+    white-space: pre-wrap;
+}}
+"""
+LATEX_COMMAND_REPLACEMENTS = {
+    r"\alpha": "α",
+    r"\beta": "β",
+    r"\gamma": "γ",
+    r"\delta": "δ",
+    r"\epsilon": "ε",
+    r"\varepsilon": "ε",
+    r"\zeta": "ζ",
+    r"\eta": "η",
+    r"\theta": "θ",
+    r"\vartheta": "ϑ",
+    r"\lambda": "λ",
+    r"\mu": "μ",
+    r"\nu": "ν",
+    r"\xi": "ξ",
+    r"\pi": "π",
+    r"\rho": "ρ",
+    r"\sigma": "σ",
+    r"\tau": "τ",
+    r"\phi": "φ",
+    r"\varphi": "φ",
+    r"\omega": "ω",
+    r"\Delta": "Δ",
+    r"\Theta": "Θ",
+    r"\Lambda": "Λ",
+    r"\Pi": "Π",
+    r"\Sigma": "Σ",
+    r"\Phi": "Φ",
+    r"\Omega": "Ω",
+    r"\times": "×",
+    r"\cdot": "·",
+    r"\div": "÷",
+    r"\pm": "±",
+    r"\mp": "∓",
+    r"\le": "≤",
+    r"\leq": "≤",
+    r"\ge": "≥",
+    r"\geq": "≥",
+    r"\ne": "≠",
+    r"\neq": "≠",
+    r"\approx": "≈",
+    r"\simeq": "≃",
+    r"\propto": "∝",
+    r"\infty": "∞",
+    r"\therefore": "∴",
+    r"\because": "∵",
+    r"\degree": "°",
+    r"\circ": "°",
+    r"\sin": "sin",
+    r"\cos": "cos",
+    r"\tan": "tan",
+    r"\log": "log",
+    r"\ln": "ln",
+    r"\min": "min",
+    r"\max": "max",
+}
+LATEX_SPACE_COMMANDS = {r"\,", r"\;", r"\:", r"\quad", r"\qquad"}
+DISPLAY_MATH_PATTERNS = (
+    (r"\[", r"\]"),
+    ("$$", "$$"),
+)
+MATHJAX_FILENAME = "tex-mml-svg.js"
+MATHJAX_RELATIVE_PATH = ("assets", "mathjax", MATHJAX_FILENAME)
+SAFE_HTML_TAGS = {
+    "b",
+    "br",
+    "code",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "i",
+    "li",
+    "math",
+    "mfrac",
+    "mi",
+    "mn",
+    "mo",
+    "mover",
+    "mroot",
+    "mrow",
+    "msqrt",
+    "msub",
+    "msubsup",
+    "msup",
+    "mtext",
+    "ol",
+    "p",
+    "semantics",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "u",
+    "ul",
+}
+SAFE_SELF_CLOSING_TAGS = {"br"}
 
 
 def progress_message_for_event_method(method: str) -> str | None:
@@ -59,6 +235,426 @@ def progress_message_for_event_method(method: str) -> str | None:
     if method.startswith("turn/") and method != "turn/completed":
         return "Codex 턴을 진행하고 있습니다."
     return None
+
+
+def render_codex_chat_html(
+    blocks: list[dict[str, str]],
+    math_mode: str = "fallback",
+    mathjax_script_url: str | None = None,
+) -> str:
+    messages = []
+    for block in blocks:
+        title = html.escape(block.get("title", ""), quote=False)
+        body = render_codex_text_to_html(block.get("text", ""), math_mode=math_mode)
+        messages.append(
+            "\n".join(
+                [
+                    '<div class="codex-message">',
+                    f'<div class="codex-title">{title}</div>',
+                    f'<div class="codex-body">{body}</div>',
+                    "</div>",
+                ]
+            )
+        )
+    body_html = "\n".join(messages)
+    mathjax_head = ""
+    if math_mode == "mathjax" and mathjax_script_url:
+        script_url = html.escape(mathjax_script_url, quote=True)
+        mathjax_head = f"""
+<script>
+window.MathJax = {{
+  tex: {{
+    inlineMath: [['\\\\(', '\\\\)'], ['$', '$']],
+    displayMath: [['\\\\[', '\\\\]'], ['$$', '$$']],
+    processEscapes: true,
+    processEnvironments: true
+  }},
+  options: {{
+    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+  }},
+  svg: {{
+    fontCache: 'local'
+  }}
+}};
+</script>
+<script id="MathJax-script" defer src="{script_url}"></script>
+"""
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<style>{CODEX_CHAT_STYLES}</style>"
+        f"{mathjax_head}"
+        f"</head><body>{body_html}</body></html>"
+    )
+
+
+def render_codex_text_to_html(text: str, math_mode: str = "fallback") -> str:
+    if not text:
+        return ""
+
+    lines = str(text).splitlines()
+    rendered: list[str] = []
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            code_lines = []
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                code_lines.append(lines[index])
+                index += 1
+            if index < len(lines):
+                index += 1
+            code_html = html.escape("\n".join(code_lines), quote=False)
+            rendered.append(f"<pre>{code_html}</pre>")
+            continue
+
+        display_math = _extract_display_math_line(stripped)
+        if display_math is not None:
+            if math_mode == "mathjax":
+                rendered.append(f'<div class="mathjax-display">{html.escape(stripped, quote=False)}</div>')
+            else:
+                rendered.append(render_codex_math_html(display_math, display=True))
+            index += 1
+            continue
+
+        if not stripped:
+            rendered.append("<div><br /></div>")
+            index += 1
+            continue
+
+        heading = re.match(r"^(#{1,3})\s+(.+)$", stripped)
+        if heading:
+            level = len(heading.group(1))
+            size = {1: 16, 2: 14, 3: 13}[level]
+            rendered.append(
+                f'<div style="font-weight:700; font-size:{size}px;">'
+                f"{render_codex_inline_html(heading.group(2), math_mode=math_mode)}</div>"
+            )
+            index += 1
+            continue
+
+        bullet = re.match(r"^\s*[-*]\s+(.+)$", raw_line)
+        if bullet:
+            rendered.append(f"<div>• {render_codex_inline_html(bullet.group(1), math_mode=math_mode)}</div>")
+            index += 1
+            continue
+
+        numbered = re.match(r"^\s*(\d+[.)])\s+(.+)$", raw_line)
+        if numbered:
+            rendered.append(
+                f"<div>{html.escape(numbered.group(1), quote=False)} "
+                f"{render_codex_inline_html(numbered.group(2), math_mode=math_mode)}</div>"
+            )
+            index += 1
+            continue
+
+        rendered.append(f"<div>{render_codex_inline_html(raw_line, math_mode=math_mode)}</div>")
+        index += 1
+
+    return "\n".join(rendered)
+
+
+def render_codex_inline_html(text: str, math_mode: str = "fallback") -> str:
+    value = str(text)
+    parts: list[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] == "`":
+            end = value.find("`", index + 1)
+            if end != -1:
+                code = html.escape(value[index + 1:end], quote=False)
+                parts.append(f"<code>{code}</code>")
+                index = end + 1
+                continue
+
+        math_span = _extract_inline_math_span(value, index)
+        if math_span is not None:
+            expression, end = math_span
+            if math_mode == "mathjax":
+                if _is_delimited_math_expression(expression):
+                    parts.append(html.escape(expression, quote=False))
+                else:
+                    parts.append(r"\(" + html.escape(expression, quote=False) + r"\)")
+            else:
+                parts.append(render_codex_math_html(expression, display=False))
+            index = end
+            continue
+
+        next_index = _next_inline_special_index(value, index + 1)
+        if next_index == -1:
+            next_index = len(value)
+        if next_index <= index:
+            next_index = index + 1
+        parts.append(_escape_preserving_safe_html(value[index:next_index]))
+        index = next_index
+
+    return "".join(parts)
+
+
+def render_codex_math_html(expression: str, display: bool = False) -> str:
+    normalized = _strip_math_delimiters(str(expression or "").strip())
+    class_name = "math-display" if display else "math-inline"
+    return f'<span class="{class_name}">{_render_latex_math_inner(normalized)}</span>'
+
+
+def _extract_display_math_line(line: str) -> str | None:
+    for opener, closer in DISPLAY_MATH_PATTERNS:
+        if line.startswith(opener) and line.endswith(closer) and len(line) > len(opener) + len(closer):
+            return line[len(opener):-len(closer)]
+    return None
+
+
+def _is_delimited_math_expression(expression: str) -> bool:
+    expression = str(expression or "").strip()
+    return any(
+        expression.startswith(opener) and expression.endswith(closer)
+        for opener, closer in ((r"\(", r"\)"), (r"\[", r"\]"), ("$$", "$$"), ("$", "$"))
+    )
+
+
+def _extract_inline_math_span(text: str, start: int) -> tuple[str, int] | None:
+    delimited_pairs = ((r"\(", r"\)"), (r"\[", r"\]"), ("$$", "$$"))
+    for opener, closer in delimited_pairs:
+        if text.startswith(opener, start):
+            end = text.find(closer, start + len(opener))
+            if end != -1:
+                return text[start:end + len(closer)], end + len(closer)
+
+    if text[start] == "$" and not text.startswith("$$", start):
+        end = text.find("$", start + 1)
+        if end != -1 and text[start + 1:end].strip():
+            return text[start:end + 1], end + 1
+
+    for command in (r"\sqrt", r"\frac", r"\overline", r"\bar"):
+        if text.startswith(command, start):
+            end = _latex_command_span_end(text, start)
+            if end is not None:
+                return text[start:end], end
+
+    if text[start] == "\\":
+        command, end = _read_latex_command(text, start)
+        if command in LATEX_COMMAND_REPLACEMENTS:
+            return command, end
+    return None
+
+
+def _next_inline_special_index(text: str, start: int) -> int:
+    candidates = [
+        text.find(token, start)
+        for token in ("`", "\\", "$$", "$")
+    ]
+    candidates = [index for index in candidates if index != -1]
+    return min(candidates) if candidates else -1
+
+
+def _latex_command_span_end(text: str, start: int) -> int | None:
+    if text.startswith(r"\frac", start):
+        index = _skip_spaces(text, start + len(r"\frac"))
+        first, index = _read_latex_group(text, index)
+        index = _skip_spaces(text, index)
+        second, index = _read_latex_group(text, index)
+        return index if first and second else None
+
+    for command in (r"\sqrt", r"\overline", r"\bar"):
+        if text.startswith(command, start):
+            index = _skip_spaces(text, start + len(command))
+            if command == r"\sqrt" and index < len(text) and text[index] == "[":
+                _, index = _read_delimited_group(text, index, "[", "]")
+                index = _skip_spaces(text, index)
+            group, index = _read_latex_group(text, index)
+            return index if group else None
+    return None
+
+
+def _strip_math_delimiters(expression: str) -> str:
+    pairs = ((r"\(", r"\)"), (r"\[", r"\]"), ("$$", "$$"), ("$", "$"))
+    for opener, closer in pairs:
+        if expression.startswith(opener) and expression.endswith(closer):
+            return expression[len(opener):-len(closer)].strip()
+    return expression
+
+
+def _render_latex_math_inner(expression: str) -> str:
+    value = expression.replace(r"\left", "").replace(r"\right", "")
+    parts: list[str] = []
+    index = 0
+    while index < len(value):
+        if value.startswith(r"\frac", index):
+            next_index = _skip_spaces(value, index + len(r"\frac"))
+            numerator, next_index = _read_latex_group(value, next_index)
+            next_index = _skip_spaces(value, next_index)
+            denominator, next_index = _read_latex_group(value, next_index)
+            if numerator and denominator:
+                parts.append(
+                    '<span class="math-frac">'
+                    f"<sup>{_render_latex_math_inner(numerator)}</sup>"
+                    "&frasl;"
+                    f"<sub>{_render_latex_math_inner(denominator)}</sub>"
+                    "</span>"
+                )
+                index = next_index
+                continue
+
+        if value.startswith(r"\sqrt", index):
+            next_index = _skip_spaces(value, index + len(r"\sqrt"))
+            root = None
+            if next_index < len(value) and value[next_index] == "[":
+                root, next_index = _read_delimited_group(value, next_index, "[", "]")
+                next_index = _skip_spaces(value, next_index)
+            inner, next_index = _read_latex_group(value, next_index)
+            if inner:
+                root_html = f"<sup>{_render_latex_math_inner(root)}</sup>" if root else ""
+                parts.append(f'{root_html}√<span class="math-radicand">{_render_latex_math_inner(inner)}</span>')
+                index = next_index
+                continue
+
+        for command in (r"\overline", r"\bar"):
+            if value.startswith(command, index):
+                next_index = _skip_spaces(value, index + len(command))
+                inner, next_index = _read_latex_group(value, next_index)
+                if inner:
+                    parts.append(
+                        '<span style="text-decoration: overline;">'
+                        f"{_render_latex_math_inner(inner)}</span>"
+                    )
+                    index = next_index
+                    break
+        else:
+            if value[index] in ("^", "_"):
+                tag = "sup" if value[index] == "^" else "sub"
+                inner, next_index = _read_latex_group(value, index + 1)
+                if inner:
+                    parts.append(f"<{tag}>{_render_latex_math_inner(inner)}</{tag}>")
+                    index = next_index
+                    continue
+
+            if value[index] == "\\":
+                command, next_index = _read_latex_command(value, index)
+                if command in LATEX_SPACE_COMMANDS:
+                    parts.append(" ")
+                elif command in LATEX_COMMAND_REPLACEMENTS:
+                    parts.append(html.escape(LATEX_COMMAND_REPLACEMENTS[command], quote=False))
+                elif len(command) > 1:
+                    parts.append(html.escape(command[1:], quote=False))
+                else:
+                    parts.append("\\")
+                index = next_index
+                continue
+
+            parts.append(html.escape(value[index], quote=False))
+            index += 1
+            continue
+        continue
+
+    return "".join(parts)
+
+
+def _read_latex_command(text: str, start: int) -> tuple[str, int]:
+    if start >= len(text) or text[start] != "\\":
+        return "", start
+    index = start + 1
+    while index < len(text) and text[index].isalpha():
+        index += 1
+    if index == start + 1 and index < len(text):
+        index += 1
+    return text[start:index], index
+
+
+def _read_latex_group(text: str, start: int) -> tuple[str, int]:
+    if start >= len(text):
+        return "", start
+    if text[start] == "{":
+        return _read_delimited_group(text, start, "{", "}")
+    if text[start] == "\\":
+        command, index = _read_latex_command(text, start)
+        return command, index
+    return text[start], start + 1
+
+
+def _read_delimited_group(text: str, start: int, opener: str, closer: str) -> tuple[str, int]:
+    if start >= len(text) or text[start] != opener:
+        return "", start
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:index], index + 1
+    return text[start + 1:], len(text)
+
+
+def _skip_spaces(text: str, start: int) -> int:
+    index = start
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _escape_preserving_safe_html(text: str) -> str:
+    if "<" not in text or ">" not in text:
+        return html.escape(text, quote=False)
+
+    output: list[str] = []
+    last = 0
+    tag_pattern = re.compile(r"<\s*(/?)\s*([a-zA-Z][\w:-]*)\b[^>]*?(/?)\s*>")
+    for match in tag_pattern.finditer(text):
+        output.append(html.escape(text[last:match.start()], quote=False))
+        tag_name = match.group(2).lower()
+        if tag_name in SAFE_HTML_TAGS:
+            is_closing = bool(match.group(1))
+            is_self_closing = bool(match.group(3)) or tag_name in SAFE_SELF_CLOSING_TAGS
+            if is_closing:
+                output.append(f"</{tag_name}>")
+            elif is_self_closing:
+                output.append(f"<{tag_name} />")
+            else:
+                output.append(f"<{tag_name}>")
+        else:
+            output.append(html.escape(match.group(0), quote=False))
+        last = match.end()
+    output.append(html.escape(text[last:], quote=False))
+    return "".join(output)
+
+
+def find_mathjax_script_path(base_dir: str | Path | None = None) -> Path | None:
+    roots = []
+    if base_dir:
+        roots.append(Path(base_dir).resolve())
+    roots.append(Path(getattr(sys, "_MEIPASS", Path.cwd())).resolve())
+    roots.append(Path(__file__).resolve().parents[3])
+
+    for root in roots:
+        path = root.joinpath(*MATHJAX_RELATIVE_PATH)
+        if path.exists():
+            return path
+    return None
+
+
+def mathjax_script_url(base_dir: str | Path | None = None) -> str | None:
+    script_path = find_mathjax_script_path(base_dir)
+    return script_path.as_uri() if script_path else None
+
+
+def should_use_webengine_chat_view() -> bool:
+    return os.environ.get("EXAM_GENERATOR_DISABLE_WEBENGINE", "").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+QWEBENGINE_IMPORT_ERROR: Exception | None = None
+QWebEngineSettings = None
+QWebEngineView = None
+if should_use_webengine_chat_view():
+    try:
+        from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
+    except Exception as exc:  # noqa: BLE001 - fallback to QTextEdit
+        QWEBENGINE_IMPORT_ERROR = exc
 
 
 def prepare_panel_codex_home(
@@ -93,6 +689,74 @@ def prepare_panel_codex_home(
         encoding="utf-8",
     )
     return panel_home
+
+
+class CodexChatView(QWidget):
+    def __init__(self, base_dir: str | Path, parent=None):
+        super().__init__(parent)
+        self.base_dir = str(Path(base_dir).resolve())
+        self._plain_text = ""
+        self._math_mode = "fallback"
+        self._mathjax_script_url = mathjax_script_url(self.base_dir)
+        self._text_edit: QTextEdit | None = None
+        self._web_view = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        if self._mathjax_script_url and should_use_webengine_chat_view():
+            if QWebEngineSettings is not None and QWebEngineView is not None:
+                self._web_view = QWebEngineView(self)
+                settings = self._web_view.settings()
+                settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+                settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
+                layout.addWidget(self._web_view)
+                self._math_mode = "mathjax"
+
+        if self._web_view is None:
+            self._text_edit = QTextEdit(self)
+            self._text_edit.setReadOnly(True)
+            self._text_edit.setAcceptRichText(True)
+            self._text_edit.document().setDefaultStyleSheet(CODEX_CHAT_STYLES)
+            self._text_edit.setPlaceholderText("Codex 응답과 실행 상태가 여기에 표시됩니다.")
+            layout.addWidget(self._text_edit)
+
+    @property
+    def math_mode(self) -> str:
+        return self._math_mode
+
+    def render_blocks(self, blocks: list[dict[str, str]]):
+        self._plain_text = self._blocks_to_plain_text(blocks)
+        document = render_codex_chat_html(
+            blocks,
+            math_mode=self._math_mode,
+            mathjax_script_url=self._mathjax_script_url,
+        )
+        if self._web_view is not None:
+            self._web_view.setHtml(document, QUrl.fromLocalFile(self.base_dir + os.sep))
+            return
+
+        if self._text_edit is None:
+            return
+        self._text_edit.setHtml(document)
+        cursor = self._text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._text_edit.setTextCursor(cursor)
+        self._text_edit.ensureCursorVisible()
+
+    def toPlainText(self) -> str:
+        if self._text_edit is not None:
+            return self._text_edit.toPlainText()
+        return self._plain_text
+
+    @staticmethod
+    def _blocks_to_plain_text(blocks: list[dict[str, str]]) -> str:
+        parts = []
+        for block in blocks:
+            title = block.get("title", "")
+            text = block.get("text", "")
+            parts.append(f"{title}\n{text}".strip())
+        return "\n\n".join(part for part in parts if part)
 
 
 def apply_hidden_codex_process_patch():
@@ -365,6 +1029,7 @@ class CodexInterface(QWidget):
         super().__init__(parent)
         self.base_dir = str(Path(base_dir).resolve())
         self.side_panel = side_panel
+        self._chat_blocks: list[dict[str, str]] = []
         self.thread_id: str | None = None
         self.image_paths: list[str] = []
         self.worker: CodexRunWorker | None = None
@@ -466,9 +1131,7 @@ class CodexInterface(QWidget):
             controls_layout.addWidget(self.newThreadButton)
         self.vBoxLayout.addLayout(controls_layout)
 
-        self.chatView = QTextEdit(self)
-        self.chatView.setReadOnly(True)
-        self.chatView.setPlaceholderText("Codex 응답과 실행 상태가 여기에 표시됩니다.")
+        self.chatView = CodexChatView(self.base_dir, self)
         self.vBoxLayout.addWidget(self.chatView, 1)
 
         self.progressView = QTextEdit(self)
@@ -648,7 +1311,7 @@ class CodexInterface(QWidget):
         self._append_block("You", prompt)
         if self.image_paths:
             names = ", ".join(Path(path).name for path in self.image_paths)
-            self._append_text(f"Images: {names}\n")
+            self._append_text(f"\nImages: {names}")
         self._append_block("Codex")
         self.promptBox.clear()
         image_paths = list(self.image_paths)
@@ -864,18 +1527,19 @@ class CodexInterface(QWidget):
         self.statusLabel.setText(message)
 
     def _append_block(self, title: str, text: str = ""):
-        if self.chatView.toPlainText():
-            self._append_text("\n")
-        self._append_text(f"{title}\n")
-        if text:
-            self._append_text(f"{text}\n")
+        self._chat_blocks.append({"title": title, "text": text})
+        self._render_chat()
 
     def _append_text(self, text: str):
-        cursor = self.chatView.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.chatView.setTextCursor(cursor)
-        self.chatView.insertPlainText(text)
-        self.chatView.ensureCursorVisible()
+        if not text:
+            return
+        if not self._chat_blocks:
+            self._chat_blocks.append({"title": "System", "text": ""})
+        self._chat_blocks[-1]["text"] += text
+        self._render_chat()
+
+    def _render_chat(self):
+        self.chatView.render_blocks(self._chat_blocks)
 
     def _append_answer_delta(self, text: str):
         if not self._answer_started:

@@ -26,6 +26,8 @@ os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 APP_TITLE = "기출문제 문제은행 관리자"
+APP_ICON_FILENAME = "exam_generator_icon.ico"
+APP_USER_MODEL_ID = "CAPTW.ExamWeaverArchive.QuestionBankManager"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 
 
@@ -48,6 +50,7 @@ if __package__ is None or __package__ == "":
     __package__ = "src.gui"
 from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QIcon
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, NavigationAvatarWidget,
     FluentTranslator, SplashScreen, PushButton, InfoBar
@@ -75,6 +78,44 @@ def build_question_repository(db_path, manifest_path):
         except (OSError, ValueError) as exc:
             return ExamRepository(str(db_path)), str(exc)
     return ExamRepository(str(db_path)), None
+
+
+def get_app_icon_path() -> str:
+    candidates = [
+        os.path.join(BASE_DIR, "assets", "icons", APP_ICON_FILENAME),
+        os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets", "icons", APP_ICON_FILENAME),
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "assets",
+                "icons",
+                APP_ICON_FILENAME,
+            )
+        ),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+def get_app_icon() -> QIcon:
+    return QIcon(get_app_icon_path())
+
+
+def _set_windows_app_user_model_id() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        return True
+    except Exception:
+        return False
+
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -132,6 +173,7 @@ class MainWindow(FluentWindow):
     def init_window(self):
         self.resize(*DEFAULT_WINDOW_SIZE)
         self.setWindowTitle(APP_TITLE)
+        self.setWindowIcon(get_app_icon())
         self.move(100, 100)
 
     def _disable_frameless_screen_refresh(self):
@@ -237,6 +279,8 @@ class MainWindow(FluentWindow):
 
 def main() -> int:
     _install_crash_logging()
+    _set_windows_app_user_model_id()
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     if hasattr(Qt, "HighDpiScaleFactorRoundingPolicy"):
@@ -245,6 +289,7 @@ def main() -> int:
         )
 
     app = QApplication(sys.argv)
+    app.setWindowIcon(get_app_icon())
     w = MainWindow()
     w.show()
     return app.exec()

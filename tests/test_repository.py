@@ -4,6 +4,12 @@ import pytest
 
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
+from src.database.repository import (
+    CLONED_MANUAL_TAG,
+    MANUAL_EXAM_CODE,
+    MANUAL_SUBJECT_CODE,
+    QUESTION_TYPE_DESCRIPTIVE,
+)
 from src.database.repository import ExamRepository
 from src.web_import.importer import ComcbtImportService, QuestionSource
 from src.web_import.models import ComcbtParsedExam, ComcbtQuestionGroup
@@ -599,6 +605,132 @@ def test_update_question_persists_text_choices_answer_tags_and_image(repo, sampl
     ]
 
 
+def test_create_manual_question_inserts_personal_exam_subject_and_choices(repo):
+    template = repo.get_manual_question_template()
+    template.update({
+        'question_text': '개인이 만든 안전관리 문제',
+        'correct_answer': 2,
+        'explanation': '사용자 작성 해설',
+        'tags': '#안전관리',
+        'choices': [
+            {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': '오답 A'},
+            {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': '정답 B'},
+            {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': '오답 C'},
+            {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': '오답 D'},
+        ],
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)[0]
+    assert saved['id'] == question_id
+    assert saved['exam_name'] == '개인 제작 문제'
+    assert saved['subject_name'] == '개인 문제'
+    assert saved['question_text'] == '개인이 만든 안전관리 문제'
+    assert saved['correct_answer'] == 2
+    assert '#안전관리' in saved['tags']
+    assert '#개인제작' in saved['tags']
+    assert [choice['choice_text'] for choice in saved['choices']] == [
+        '오답 A',
+        '정답 B',
+        '오답 C',
+        '오답 D',
+    ]
+
+    next_template = repo.get_manual_question_template()
+    assert next_template['exam_code'] == MANUAL_EXAM_CODE
+    assert next_template['subject_code'] == MANUAL_SUBJECT_CODE
+    assert next_template['question_number'] == template['question_number'] + 1
+
+
+def test_create_manual_question_accepts_more_than_five_choices(repo):
+    template = repo.get_manual_question_template()
+    template.update({
+        'question_text': '6지선다 개인 제작 문제',
+        'correct_answer': 6,
+        'choices': [
+            {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': 'A'},
+            {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': 'B'},
+            {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': 'C'},
+            {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': 'D'},
+            {'choice_number': 5, 'choice_symbol': '⑤', 'choice_text': 'E'},
+            {'choice_number': 6, 'choice_symbol': '6', 'choice_text': 'F'},
+        ],
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_question(question_id)
+    assert saved['correct_answer'] == 6
+    assert [choice['choice_number'] for choice in saved['choices']] == [1, 2, 3, 4, 5, 6]
+    assert saved['choices'][-1]['choice_symbol'] == '6'
+    assert saved['choices'][-1]['choice_text'] == 'F'
+
+
+def test_create_manual_descriptive_question_stores_model_answer_without_choices(repo):
+    template = repo.get_manual_descriptive_question_template()
+    template.update({
+        'question_text': '선박 복원성의 의미를 설명하시오.',
+        'model_answer': '외력으로 기울어진 선박이 원래 자세로 돌아가려는 성질이다.',
+        'tags': '#복원성',
+    })
+
+    question_id = repo.create_manual_question(template)
+
+    assert question_id is not None
+    saved = repo.get_question(question_id)
+    assert saved['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert saved['question_text'] == '선박 복원성의 의미를 설명하시오.'
+    assert saved['model_answer'] == '외력으로 기울어진 선박이 원래 자세로 돌아가려는 성질이다.'
+    assert saved['correct_answer'] == 0
+    assert saved['answer_available'] == 0
+    assert saved['choices'] == []
+    assert '#복원성' in saved['tags']
+    assert '#서술형' in saved['tags']
+    assert '#개인제작' in saved['tags']
+
+    searched = repo.get_questions_with_choices(search_text='원래 자세', limit=1)
+    assert searched[0]['id'] == question_id
+
+
+def test_manual_clone_template_copies_existing_question_for_customization(repo, sample_metadata):
+    question = Question(
+        number=8,
+        text='복제할 원본 문제',
+        choices=[
+            Choice(number=1, symbol='㉮', text='A'),
+            Choice(number=2, symbol='㉯', text='B'),
+            Choice(number=3, symbol='㉴', text='C'),
+            Choice(number=4, symbol='㉵', text='D'),
+            Choice(number=5, symbol='⑤', text='E'),
+        ],
+        correct_answer=5,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    assert repo.save_questions([question], sample_metadata) == 1
+    source = repo.get_questions_with_choices(exam_code='3급기관사', limit=1)[0]
+    assert repo.update_question_explanation(source['id'], '원본 해설') is True
+
+    template = repo.get_manual_question_clone_template(source['id'])
+
+    assert template is not None
+    assert template['editor_title'] == '기존 문제 복제'
+    assert template['exam_code'] == MANUAL_EXAM_CODE
+    assert template['subject_code'] == MANUAL_SUBJECT_CODE
+    assert template['question_text'] == '복제할 원본 문제'
+    assert template['correct_answer'] == 5
+    assert template['explanation'] == '원본 해설'
+    assert CLONED_MANUAL_TAG in template['tags']
+    assert '#개인제작' in template['tags']
+    assert [choice['choice_number'] for choice in template['choices']] == [1, 2, 3, 4, 5]
+    assert template['choices'][-1]['choice_text'] == 'E'
+
+
 def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadata, sample_question):
     repo.save_questions([sample_question], sample_metadata)
     question = repo.get_questions_with_choices(limit=1)[0]
@@ -620,6 +752,27 @@ def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadat
 
     assert repo.update_question_explanation(question['id'], "   ") is True
     assert repo.get_question(question['id'])['explanation'] is None
+
+
+def test_update_question_can_convert_to_descriptive_and_clear_choices(repo, sample_metadata, sample_question):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+
+    assert repo.update_question(question['id'], {
+        'question_text': '압축 공기 계통 점검 절차를 서술하시오.',
+        'question_type': QUESTION_TYPE_DESCRIPTIVE,
+        'model_answer': '드레인 배출, 압력 확인, 누설 점검 순서로 확인한다.',
+        'tags': '#서술형',
+        'image_path': None,
+        'choices': question['choices'],
+    }) is True
+
+    updated = repo.get_question(question['id'])
+    assert updated['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert updated['model_answer'] == '드레인 배출, 압력 확인, 누설 점검 순서로 확인한다.'
+    assert updated['correct_answer'] == 0
+    assert updated['answer_available'] == 0
+    assert updated['choices'] == []
 
 
 def test_choice_image_paths_are_saved_updated_and_exposed(repo, sample_metadata):

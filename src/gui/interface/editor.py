@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QScrollArea,
-    QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QTextCharFormat, QTextCursor
@@ -24,14 +24,25 @@ from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ...parser.question import ALL_CHOICES_CORRECT
 
 
+MIN_CHOICE_COUNT = 4
+MAX_CHOICE_COUNT = 10
+QUESTION_TYPE_MULTIPLE_CHOICE = "multiple_choice"
+QUESTION_TYPE_DESCRIPTIVE = "descriptive"
+
+
 class QuestionEditor(QDialog):
     """문제 전체 수정 다이얼로그"""
     
-    def __init__(self, parent=None, question_data=None, subject_options=None):
+    def __init__(self, parent=None, question_data=None, subject_options=None, create_mode=False):
         super().__init__(parent)
-        self.setWindowTitle("문제 수정")
+        self.create_mode = bool(create_mode)
         self.setModal(True)
         self.question_data = question_data or {}
+        self.editor_title = (
+            self.question_data.get('editor_title')
+            or ("개인 제작 문제 추가" if self.create_mode else "문제 수정")
+        )
+        self.setWindowTitle(self.editor_title)
         self.subject_options = subject_options or []
         self._normalizing_private_glyphs = False
         self.explanation_sidecar_expanded = False
@@ -39,7 +50,10 @@ class QuestionEditor(QDialog):
             self.question_data.get('shared_passage')
             or self.question_data.get('group_shared_text')
         )
-        self.titleLabel = SubtitleLabel("문제 수정", self)
+        self.titleLabel = SubtitleLabel(
+            self.editor_title,
+            self,
+        )
 
         self.rootLayout = QVBoxLayout(self)
         self.rootLayout.setContentsMargins(18, 16, 18, 14)
@@ -77,10 +91,17 @@ class QuestionEditor(QDialog):
         self.subjectCombo = ComboBox(self)
         self._apply_input_height(self.subjectCombo)
         self._init_subjects()
+        self.questionTypeCombo = ComboBox(self)
+        self._apply_input_height(self.questionTypeCombo)
+        self._init_question_types()
+        self.questionTypeCombo.currentIndexChanged.connect(
+            lambda *_: self._apply_question_type_visibility()
+        )
         self._add_metadata_field("연도", self.yearInput, 0, 0)
         self._add_metadata_field("회차", self.sessionInput, 0, 1)
         self._add_metadata_field("문제번호", self.questionNumberInput, 0, 2)
         self._add_metadata_field("과목", self.subjectCombo, 0, 3, stretch=2)
+        self._add_metadata_field("유형", self.questionTypeCombo, 0, 4)
 
         self.sharedPassageText = None
         if self.sharedPassage:
@@ -124,10 +145,12 @@ class QuestionEditor(QDialog):
         self.questionToolbarLayout.addStretch(1)
 
         self.answerCombo = ComboBox(self)
+        self.choice_count = self._initial_choice_count()
         self.choiceInputs = {}
+        self.choiceRows = {}
         self.choiceImagePaths = {
             number: self._choice_image_path(number)
-            for number in range(1, 5)
+            for number in self._choice_numbers()
         }
         self.choiceImageLabels = {}
         self.choiceImagePreviews = {}
@@ -139,19 +162,35 @@ class QuestionEditor(QDialog):
         self.choiceLayout.setContentsMargins(0, 2, 0, 2)
         self.choiceLayout.setSpacing(8)
         self.choiceWidget.setMinimumHeight(248)
-        self.choiceWidget.setMaximumHeight(276)
         self.choiceWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        for number in range(1, 5):
-            symbol = NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
-            field = LineEdit(self)
-            field.setPlaceholderText(f"{symbol} 선지 내용")
-            field.setText(self._choice_text(number))
-            self._apply_input_height(field)
-            self.choiceInputs[number] = field
-            field.textChanged.connect(
-                lambda _text, n=number: self._normalize_choice_text_input(n)
-            )
-            self.choiceLayout.addWidget(self._make_choice_row(symbol, field, number))
+        for number in self._choice_numbers():
+            self._add_choice_row(number)
+        self.choiceControlWidget = QWidget(self)
+        choiceControlLayout = QHBoxLayout(self.choiceControlWidget)
+        choiceControlLayout.setContentsMargins(0, 0, 0, 0)
+        choiceControlLayout.setSpacing(8)
+        self.btnAddChoice = PushButton("선지 추가", self)
+        self.btnAddChoice.setToolTip(f"최대 {MAX_CHOICE_COUNT}개까지 선지를 추가")
+        self._apply_input_height(self.btnAddChoice)
+        self.btnAddChoice.clicked.connect(self._add_choice)
+        self.btnRemoveChoice = PushButton("마지막 선지 삭제", self)
+        self.btnRemoveChoice.setToolTip(f"{MIN_CHOICE_COUNT}개 미만으로는 줄일 수 없습니다.")
+        self._apply_input_height(self.btnRemoveChoice)
+        self.btnRemoveChoice.clicked.connect(self._remove_last_choice)
+        choiceControlLayout.addStretch(1)
+        choiceControlLayout.addWidget(self.btnAddChoice)
+        choiceControlLayout.addWidget(self.btnRemoveChoice)
+        self.choiceLayout.addWidget(self.choiceControlWidget)
+        self._update_choice_control_state()
+
+        self.modelAnswerText = TextEdit(self)
+        self.modelAnswerText.setPlaceholderText("모범답안")
+        self.modelAnswerText.setPlainText(
+            self._display_text(self.question_data.get('model_answer', ''))
+        )
+        self.modelAnswerText.setMinimumHeight(128)
+        self.modelAnswerText.setMaximumHeight(180)
+        self.modelAnswerText.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         self.tagsInput = LineEdit(self)
         self.tagsInput.setPlaceholderText("태그 (콤마로 구분)")
@@ -169,7 +208,7 @@ class QuestionEditor(QDialog):
         self.imageLabel.setScaledContents(True)
         self.imageStatusLabel = BodyLabel("", self)
         self.imageStatusLabel.setWordWrap(True)
-        self.btnImage = PushButton("이미지 변경", self)
+        self.btnImage = PushButton("이미지 추가" if self.create_mode else "이미지 변경", self)
         self._apply_input_height(self.btnImage)
         self.btnImage.setFixedWidth(140)
         self.btnImage.clicked.connect(self._select_image)
@@ -206,17 +245,26 @@ class QuestionEditor(QDialog):
         if self.sharedPassageText:
             self.viewLayout.addWidget(BodyLabel("공통지문", self))
             self.viewLayout.addWidget(self.sharedPassageText)
-        self.viewLayout.addWidget(BodyLabel("발문", self))
+        self.questionSectionLabel = BodyLabel("발문", self)
+        self.choiceSectionLabel = BodyLabel("선지", self)
+        self.answerSectionLabel = BodyLabel("정답", self)
+        self.modelAnswerSectionLabel = BodyLabel("모범답안", self)
+        self.tagsSectionLabel = BodyLabel("태그", self)
+        self.imageSectionLabel = BodyLabel("이미지", self)
+
+        self.viewLayout.addWidget(self.questionSectionLabel)
         self.viewLayout.addWidget(self.questionToolbar)
         self.viewLayout.addWidget(self.questionText)
-        self.viewLayout.addWidget(BodyLabel("선지", self))
+        self.viewLayout.addWidget(self.choiceSectionLabel)
         self.viewLayout.addWidget(self.choiceWidget)
-        self.viewLayout.addWidget(BodyLabel("정답", self))
+        self.viewLayout.addWidget(self.answerSectionLabel)
         self._apply_input_height(self.answerCombo)
         self.viewLayout.addWidget(self.answerCombo)
-        self.viewLayout.addWidget(BodyLabel("태그", self))
+        self.viewLayout.addWidget(self.modelAnswerSectionLabel)
+        self.viewLayout.addWidget(self.modelAnswerText)
+        self.viewLayout.addWidget(self.tagsSectionLabel)
         self.viewLayout.addWidget(self.tagsInput)
-        self.viewLayout.addWidget(BodyLabel("이미지", self))
+        self.viewLayout.addWidget(self.imageSectionLabel)
         self.viewLayout.addWidget(self.imageWidget)
         self.viewLayout.addStretch(1)
 
@@ -251,8 +299,51 @@ class QuestionEditor(QDialog):
         self.cancelButton.clicked.connect(self.reject)
         self.rootLayout.addWidget(self.buttonBar, 0)
 
+        self._apply_question_type_visibility()
         self.setMinimumSize(960, 780)
         self.resize(1060, 820)
+
+    def accept(self):
+        data = self.get_data()
+        if not str(data.get('question_text') or '').strip():
+            QMessageBox.warning(self, "입력 필요", "발문을 입력하세요.")
+            return
+        if not data.get('subject_code'):
+            QMessageBox.warning(self, "입력 필요", "과목을 선택하세요.")
+            return
+        if data.get('question_type') == QUESTION_TYPE_DESCRIPTIVE:
+            if not str(data.get('model_answer') or '').strip():
+                QMessageBox.warning(self, "입력 필요", "모범답안을 입력하세요.")
+                return
+            super().accept()
+            return
+
+        choices = data.get('choices', [])
+        if len(choices) < MIN_CHOICE_COUNT:
+            QMessageBox.warning(
+                self,
+                "입력 필요",
+                f"선지는 최소 {MIN_CHOICE_COUNT}개 이상 필요합니다.",
+            )
+            return
+        missing_choices = [
+            str(choice.get('choice_number'))
+            for choice in choices
+            if not str(choice.get('choice_text') or '').strip()
+            and not choice.get('choice_image_path')
+        ]
+        if missing_choices:
+            QMessageBox.warning(
+                self,
+                "입력 필요",
+                f"{', '.join(missing_choices)}번 선지를 입력하거나 이미지를 지정하세요.",
+            )
+            return
+        choice_numbers = {choice.get('choice_number') for choice in choices}
+        if data.get('correct_answer') not in choice_numbers:
+            QMessageBox.warning(self, "입력 필요", "정답 번호가 선지 목록에 없습니다.")
+            return
+        super().accept()
 
     def _init_explanation_sidecar(self):
         self.explanationDock = QWidget(self)
@@ -373,6 +464,89 @@ class QuestionEditor(QDialog):
         layout.addWidget(clear_button)
         return row
 
+    def _choice_numbers(self):
+        return range(1, self.choice_count + 1)
+
+    def _initial_choice_count(self):
+        numbers = []
+        for choice in self.question_data.get('choices') or []:
+            try:
+                numbers.append(int(choice.get('choice_number') or choice.get('number')))
+            except (TypeError, ValueError, AttributeError):
+                continue
+        try:
+            correct_answer = int(self.question_data.get('correct_answer') or 0)
+        except (TypeError, ValueError):
+            correct_answer = 0
+        if correct_answer:
+            numbers.append(correct_answer)
+        count = max(numbers or [MIN_CHOICE_COUNT])
+        return max(MIN_CHOICE_COUNT, min(MAX_CHOICE_COUNT, count))
+
+    def _choice_symbol(self, number):
+        return NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
+
+    def _add_choice_row(self, number):
+        symbol = self._choice_symbol(number)
+        field = LineEdit(self)
+        field.setPlaceholderText(f"{symbol} 선지 내용")
+        field.setText(self._choice_text(number))
+        self._apply_input_height(field)
+        self.choiceInputs[number] = field
+        field.textChanged.connect(
+            lambda _text, n=number: self._normalize_choice_text_input(n)
+        )
+        row = self._make_choice_row(symbol, field, number)
+        self.choiceRows[number] = row
+        insert_index = self.choiceLayout.count()
+        if hasattr(self, 'choiceControlWidget'):
+            insert_index = max(0, insert_index - 1)
+        self.choiceLayout.insertWidget(insert_index, row)
+
+    def _add_answer_option(self, number):
+        symbol = self._choice_symbol(number)
+        self.answerCombo.addItem(f"{symbol} ({number}번)", userData=number)
+
+    def _remove_answer_option(self, number):
+        index = self.answerCombo.findData(number)
+        if index >= 0:
+            self.answerCombo.removeItem(index)
+
+    def _add_choice(self):
+        if self.choice_count >= MAX_CHOICE_COUNT:
+            return
+        self.choice_count += 1
+        self.choiceImagePaths[self.choice_count] = None
+        self._add_choice_row(self.choice_count)
+        self._add_answer_option(self.choice_count)
+        self._update_choice_control_state()
+
+    def _remove_last_choice(self):
+        if self.choice_count <= MIN_CHOICE_COUNT:
+            return
+        number = self.choice_count
+        if self.answerCombo.currentData() == number:
+            previous_index = self.answerCombo.findData(number - 1)
+            self.answerCombo.setCurrentIndex(previous_index if previous_index >= 0 else 0)
+        self._remove_answer_option(number)
+        row = self.choiceRows.pop(number, None)
+        if row is not None:
+            self.choiceLayout.removeWidget(row)
+            row.deleteLater()
+        self.choiceInputs.pop(number, None)
+        self.choiceImagePaths.pop(number, None)
+        self.choiceImageLabels.pop(number, None)
+        self.choiceImagePreviews.pop(number, None)
+        self.choiceClearImageButtons.pop(number, None)
+        self.choice_count -= 1
+        self._update_choice_control_state()
+
+    def _update_choice_control_state(self):
+        if hasattr(self, 'btnAddChoice'):
+            self.btnAddChoice.setEnabled(self.choice_count < MAX_CHOICE_COUNT)
+        if hasattr(self, 'btnRemoveChoice'):
+            self.btnRemoveChoice.setEnabled(self.choice_count > MIN_CHOICE_COUNT)
+
     def _apply_input_height(self, widget, height=38):
         widget.setMinimumHeight(height)
         if hasattr(widget, "setFixedHeight"):
@@ -407,9 +581,8 @@ class QuestionEditor(QDialog):
         if not answer_available:
             self.answerCombo.addItem("정답 없음", userData=0)
         self.answerCombo.addItem("전원 정답", userData=ALL_CHOICES_CORRECT)
-        for number in range(1, 5):
-            symbol = NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
-            self.answerCombo.addItem(f"{symbol} ({number}번)", userData=number)
+        for number in self._choice_numbers():
+            self._add_answer_option(number)
 
         correct_answer = self.question_data.get('correct_answer')
         index = self.answerCombo.findData(correct_answer)
@@ -428,6 +601,35 @@ class QuestionEditor(QDialog):
         index = self.subjectCombo.findData(current_subject)
         if index >= 0:
             self.subjectCombo.setCurrentIndex(index)
+
+    def _init_question_types(self):
+        self.questionTypeCombo.addItem("객관식", userData=QUESTION_TYPE_MULTIPLE_CHOICE)
+        self.questionTypeCombo.addItem("서술형", userData=QUESTION_TYPE_DESCRIPTIVE)
+        index = self.questionTypeCombo.findData(self._initial_question_type())
+        self.questionTypeCombo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _initial_question_type(self):
+        raw = str(self.question_data.get('question_type') or '').strip().lower()
+        if raw in {QUESTION_TYPE_DESCRIPTIVE, 'subjective', 'essay', 'written'}:
+            return QUESTION_TYPE_DESCRIPTIVE
+        if self.question_data.get('model_answer') and not (self.question_data.get('choices') or []):
+            return QUESTION_TYPE_DESCRIPTIVE
+        return QUESTION_TYPE_MULTIPLE_CHOICE
+
+    def _current_question_type(self):
+        return self.questionTypeCombo.currentData() or QUESTION_TYPE_MULTIPLE_CHOICE
+
+    def _apply_question_type_visibility(self):
+        is_descriptive = self._current_question_type() == QUESTION_TYPE_DESCRIPTIVE
+        for widget in (
+            self.choiceSectionLabel,
+            self.choiceWidget,
+            self.answerSectionLabel,
+            self.answerCombo,
+        ):
+            widget.setVisible(not is_descriptive)
+        self.modelAnswerSectionLabel.setVisible(is_descriptive)
+        self.modelAnswerText.setVisible(is_descriptive)
 
     def _choice_text(self, number):
         for choice in self.question_data.get('choices') or []:
@@ -716,7 +918,7 @@ class QuestionEditor(QDialog):
 
     def _select_choice_image(self, number):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, f"{NUMBER_TO_CHOICE_SYMBOL.get(number, number)} 선지 이미지 선택", "", "Images (*.png *.jpg *.jpeg)"
+            self, f"{self._choice_symbol(number)} 선지 이미지 선택", "", "Images (*.png *.jpg *.jpeg)"
         )
         if file_path:
             self.choiceImagePaths[number] = file_path
@@ -736,18 +938,24 @@ class QuestionEditor(QDialog):
 
     def get_data(self):
         question_text, question_format_json = self._question_text_and_format_json()
+        question_type = self._current_question_type()
         choices = []
-        for number in range(1, 5):
-            choice_text, choice_format_json = self._choice_text_and_format_json(number)
-            choices.append({
-                'choice_number': number,
-                'choice_symbol': NUMBER_TO_CHOICE_SYMBOL.get(number, str(number)),
-                'choice_text': choice_text,
-                'choice_format_json': choice_format_json,
-                'choice_image_path': self.choiceImagePaths.get(number),
-            })
+        if question_type != QUESTION_TYPE_DESCRIPTIVE:
+            for number in self._choice_numbers():
+                choice_text, choice_format_json = self._choice_text_and_format_json(number)
+                choices.append({
+                    'choice_number': number,
+                    'choice_symbol': self._choice_symbol(number),
+                    'choice_text': choice_text,
+                    'choice_format_json': choice_format_json,
+                    'choice_image_path': self.choiceImagePaths.get(number),
+                })
 
-        correct_answer = self.answerCombo.currentData()
+        correct_answer = (
+            0
+            if question_type == QUESTION_TYPE_DESCRIPTIVE
+            else self.answerCombo.currentData()
+        )
         return {
             'year': self.yearInput.value(),
             'session': self.sessionInput.value(),
@@ -756,8 +964,10 @@ class QuestionEditor(QDialog):
             'subject_code': self.subjectCombo.currentData() or self.question_data.get('subject_code'),
             'question_text': question_text,
             'question_format_json': question_format_json,
+            'question_type': question_type,
+            'model_answer': self.modelAnswerText.toPlainText().strip() if question_type == QUESTION_TYPE_DESCRIPTIVE else None,
             'correct_answer': correct_answer,
-            'answer_available': correct_answer != 0,
+            'answer_available': question_type != QUESTION_TYPE_DESCRIPTIVE and correct_answer != 0,
             'tags': self.tagsInput.text(),
             'explanation': self.explanationEditor.toPlainText().strip() or None,
             'image_path': self.imagePath,

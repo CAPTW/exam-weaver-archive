@@ -81,6 +81,14 @@ class BrowserInterface(QWidget):
         self.btnRefresh = PrimaryPushButton("조회", self)
         self.btnRefresh.clicked.connect(self.load_data)
 
+        self.btnAddManual = PrimaryPushButton("문제 추가", self)
+        self.btnAddManual.setToolTip("개인이 만든 문제를 수동으로 추가")
+        self.btnAddManual.clicked.connect(self.add_manual_question)
+
+        self.btnAddDescriptive = PushButton("서술형 추가", self)
+        self.btnAddDescriptive.setToolTip("문제와 모범답안으로 구성된 서술형 문제 추가")
+        self.btnAddDescriptive.clicked.connect(self.add_descriptive_question)
+
         self.btnValidate = PrimaryPushButton("오류 검사", self)
         self.btnValidate.clicked.connect(self.load_validation_results)
 
@@ -94,6 +102,8 @@ class BrowserInterface(QWidget):
         self.headerLayout.addWidget(self.subjectFilterLabel)
         self.headerLayout.addWidget(self.subjectFilter)
         self.headerLayout.addWidget(self.searchBox)
+        self.headerLayout.addWidget(self.btnAddManual)
+        self.headerLayout.addWidget(self.btnAddDescriptive)
         self.headerLayout.addWidget(self.btnRefresh)
         self.headerLayout.addWidget(self.btnValidate)
         self.headerLayout.addWidget(self.btnDeleteSelected)
@@ -106,7 +116,7 @@ class BrowserInterface(QWidget):
         self.table.setColumnWidth(0, 54)
         self.table.setColumnWidth(1, 70)
         self.table.setColumnWidth(4, 180)
-        self.table.setColumnWidth(5, 216)
+        self.table.setColumnWidth(5, 284)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.verticalHeader().hide()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -378,10 +388,130 @@ class BrowserInterface(QWidget):
                     parent=self
                 )
 
+    def add_manual_question(self):
+        dialog = QuestionEditor(
+            self.window(),
+            self.repo.get_manual_question_template(),
+            subject_options=self.repo.get_manual_subject_options(),
+            create_mode=True,
+        )
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        question_id = self.repo.create_manual_question(data)
+        if question_id:
+            InfoBar.success(
+                title='추가 완료',
+                content=f"개인 제작 문제 ID {question_id}번을 추가했습니다.",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self
+            )
+            self._load_exam_filters()
+            self._select_filter_value(self.examFilter, data.get('exam_code'))
+            self._load_subject_filters()
+            self._select_filter_value(self.subjectFilter, data.get('subject_code'))
+            self.load_data()
+        else:
+            InfoBar.error(
+                title='추가 실패',
+                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                parent=self
+            )
+
+    def add_descriptive_question(self):
+        dialog = QuestionEditor(
+            self.window(),
+            self.repo.get_manual_descriptive_question_template(),
+            subject_options=self.repo.get_manual_subject_options(),
+            create_mode=True,
+        )
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        question_id = self.repo.create_manual_question(data)
+        if question_id:
+            InfoBar.success(
+                title='추가 완료',
+                content=f"서술형 문제 ID {question_id}번을 추가했습니다.",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self
+            )
+            self._load_exam_filters()
+            self._select_filter_value(self.examFilter, data.get('exam_code'))
+            self._load_subject_filters()
+            self._select_filter_value(self.subjectFilter, data.get('subject_code'))
+            self.load_data()
+        else:
+            InfoBar.error(
+                title='추가 실패',
+                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                parent=self
+            )
+
+    def clone_question(self, question_id):
+        template = self.repo.get_manual_question_clone_template(question_id)
+        if not template:
+            InfoBar.error(
+                title='복제 실패',
+                content="복제할 문제를 찾을 수 없습니다.",
+                parent=self
+            )
+            return
+
+        dialog = QuestionEditor(
+            self.window(),
+            template,
+            subject_options=self.repo.get_manual_subject_options(),
+            create_mode=True,
+        )
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        new_question_id = self.repo.create_manual_question(data)
+        if new_question_id:
+            InfoBar.success(
+                title='복제 완료',
+                content=f"개인 제작 문제 ID {new_question_id}번으로 복제했습니다.",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self
+            )
+            self._load_exam_filters()
+            self._select_filter_value(self.examFilter, data.get('exam_code'))
+            self._load_subject_filters()
+            self._select_filter_value(self.subjectFilter, data.get('subject_code'))
+            self.load_data()
+        else:
+            InfoBar.error(
+                title='복제 실패',
+                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                parent=self
+            )
+
+    @staticmethod
+    def _select_filter_value(combo, value):
+        if value is None:
+            return
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
     def _format_info(self, question):
         prefix = "공통 " if question.get('group_id') is not None else ""
+        type_prefix = "서술형 " if question.get('question_type') == 'descriptive' else ""
         info = (
-            f"{prefix}{question['year']}-{question['session']} "
+            f"{prefix}{type_prefix}{question['year']}-{question['session']} "
             f"{question['subject_name']} {question['question_number']}번"
         )
         mount_label = question.get('mount_label')
@@ -390,28 +520,39 @@ class BrowserInterface(QWidget):
     def _format_question_preview(self, question):
         question_text = question.get('question_text') or ''
         text = question_text[:50] + "..." if len(question_text) > 50 else question_text
-        return f"[공통] {text}" if question.get('group_id') is not None else text
+        prefixes = []
+        if question.get('group_id') is not None:
+            prefixes.append("[공통]")
+        if question.get('question_type') == 'descriptive':
+            prefixes.append("[서술형]")
+        return f"{' '.join(prefixes)} {text}".strip() if prefixes else text
 
     def _make_action_widget(self, question_id):
         widget = QWidget(self)
-        widget.setMinimumWidth(204)
+        widget.setMinimumWidth(272)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
         edit_btn = PrimaryPushButton("수정", self)
-        edit_btn.setFixedSize(64, 30)
+        edit_btn.setFixedSize(60, 30)
         edit_btn.clicked.connect(lambda checked, q_id=question_id: self.open_editor(q_id))
 
+        clone_btn = PushButton("복제", self)
+        clone_btn.setToolTip("이 문제를 개인 제작 문제로 복사해서 수정")
+        clone_btn.setFixedSize(60, 30)
+        clone_btn.clicked.connect(lambda checked, q_id=question_id: self.clone_question(q_id))
+
         delete_btn = PushButton("삭제", self)
-        delete_btn.setFixedSize(64, 30)
+        delete_btn.setFixedSize(60, 30)
         delete_btn.clicked.connect(lambda checked, q_id=question_id: self.delete_question(q_id))
 
         explanation_btn = PushButton("해설", self)
-        explanation_btn.setFixedSize(64, 30)
+        explanation_btn.setFixedSize(60, 30)
         explanation_btn.clicked.connect(lambda checked, q_id=question_id: self.open_explanation(q_id))
 
         layout.addWidget(edit_btn)
+        layout.addWidget(clone_btn)
         layout.addWidget(delete_btn)
         layout.addWidget(explanation_btn)
         return widget

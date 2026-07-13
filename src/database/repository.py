@@ -2,6 +2,7 @@ import sqlite3
 import logging
 import hashlib
 import re
+from datetime import date
 from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -11,7 +12,16 @@ from ..parser.question import ALL_CHOICES_CORRECT
 
 logger = logging.getLogger(__name__)
 
-VALID_CHOICE_NUMBERS = (1, 2, 3, 4, 5)
+VALID_CHOICE_NUMBERS = tuple(range(1, 11))
+QUESTION_TYPE_MULTIPLE_CHOICE = "multiple_choice"
+QUESTION_TYPE_DESCRIPTIVE = "descriptive"
+MANUAL_EXAM_CODE = "personal_questions"
+MANUAL_EXAM_NAME = "개인 제작 문제"
+MANUAL_SUBJECT_CODE = "manual_general"
+MANUAL_SUBJECT_NAME = "개인 문제"
+MANUAL_TAG = "#개인제작"
+CLONED_MANUAL_TAG = "#복제수정"
+DESCRIPTIVE_TAG = "#서술형"
 
 
 def _tag_query_tokens(tag_query: str) -> List[str]:
@@ -298,6 +308,14 @@ class ExamRepository:
                 cursor.execute("ALTER TABLE questions ADD COLUMN answer_available BOOLEAN NOT NULL DEFAULT 1")
                 cursor.execute("UPDATE questions SET answer_available = 0 WHERE correct_answer = 0")
                 logger.info("Migrated: Added 'answer_available' column to questions table")
+            if 'question_type' not in columns:
+                cursor.execute(
+                    "ALTER TABLE questions ADD COLUMN question_type TEXT NOT NULL DEFAULT 'multiple_choice'"
+                )
+                logger.info("Migrated: Added 'question_type' column to questions table")
+            if 'model_answer' not in columns:
+                cursor.execute("ALTER TABLE questions ADD COLUMN model_answer TEXT")
+                logger.info("Migrated: Added 'model_answer' column to questions table")
             question_column_migrations = {
                 'group_id': 'INTEGER',
                 'group_order': 'INTEGER',
@@ -678,6 +696,7 @@ class ExamRepository:
                 query += """
                     AND (
                         LOWER(q.question_text) LIKE ?
+                        OR LOWER(COALESCE(q.model_answer, '')) LIKE ?
                         OR LOWER(q.tags) LIKE ?
                         OR EXISTS (
                             SELECT 1
@@ -687,7 +706,7 @@ class ExamRepository:
                         )
                     )
                 """
-                params.extend([like, like, like])
+                params.extend([like, like, like, like])
 
         if question_numbers:
             qnums = sorted({int(n) for n in question_numbers})
@@ -888,6 +907,283 @@ class ExamRepository:
             """)
             return [{'code': r[0], 'name_ko': r[1]} for r in cursor.fetchall()]
 
+    def get_manual_question_template(self) -> Dict[str, Any]:
+        """Return default values for a user-authored, non-imported question."""
+        self._ensure_initialized()
+        year = date.today().year
+        session = 1
+        return {
+            'year': year,
+            'session': session,
+            'question_number': self.next_manual_question_number(year, session),
+            'exam_code': MANUAL_EXAM_CODE,
+            'exam_name': MANUAL_EXAM_NAME,
+            'subject_code': MANUAL_SUBJECT_CODE,
+            'subject_name': MANUAL_SUBJECT_NAME,
+            'question_text': '',
+            'question_type': QUESTION_TYPE_MULTIPLE_CHOICE,
+            'model_answer': '',
+            'correct_answer': 1,
+            'answer_available': True,
+            'tags': MANUAL_TAG,
+            'choices': [],
+        }
+
+    def get_manual_descriptive_question_template(self) -> Dict[str, Any]:
+        """Return default values for a user-authored descriptive question."""
+        template = self.get_manual_question_template()
+        template.update({
+            'editor_title': '서술형 문제 추가',
+            'question_type': QUESTION_TYPE_DESCRIPTIVE,
+            'model_answer': '',
+            'correct_answer': 0,
+            'answer_available': False,
+            'tags': self._manual_tags(f"{template.get('tags') or ''} {DESCRIPTIVE_TAG}", QUESTION_TYPE_DESCRIPTIVE),
+            'choices': [],
+        })
+        return template
+
+    def get_manual_question_clone_template(self, question_id: int) -> Optional[Dict[str, Any]]:
+        """Return editable manual-question defaults copied from an existing question."""
+        source = self.get_question(question_id)
+        if not source:
+            return None
+
+        template = self.get_manual_question_template()
+        shared_passage = source.get('shared_passage') or source.get('group_shared_text')
+        question_text = source.get('question_text') or ''
+        question_format_json = source.get('question_format_json')
+        if shared_passage:
+            question_text = f"[공통지문]\n{shared_passage}\n\n{question_text}"
+            question_format_json = None
+
+        question_type = self._normalize_question_type(source)
+        answer_available = bool(source.get('answer_available', True))
+        choices = []
+        for choice in source.get('choices') or []:
+            try:
+                choice_number = int(choice.get('choice_number') or choice.get('number'))
+            except (TypeError, ValueError):
+                continue
+            if choice_number not in VALID_CHOICE_NUMBERS:
+                continue
+            choices.append({
+                'choice_number': choice_number,
+                'choice_symbol': choice.get('choice_symbol') or choice.get('symbol') or str(choice_number),
+                'choice_text': choice.get('choice_text') or choice.get('text') or '',
+                'choice_format_json': self._choice_format_json(choice),
+                'choice_image_path': self._choice_image_path(choice),
+            })
+
+        template.update({
+            'editor_title': '기존 문제 복제',
+            'question_text': question_text,
+            'question_format_json': question_format_json,
+            'question_type': question_type,
+            'model_answer': source.get('model_answer') or '',
+            'correct_answer': (
+                0
+                if question_type == QUESTION_TYPE_DESCRIPTIVE or not answer_available
+                else (source.get('correct_answer') or 1)
+            ),
+            'answer_available': (
+                False if question_type == QUESTION_TYPE_DESCRIPTIVE else answer_available
+            ),
+            'tags': self._manual_tags(
+                f"{source.get('tags') or ''} {CLONED_MANUAL_TAG}",
+                question_type,
+            ),
+            'explanation': source.get('explanation'),
+            'image_path': source.get('image_path'),
+            'choices': [] if question_type == QUESTION_TYPE_DESCRIPTIVE else choices,
+        })
+        return template
+
+    def get_manual_subject_options(self) -> List[Dict[str, str]]:
+        return [{'code': MANUAL_SUBJECT_CODE, 'name_ko': MANUAL_SUBJECT_NAME}]
+
+    def next_manual_question_number(self, year: int, session: int) -> int:
+        self._ensure_initialized()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COALESCE(MAX(q.question_number), 0) + 1
+                FROM questions q
+                JOIN exam_subjects es ON q.exam_subject_id = es.id
+                JOIN exams e ON es.exam_id = e.id
+                JOIN subjects s ON es.subject_id = s.id
+                WHERE e.code = ?
+                  AND s.code = ?
+                  AND q.year = ?
+                  AND q.session = ?
+            """, (MANUAL_EXAM_CODE, MANUAL_SUBJECT_CODE, int(year), int(session)))
+            return int(cursor.fetchone()[0] or 1)
+
+    def create_manual_question(self, data: Dict[str, Any]) -> Optional[int]:
+        """Insert a user-authored question under the manual question bucket."""
+        self._ensure_initialized()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                exam_subject_id = self._ensure_exam_subject(
+                    cursor,
+                    exam_code=data.get('exam_code') or MANUAL_EXAM_CODE,
+                    exam_name=data.get('exam_name') or MANUAL_EXAM_NAME,
+                    subject_code=data.get('subject_code') or MANUAL_SUBJECT_CODE,
+                    subject_name=data.get('subject_name') or MANUAL_SUBJECT_NAME,
+                )
+                question_type = self._normalize_question_type(data)
+                is_descriptive = question_type == QUESTION_TYPE_DESCRIPTIVE
+                tags = self._manual_tags(data.get('tags'), question_type)
+                image_path = data.get('image_path')
+                correct_answer = (
+                    0 if is_descriptive else int(data.get('correct_answer') or 0)
+                )
+                answer_available = (
+                    False
+                    if is_descriptive
+                    else bool(data.get('answer_available', correct_answer != 0))
+                )
+                if not is_descriptive:
+                    self._validate_answer_state(
+                        answer_available,
+                        correct_answer,
+                        list(data.get('choices') or []),
+                    )
+                cursor.execute("""
+                    INSERT INTO questions (
+                        exam_subject_id, year, session, question_number,
+                        question_text, question_format_json, explanation,
+                        question_type, model_answer,
+                        has_image, image_path, correct_answer, answer_available, tags
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    exam_subject_id,
+                    int(data.get('year') or date.today().year),
+                    int(data.get('session') or 1),
+                    int(data.get('question_number') or 1),
+                    str(data.get('question_text') or '').strip(),
+                    data.get('question_format_json'),
+                    data.get('explanation'),
+                    question_type,
+                    str(data.get('model_answer') or '').strip() or None,
+                    1 if image_path else 0,
+                    image_path,
+                    correct_answer,
+                    answer_available,
+                    tags,
+                ))
+                question_id = cursor.lastrowid
+                choice_rows = []
+                if not is_descriptive:
+                    for choice in data.get('choices', []):
+                        try:
+                            choice_number = int(choice.get('choice_number') or choice.get('number'))
+                        except (TypeError, ValueError):
+                            continue
+                        if choice_number not in VALID_CHOICE_NUMBERS:
+                            continue
+                        choice_rows.append((
+                            question_id,
+                            choice_number,
+                            choice.get('choice_symbol') or choice.get('symbol') or '',
+                            choice.get('choice_text') or choice.get('text') or '',
+                            self._choice_format_json(choice),
+                            self._choice_image_path(choice),
+                        ))
+                    cursor.executemany("""
+                        INSERT INTO question_choices (
+                            question_id, choice_number, choice_symbol, choice_text,
+                            choice_format_json, choice_image_path
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    """, choice_rows)
+                conn.commit()
+                return int(question_id)
+        except Exception as e:
+            logger.error("Failed to create manual question: %s", e)
+            return None
+
+    def _ensure_exam_subject(
+        self,
+        cursor: sqlite3.Cursor,
+        exam_code: str,
+        exam_name: str,
+        subject_code: str,
+        subject_name: str,
+    ) -> int:
+        cursor.execute(
+            "INSERT OR IGNORE INTO exams (code, name) VALUES (?, ?)",
+            (exam_code, exam_name),
+        )
+        cursor.execute(
+            "UPDATE exams SET name = ? WHERE code = ?",
+            (exam_name, exam_code),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO subjects (code, name_ko) VALUES (?, ?)",
+            (subject_code, subject_name),
+        )
+        cursor.execute(
+            "UPDATE subjects SET name_ko = ? WHERE code = ?",
+            (subject_name, subject_code),
+        )
+        cursor.execute("SELECT id FROM exams WHERE code = ?", (exam_code,))
+        exam_id = cursor.fetchone()[0]
+        cursor.execute("SELECT id FROM subjects WHERE code = ?", (subject_code,))
+        subject_id = cursor.fetchone()[0]
+        cursor.execute("""
+            SELECT id
+            FROM exam_subjects
+            WHERE exam_id = ? AND subject_id = ?
+        """, (exam_id, subject_id))
+        row = cursor.fetchone()
+        if row:
+            return int(row[0])
+
+        cursor.execute(
+            "SELECT COALESCE(MAX(display_order), 0) + 1 FROM exam_subjects WHERE exam_id = ?",
+            (exam_id,),
+        )
+        display_order = int(cursor.fetchone()[0] or 1)
+        cursor.execute("""
+            INSERT INTO exam_subjects (exam_id, subject_id, display_order, questions_count)
+            VALUES (?, ?, ?, ?)
+        """, (exam_id, subject_id, display_order, 25))
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _normalize_question_type(data: Any) -> str:
+        if isinstance(data, dict):
+            raw = data.get('question_type')
+        else:
+            raw = getattr(data, 'question_type', None)
+        value = str(raw or QUESTION_TYPE_MULTIPLE_CHOICE).strip().lower()
+        if value in {'descriptive', 'subjective', 'essay', 'written'}:
+            return QUESTION_TYPE_DESCRIPTIVE
+        return QUESTION_TYPE_MULTIPLE_CHOICE
+
+    @classmethod
+    def _is_descriptive(cls, data: Any) -> bool:
+        return cls._normalize_question_type(data) == QUESTION_TYPE_DESCRIPTIVE
+
+    @staticmethod
+    def _manual_tags(tags: Optional[str], question_type: str = QUESTION_TYPE_MULTIPLE_CHOICE) -> str:
+        raw = str(tags or '').strip()
+        tokens = [token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()]
+        normalized = {token.lower().lstrip("#") for token in tokens}
+        required_tags = [
+            MANUAL_TAG,
+            f"#{MANUAL_EXAM_NAME.replace(' ', '')}",
+            f"#{MANUAL_SUBJECT_NAME.replace(' ', '')}",
+        ]
+        for required_tag in required_tags:
+            if required_tag.lower().lstrip("#") not in normalized:
+                tokens.append(required_tag)
+                normalized.add(required_tag.lower().lstrip("#"))
+        if question_type == QUESTION_TYPE_DESCRIPTIVE and DESCRIPTIVE_TAG.lower().lstrip("#") not in normalized:
+            tokens.append(DESCRIPTIVE_TAG)
+        return ", ".join(tokens)
+
     def update_question(self, question_id: int, data: Dict) -> bool:
         """Update question data"""
         self._ensure_initialized()
@@ -895,8 +1191,10 @@ class ExamRepository:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT exam_subject_id, year, session, question_number, question_format_json,
-                           explanation, correct_answer, answer_available
+                    SELECT
+                        exam_subject_id, year, session, question_number,
+                        question_format_json, explanation, question_type, model_answer,
+                        correct_answer, answer_available
                     FROM questions
                     WHERE id = ?
                 """, (question_id,))
@@ -922,18 +1220,28 @@ class ExamRepository:
                 if not exam_subject_id:
                     exam_subject_id = current[0]
 
+                question_type = self._normalize_question_type({
+                    'question_type': data.get('question_type', current[6])
+                })
+                is_descriptive = question_type == QUESTION_TYPE_DESCRIPTIVE
                 has_image = 1 if data.get('image_path') else 0
-                answer_available = bool(data.get('answer_available', current[7]))
-                correct_answer = data.get('correct_answer', current[6])
-                if 'choices' in data:
-                    answer_choices = list(data.get('choices') or [])
+                if is_descriptive:
+                    answer_available = False
+                    correct_answer = 0
                 else:
-                    cursor.execute(
-                        "SELECT choice_number FROM question_choices WHERE question_id = ?",
-                        (question_id,),
+                    answer_available = bool(data.get('answer_available', current[9]))
+                    correct_answer = data.get('correct_answer', current[8])
+                    if 'choices' in data:
+                        answer_choices = list(data.get('choices') or [])
+                    else:
+                        cursor.execute(
+                            "SELECT choice_number FROM question_choices WHERE question_id = ?",
+                            (question_id,),
+                        )
+                        answer_choices = [{'choice_number': row[0]} for row in cursor.fetchall()]
+                    self._validate_answer_state(
+                        answer_available, correct_answer, answer_choices
                     )
-                    answer_choices = [{'choice_number': row[0]} for row in cursor.fetchall()]
-                self._validate_answer_state(answer_available, correct_answer, answer_choices)
                 cursor.execute("""
                     UPDATE questions 
                     SET
@@ -944,6 +1252,8 @@ class ExamRepository:
                         question_text = ?,
                         question_format_json = ?,
                         explanation = ?,
+                        question_type = ?,
+                        model_answer = ?,
                         correct_answer = ?,
                         answer_available = ?,
                         tags = ?,
@@ -958,6 +1268,8 @@ class ExamRepository:
                     data['question_text'],
                     data.get('question_format_json', current[4]),
                     data.get('explanation', current[5]),
+                    question_type,
+                    str(data.get('model_answer', current[7]) or '').strip() or None,
                     correct_answer,
                     answer_available,
                     data.get('tags', ''),
@@ -966,7 +1278,12 @@ class ExamRepository:
                     question_id
                 ))
 
-                if 'choices' in data:
+                if is_descriptive:
+                    cursor.execute(
+                        "DELETE FROM question_choices WHERE question_id = ?",
+                        (question_id,)
+                    )
+                elif 'choices' in data:
                     cursor.execute(
                         "DELETE FROM question_choices WHERE question_id = ?",
                         (question_id,)

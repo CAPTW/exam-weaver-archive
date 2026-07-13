@@ -68,9 +68,11 @@ CREATE TABLE IF NOT EXISTS questions (
     question_text TEXT NOT NULL,         -- 문제 본문
     question_format_json TEXT,           -- 문제 본문 서식 JSON
     explanation TEXT,                    -- 사용자가 직접 작성한 상세 해설
+    question_type TEXT NOT NULL DEFAULT 'multiple_choice', -- multiple_choice / descriptive
+    model_answer TEXT,                   -- 서술형 모범답안
     has_image BOOLEAN DEFAULT 0,         -- 이미지 포함 여부
     image_path TEXT,                     -- 이미지 경로
-    correct_answer INTEGER NOT NULL,     -- 1..N, -1 when every choice is officially correct
+    correct_answer INTEGER NOT NULL DEFAULT 0, -- 객관식 1..N, 전원 정답 -1, 서술형/정답 미제공 0
     answer_available BOOLEAN NOT NULL DEFAULT 1, -- 0 when the official source provides no answer
     source_page INTEGER,                 -- 원본 PDF 페이지
     tags TEXT,                           -- 태그 (comma separated)
