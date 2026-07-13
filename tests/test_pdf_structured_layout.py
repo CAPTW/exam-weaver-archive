@@ -1,5 +1,6 @@
 import io
 import re
+import time
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import fitz
 import pytest
 from PIL import Image, ImageDraw
 
+from src.parser import extractor as extractor_module
 from src.parser.extractor import PDFExtractor
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
 from src.parser.offline_exam import OfflineExamParser
@@ -218,6 +220,15 @@ def test_targeted_training_rows_requires_exact_first_and_tail_ocr(monkeypatch):
 
     assert restored.lines[0].words[1].text == "선내숙지 훈련"
     assert restored.lines[3].words[1].text.endswith("대응 훈련")
+
+
+def test_targeted_ocr_timeout_returns_without_waiting_for_hung_worker():
+    started = time.monotonic()
+
+    result = extractor_module._run_with_timeout(lambda: time.sleep(1), timeout_seconds=0.02)
+
+    assert result is None
+    assert time.monotonic() - started < 0.30
 
 
 def test_targeted_percentage_length_rows_prefer_clean_raw_percent_cells(monkeypatch):

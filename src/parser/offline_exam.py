@@ -1167,7 +1167,14 @@ class OfflineExamParser:
             choices.extend(segment)
         if len(choices) != 4 or any(not choice.strip() for choice in choices):
             return None
-        if choices[-1].lstrip().startswith("@"):
+        visual_at_marker = any(
+            record.words
+            and record.text.lstrip().startswith("@")
+            and str(record.words[0].text).strip().startswith("@")
+            and getattr(record.words[0], "visual_choice_marker", False)
+            for record in records[markers[-1][0]:]
+        )
+        if choices[-1].lstrip().startswith("@") and visual_at_marker:
             choices[-1] = choices[-1].lstrip()[1:].lstrip()
         return set(range(choice_start + 1, len(region))), choices
 

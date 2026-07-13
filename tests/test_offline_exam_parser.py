@@ -340,13 +340,30 @@ def test_proven_fourth_at_sign_is_removed_during_damaged_choice_recovery():
         _line(["첫째"], y=0.22, xs=[0.08]),
         _line(["둘째"], y=0.28, xs=[0.08]),
         _line(["㉭", "셋째"], y=0.34, xs=[0.05, 0.09]),
-        _line(["@", "넷째"], y=0.40, xs=[0.05, 0.09]),
+        _line(["@", "넷째"], y=0.40, xs=[0.05, 0.09], visual_indexes=(0,)),
     )
 
     question = OfflineExamParser().parse_pages([page])[0]
 
     assert question.choices == ["첫째", "둘째", "셋째", "넷째"]
     assert validate_offline_question(question).importable is True
+
+
+def test_unproven_fourth_at_sign_is_preserved_and_rejected():
+    page = _page(
+        _line(["10.", "옳지", "않은", "것은?"], y=0.12),
+        _line(["첫째"], y=0.22, xs=[0.08]),
+        _line(["둘째"], y=0.28, xs=[0.08]),
+        _line(["㉭", "셋째"], y=0.34, xs=[0.05, 0.09]),
+        _line(["@", "넷째"], y=0.40, xs=[0.05, 0.09]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["첫째", "둘째", "셋째", "@ 넷째"]
+    result = validate_offline_question(question)
+    assert result.importable is False
+    assert "contaminated_choice" in result.reason_codes
 
 
 def test_quality_gate_does_not_treat_slash_damaged_percentages_as_page_counters():

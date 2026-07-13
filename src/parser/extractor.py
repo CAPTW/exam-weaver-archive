@@ -10,8 +10,10 @@ import unicodedata
 import re
 import math
 import itertools
+import queue
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from dataclasses import dataclass, field, replace
 import pypdf
 import logging
@@ -37,6 +39,38 @@ _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:[?？]|고려하지\s*아니한다[.)])\s*$"
 )
 _VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭]\)?\s*")
+
+
+def _run_with_timeout(
+    worker: Callable[[], Any], *, timeout_seconds: float
+) -> Any | None:
+    """Run a best-effort worker without making its caller wait on shutdown.
+
+    Some WinRT OCR operations cannot be synchronously cancelled once entered.
+    A daemon thread keeps the parsing call bounded even when such an operation
+    never returns; successful results and ordinary exceptions are forwarded.
+    """
+    result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+    def run() -> None:
+        try:
+            result_queue.put_nowait((True, worker()))
+        except Exception as exc:
+            result_queue.put_nowait((False, exc))
+
+    thread = threading.Thread(
+        target=run,
+        name="exam-weaver-targeted-ocr",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        succeeded, value = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty:
+        return None
+    if not succeeded:
+        raise value
+    return value
 
 
 @dataclass
@@ -1899,7 +1933,6 @@ class PDFExtractor:
         try:
             import asyncio
             from collections import Counter
-            from concurrent.futures import ThreadPoolExecutor
             from PIL import Image, ImageEnhance, ImageOps
         except Exception:
             return None
@@ -1955,8 +1988,7 @@ class PDFExtractor:
             return asyncio.run(recognize())
 
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                values = executor.submit(worker).result(timeout=20)
+            values = _run_with_timeout(worker, timeout_seconds=20)
         except Exception:
             return None
         if not values:
