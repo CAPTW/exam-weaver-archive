@@ -39,7 +39,7 @@ _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:[?？]|고려하지\s*아니한다[.)]|"
     r"(?:것\s*은|것인가|무엇인가|있는가|거\s*은)\s*\d?)\s*$"
 )
-_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉩㉭年]\)?\s*")
+_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-59@①-⑤㉦㉨㉩㉭年]\)?\s*")
 _TARGETED_OCR_STATE_LOCK = threading.Lock()
 _TARGETED_OCR_ACTIVE_TOKEN: object | None = None
 _TARGETED_OCR_CIRCUIT_OPEN = False
@@ -2470,7 +2470,7 @@ class PDFExtractor:
         markerish = (
             set(_VISUAL_EXPLICIT_MARKERS)
             | set(_VISUAL_DAMAGED_MARKERS)
-            | {"@", "O", "0", "1", "2", "3", "4", "5"}
+            | {"@", "O", "0", "1", "2", "3", "4", "5", "9"}
         )
         trusted_markerish = (
             set(_VISUAL_EXPLICIT_MARKERS)
@@ -2681,7 +2681,13 @@ class PDFExtractor:
                     cls._visual_marker_ring_score(gray, marker_x + delta, lines[index].bbox),
                     marker_x + delta,
                 )
-                for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
+                for delta in (
+                    -0.012, -0.011, -0.010, -0.009, -0.008, -0.007,
+                    -0.006, -0.005, -0.004, -0.003, -0.002, -0.001,
+                    0.0,
+                    0.001, 0.002, 0.003, 0.004, 0.005, 0.006,
+                    0.007, 0.008, 0.009, 0.010, 0.011, 0.012,
+                )
             )
             if score[0] < 20 or score[1] < 120:
                 return None

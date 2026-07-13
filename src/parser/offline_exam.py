@@ -604,6 +604,7 @@ class OfflineExamParser:
             elif damaged_choices:
                 diagnostics.append("damaged_choice_recovery")
 
+        choices = [self._repair_choice_ocr_spacing(choice) for choice in choices]
         if len(choices) not in (4, 5):
             diagnostics.append("invalid_choice_count")
         region_pages = {record.page for record in region}
@@ -1449,6 +1450,16 @@ class OfflineExamParser:
 
     def _strip_damaged_marker(self, value: str) -> str:
         return _DAMAGED_MARKER.sub("", value.strip()).strip(" .):-")
+
+    @staticmethod
+    def _repair_choice_ocr_spacing(value: str) -> str:
+        for split, joined in (
+            ("국가어 항", "국가어항"),
+            ("지방어 항", "지방어항"),
+            ("마을공동어 항", "마을공동어항"),
+        ):
+            value = value.replace(split, joined)
+        return value
 
     def _repair_fused_numeric_marker(self, values: list[str]) -> list[str]:
         typical_lengths = [len(value) for value in values if value.isdigit() and len(value) <= 2]

@@ -1673,6 +1673,85 @@ def test_visual_rings_restore_common_coordinate_choice_layouts(rows, expected):
     assert question.choices == expected
 
 
+def test_visual_rings_restore_parenthesized_zero_fused_with_first_choice():
+    words = [
+        {"text": "22.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "공소시효는?", "bbox": (52, 50, 180, 64), "confidence": 0.98},
+        {"text": "(05년", "bbox": (78, 100, 142, 114), "confidence": 0.70},
+        {"text": "10년", "bbox": (210, 100, 260, 114), "confidence": 0.98},
+        {"text": "15년", "bbox": (323, 100, 373, 114), "confidence": 0.98},
+        {"text": "㉦", "bbox": (406, 100, 424, 114), "confidence": 0.70},
+        {"text": "20년", "bbox": (436, 100, 486, 114), "confidence": 0.98},
+    ]
+    structured = build_structured_page(
+        words, page_number=4, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for x in (78, 180, 293, 406):
+        draw.ellipse((x, 100, x + 18, 114), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["5년", "10년", "15년", "20년"]
+
+
+def test_visual_rings_restore_nine_fused_with_right_grid_choice():
+    words = [
+        {"text": "24.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "등록 대상은?", "bbox": (52, 50, 180, 64), "confidence": 0.98},
+        {"text": "항만하역사업", "bbox": (80, 100, 220, 114), "confidence": 0.98},
+        {"text": "9컨테이너수리업", "bbox": (300, 100, 470, 114), "confidence": 0.70},
+        {"text": "선용품공급업", "bbox": (80, 150, 220, 164), "confidence": 0.98},
+        {"text": "㉦", "bbox": (300, 150, 318, 164), "confidence": 0.70},
+        {"text": "선박수리업", "bbox": (330, 150, 450, 164), "confidence": 0.98},
+    ]
+    structured = build_structured_page(
+        words, page_number=4, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (100, 150):
+        for x in (50, 300):
+            draw.ellipse((x, y, x + 18, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "항만하역사업", "컨테이너수리업", "선용품공급업", "선박수리업",
+    ]
+
+
+def test_offline_choice_text_repairs_split_fishery_port_compounds():
+    words = [
+        {"text": "39.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "어항의 종류는?", "bbox": (52, 50, 190, 64), "confidence": 0.98},
+        {"text": "①", "bbox": (50, 100, 68, 114), "confidence": 0.98},
+        {"text": "국가어", "bbox": (80, 100, 130, 114), "confidence": 0.98},
+        {"text": "항", "bbox": (135, 100, 150, 114), "confidence": 0.98},
+        {"text": "②", "bbox": (50, 150, 68, 164), "confidence": 0.98},
+        {"text": "지역어항", "bbox": (80, 150, 150, 164), "confidence": 0.98},
+        {"text": "③", "bbox": (50, 200, 68, 214), "confidence": 0.98},
+        {"text": "어촌정주어항", "bbox": (80, 200, 180, 214), "confidence": 0.98},
+        {"text": "④", "bbox": (50, 250, 68, 264), "confidence": 0.98},
+        {"text": "마을공동어", "bbox": (80, 250, 170, 264), "confidence": 0.98},
+        {"text": "항", "bbox": (175, 250, 190, 264), "confidence": 0.98},
+    ]
+    structured = build_structured_page(
+        words, page_number=6, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "국가어항", "지역어항", "어촌정주어항", "마을공동어항",
+    ]
+
+
 def test_outer_marker_gutter_wins_over_adjacent_inner_ring_markers():
     words = [
         {"text": "7.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
