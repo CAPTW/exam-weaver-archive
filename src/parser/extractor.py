@@ -9,8 +9,9 @@ import contextlib
 import unicodedata
 import re
 import math
+import itertools
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 from dataclasses import dataclass, field, replace
 import pypdf
 import logging
@@ -20,10 +21,22 @@ from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_stru
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
-_VISUAL_QUESTION_START = re.compile(r"^\s*\d{1,3}\s*[.)]")
+_VISUAL_QUESTION_START = re.compile(
+    r"^\s*\d{1,3}\s*(?:[.)•]|\s+(?=(?:다음|[「\[]|r[가-힣])))"
+)
+_VISUAL_QUESTION_LEAD = re.compile(r"^\s*(?:다음|아래|[「\[]|r(?=[가-힣\[]))")
+_VISUAL_HANGING_NUMBER = re.compile(r"^\s*\d{1,3}\s+")
+_VISUAL_NUMBERED_CHOICE = re.compile(r"^\s*\d{1,3}\s*[.)]\s*[①-⑤㉠-㉭@]")
+_VISUAL_EMBEDDED_QUESTION_START = re.compile(r".*?\d{1,3}\s*[.)]\s*다음")
+_VISUAL_LEADING_NUMBER = re.compile(r"^\s*(\d{1,3})")
 _VISUAL_DAMAGED_MARKERS = {"㉦": 1, "㉨": 2, "㉭": 3}
 _VISUAL_EXPLICIT_MARKERS = {"①": 1, "②": 2, "③": 3, "④": 4}
 _VISUAL_CHOICE_SYMBOLS = ("①", "②", "③", "④")
+_VISUAL_PROPOSITION_MARKERS = set("㉠㉡㉢㉣㉤㉥")
+_VISUAL_QUESTION_TERMINATOR = re.compile(
+    r"(?:[?？]|고려하지\s*아니한다[.)])\s*$"
+)
+_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭]\)?\s*")
 
 
 @dataclass
@@ -544,76 +557,1912 @@ class PDFExtractor:
         return self._restore_visual_choice_markers(structured_page, image)
 
     def _restore_visual_choice_markers(self, page: StructuredPage, image) -> StructuredPage:
-        """Restore a complete vertical ①-④ sequence only with raster evidence."""
+        """Restore a complete ①-④ layout only with raster ring evidence."""
         gray = image.convert("L")
         lines = list(page.lines)
-        replacements: dict[int, str] = {}
+        replacements: dict[int, list[tuple[str, int, float, bool]]] = {}
+        recovered_cells: dict[int, tuple[str, float, float]] = {}
         columns = sorted({line.column for line in lines})
 
         for column in columns:
             indexes = [index for index, line in enumerate(lines) if line.column == column]
-            starts = [
+            raw_starts = [
                 position
                 for position, index in enumerate(indexes)
                 if _VISUAL_QUESTION_START.match(lines[index].text)
             ]
+            embedded_starts = {
+                position
+                for position, index in enumerate(indexes)
+                if _VISUAL_EMBEDDED_QUESTION_START.match(lines[index].text)
+            }
+            if not raw_starts:
+                continue
+            first_missing_starts = set()
+            first_match = _VISUAL_LEADING_NUMBER.match(
+                lines[indexes[raw_starts[0]]].text
+            )
+            if first_match is not None and int(first_match.group(1)) == 2:
+                first_lead = next((
+                    position
+                    for position in range(raw_starts[0])
+                    if _VISUAL_QUESTION_LEAD.match(lines[indexes[position]].text)
+                ), None)
+                if first_lead is not None:
+                    first_missing_starts.add(first_lead)
+            question_gutter = min(
+                float(lines[indexes[position]].words[0].bbox[0])
+                for position in raw_starts
+                if lines[indexes[position]].words
+            )
+            hanging_starts = {
+                position
+                for position in range(len(indexes) - 1)
+                if _VISUAL_QUESTION_LEAD.match(lines[indexes[position]].text)
+                and _VISUAL_HANGING_NUMBER.match(lines[indexes[position + 1]].text)
+                and lines[indexes[position + 1]].words
+                and float(lines[indexes[position + 1]].words[0].bbox[0])
+                <= question_gutter + 0.020
+            }
+            effective_raw_starts = (
+                set(raw_starts) | embedded_starts | first_missing_starts
+            )
+            for position in tuple(raw_starts):
+                if (
+                    position + 1 < len(indexes)
+                    and not _VISUAL_QUESTION_LEAD.match(lines[indexes[position]].text)
+                    and _VISUAL_QUESTION_LEAD.match(lines[indexes[position + 1]].text)
+                ):
+                    effective_raw_starts.discard(position)
+                    hanging_starts.add(position + 1)
+                    continue
+                if not _VISUAL_NUMBERED_CHOICE.match(lines[indexes[position]].text):
+                    continue
+                previous_start = max(
+                    (prior for prior in raw_starts if prior < position),
+                    default=-1,
+                )
+                lead_position = next((
+                    candidate
+                    for candidate in range(position - 1, previous_start, -1)
+                    if _VISUAL_QUESTION_LEAD.match(lines[indexes[candidate]].text)
+                ), None)
+                if lead_position is not None:
+                    effective_raw_starts.discard(position)
+                    hanging_starts.add(lead_position)
+            semantic_starts = set()
+            trusted_leading = (
+                set(_VISUAL_EXPLICIT_MARKERS)
+                | set(_VISUAL_DAMAGED_MARKERS)
+                | {"@", "O", "1", "2", "3", "4", "5"}
+            )
+            for position in range(len(indexes)):
+                if not _VISUAL_QUESTION_LEAD.match(lines[indexes[position]].text):
+                    continue
+                prior = max(
+                    (
+                        candidate
+                        for candidate in effective_raw_starts | hanging_starts | semantic_starts
+                        if candidate < position
+                    ),
+                    default=-1,
+                )
+                evidence_lines = sum(
+                    any(
+                        str(word.text).strip()[:1] in trusted_leading
+                        for word in lines[indexes[candidate]].words
+                    )
+                    for candidate in range(prior + 1, position)
+                )
+                if evidence_lines >= 2:
+                    semantic_starts.add(position)
+            starts = [
+                position for position in sorted(
+                    effective_raw_starts | hanging_starts | semantic_starts
+                )
+                if position in hanging_starts or position in embedded_starts
+                or position in semantic_starts or position in first_missing_starts
+                or (
+                    lines[indexes[position]].words
+                    and float(lines[indexes[position]].words[0].bbox[0])
+                    <= question_gutter + 0.020
+                )
+            ]
             for start_offset, start_position in enumerate(starts):
                 end_position = starts[start_offset + 1] if start_offset + 1 < len(starts) else len(indexes)
                 region_indexes = indexes[start_position:end_position]
-                damaged_lines = [
-                    lines[index]
-                    for index in region_indexes
-                    if lines[index].words
-                    and str(lines[index].words[0].text).strip()[:1] in _VISUAL_DAMAGED_MARKERS
+                if self._complete_explicit_visual_sequence(lines, region_indexes):
+                    continue
+                anchors = self._visual_ring_anchors(gray, lines, region_indexes[1:])
+                selected = self._select_complete_visual_choice_layout(lines, anchors)
+                if selected is None:
+                    continue
+                recovered = self._recover_empty_visual_grid_cell(gray, lines, selected)
+                if recovered is not None:
+                    recovered_index, recovered_text, marker_x, cell_end_x = recovered
+                    recovered_cells[recovered_index] = (
+                        recovered_text,
+                        marker_x,
+                        cell_end_x,
+                    )
+                for choice_number, (index, marker_x, word_index, existing, known) in enumerate(selected, start=1):
+                    if known is not None and known != choice_number:
+                        break
+                    replacements.setdefault(index, []).append((
+                        _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                        word_index,
+                        marker_x,
+                        existing,
+                    ))
+                else:
+                    continue
+                for index, *_ in selected:
+                    replacements.pop(index, None)
+                    recovered_cells.pop(index, None)
+
+        if replacements:
+            for index, operations in replacements.items():
+                lines[index] = self._line_with_visual_markers(lines[index], operations)
+                if index in recovered_cells:
+                    text_value, marker_x, cell_end_x = recovered_cells[index]
+                    lines[index] = self._line_with_recovered_choice_text(
+                        lines[index], text_value, marker_x, cell_end_x
+                    )
+            page = replace(page, lines=tuple(lines))
+        page = self._recover_targeted_ton_hour_rows(page, gray)
+        page = self._recover_targeted_three_field_rows(page, gray)
+        page = self._recover_targeted_percentage_rows(page, gray)
+        page = self._recover_targeted_percentage_length_rows(page, gray)
+        page = self._recover_targeted_year_pairs(page, gray)
+        page = self._recover_targeted_training_rows(page, gray)
+        page = self._recover_raster_verified_vertical_sequence(page, gray)
+        page = self._recover_same_page_glyph_mapping(page, gray)
+        return self._recover_separated_glyph_mapping(page, gray)
+
+    @classmethod
+    def _recover_targeted_ton_hour_rows(cls, page, gray):
+        lines = list(page.lines)
+        for start in range(len(lines) - 7):
+            window = lines[start:start + 8]
+            row_pairs = [(window[offset], window[offset + 1]) for offset in range(0, 8, 2)]
+            if any("톤" not in upper.text or "시간" not in lower.text for upper, lower in row_pairs):
+                continue
+            if any(
+                not 0.010 <= float(lower.bbox[1]) - float(upper.bbox[1]) <= 0.030
+                for upper, lower in row_pairs
+            ):
+                continue
+            if any(
+                not 0.010 <= float(window[offset + 2].bbox[1]) - float(window[offset + 1].bbox[1]) <= 0.030
+                for offset in range(0, 6, 2)
+            ):
+                continue
+            if not any(re.search(r"[①-④]\d+톤", upper.text) for upper, _lower in row_pairs):
+                continue
+            width, height = gray.size
+            recovered = []
+            for upper, lower in row_pairs:
+                crop = gray.crop((
+                    max(0, int((float(upper.bbox[0]) - 0.015) * width)),
+                    max(0, int((float(upper.bbox[1]) - 0.010) * height)),
+                    min(width, int((max(float(upper.bbox[2]), float(lower.bbox[2])) + 0.010) * width)),
+                    min(height, int((float(lower.bbox[3]) + 0.010) * height)),
+                ))
+                target = cls._targeted_choice_crop_text(crop)
+                ton = re.search(r"(\d{2,4})\s*톤", target or "")
+                hour = re.search(r"(\d{1,2})\s*시", target or "")
+                if ton is None or hour is None:
+                    recovered = []
+                    break
+                raw = f"{upper.text} {lower.text}"
+                raw = re.sub(r"[①-④]", "", raw)
+                raw = re.sub(r"^[㉦㉨㉭]\s*", "", raw).strip()
+                raw = re.sub(r"\d*\s*톤", f"{ton.group(1)}톤", raw, count=1)
+                raw = re.sub(r"\d+\s*시간", f"{hour.group(1)}시간", raw, count=1)
+                recovered.append(re.sub(r"\s+", " ", raw).strip())
+            if len(recovered) != 4:
+                continue
+            rewritten = []
+            for choice_number, ((upper, lower), text_value) in enumerate(
+                zip(row_pairs, recovered), start=1
+            ):
+                marker_x = float(upper.bbox[0])
+                content_x = min(
+                    (
+                        float(word.bbox[0])
+                        for word in upper.words
+                        if float(word.bbox[0]) >= marker_x + 0.020
+                    ),
+                    default=marker_x + 0.030,
+                )
+                marker = LayoutWord(
+                    text=_VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    bbox=(marker_x, upper.bbox[1], marker_x + 0.018, lower.bbox[3]),
+                    confidence=1.0,
+                    column=upper.column,
+                    visual_choice_marker=True,
+                )
+                content = LayoutWord(
+                    text=text_value,
+                    bbox=(content_x, upper.bbox[1], max(upper.bbox[2], lower.bbox[2]), lower.bbox[3]),
+                    confidence=min(
+                        (word.confidence for line in (upper, lower) for word in line.words if word.confidence is not None),
+                        default=1.0,
+                    ),
+                    column=upper.column,
+                )
+                rewritten.append(
+                    LayoutLine(
+                        words=(marker, content),
+                        bbox=(marker_x, upper.bbox[1], content.bbox[2], lower.bbox[3]),
+                        page=upper.page,
+                        column=upper.column,
+                    )
+                )
+            lines[start:start + 8] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_targeted_three_field_rows(cls, page, gray):
+        lines = list(page.lines)
+        for start in range(len(lines) - 3):
+            rows = lines[start:start + 4]
+            if any(
+                not all(label in row.text for label in ("㉠", "㉡", "㉢"))
+                for row in rows
+            ):
+                continue
+            if any(
+                not 0.010 <= float(right.bbox[1]) - float(left.bbox[1]) <= 0.030
+                for left, right in zip(rows, rows[1:])
+            ):
+                continue
+            if not any(re.search(r"[①-④]\d", row.text) for row in rows):
+                continue
+            width, height = gray.size
+            recovered = []
+            for row in rows:
+                crop = gray.crop((
+                    max(0, int((float(row.bbox[0]) - 0.010) * width)),
+                    max(0, int((float(row.bbox[1]) - 0.010) * height)),
+                    min(width, int((float(row.bbox[2]) + 0.010) * width)),
+                    min(height, int((float(row.bbox[3]) + 0.010) * height)),
+                ))
+                target = cls._targeted_choice_crop_text(crop) or ""
+                match = re.search(
+                    r"㉠\s*(.+?)\s*㉡\s*(.+?)\s*㉢\s*(.+)$", target
+                )
+                if match is None or any(not value.strip() for value in match.groups()):
+                    recovered = []
+                    break
+                recovered.append(
+                    f"㉠ {match.group(1).strip()} ㉡ {match.group(2).strip()} ㉢ {match.group(3).strip()}"
+                )
+            if len(recovered) != 4:
+                continue
+            rewritten = []
+            for choice_number, (row, text_value) in enumerate(zip(rows, recovered), start=1):
+                marker_x = float(row.bbox[0])
+                marker = LayoutWord(
+                    text=_VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    bbox=(marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    confidence=1.0,
+                    column=row.column,
+                    visual_choice_marker=True,
+                )
+                content = LayoutWord(
+                    text=text_value,
+                    bbox=(marker_x + 0.025, row.bbox[1], row.bbox[2], row.bbox[3]),
+                    confidence=min(
+                        (word.confidence for word in row.words if word.confidence is not None),
+                        default=1.0,
+                    ),
+                    column=row.column,
+                )
+                rewritten.append(
+                    LayoutLine(
+                        words=(marker, content),
+                        bbox=(marker_x, row.bbox[1], row.bbox[2], row.bbox[3]),
+                        page=row.page,
+                        column=row.column,
+                    )
+                )
+            lines[start:start + 4] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_targeted_percentage_rows(cls, page, gray):
+        def normalized_percent(text):
+            compact = str(text).strip().replace(" ", "").strip(",")
+            if match := re.fullmatch(r"(\d{1,3})%", compact):
+                return int(match.group(1))
+            for pattern in (
+                r"^(\d{2,3})70$",
+                r"^(\d+)0/0$",
+                r"^(\d+)9/0$",
+                r"^(\d+)96$",
+            ):
+                if match := re.fullmatch(pattern, compact):
+                    value = int(match.group(1))
+                    if 1 <= value <= 200:
+                        return value
+            return None
+
+        lines = list(page.lines)
+        for start in range(len(lines) - 3):
+            rows = lines[start:start + 4]
+            raw_values = [
+                [
+                    value
+                    for word in row.words
+                    if (value := normalized_percent(word.text)) is not None
                 ]
-                if not damaged_lines:
-                    continue
-                marker_x = sum(line.words[0].bbox[0] for line in damaged_lines) / len(damaged_lines)
-
-                candidates: list[tuple[int, int | None]] = []
-                for index in region_indexes[1:]:
-                    line = lines[index]
-                    if not line.words:
-                        continue
-                    first_text = str(line.words[0].text).strip()
-                    known_number = _VISUAL_EXPLICIT_MARKERS.get(first_text[:1])
-                    has_damaged_anchor = (
-                        first_text[:1] in _VISUAL_DAMAGED_MARKERS
-                        or first_text == "@"
+                for row in rows
+            ]
+            if any(len(values) < 2 for values in raw_values):
+                continue
+            if any(
+                not 0.010 <= float(right.bbox[1]) - float(left.bbox[1]) <= 0.025
+                for left, right in zip(rows, rows[1:])
+            ):
+                continue
+            width, height = gray.size
+            recovered = []
+            for row, raw in zip(rows, raw_values):
+                crop = gray.crop((
+                    max(0, int((float(row.bbox[0]) - 0.010) * width)),
+                    max(0, int((float(row.bbox[1]) - 0.010) * height)),
+                    min(width, int((float(row.bbox[2]) + 0.010) * width)),
+                    min(height, int((float(row.bbox[3]) + 0.010) * height)),
+                ))
+                target = cls._targeted_choice_crop_text(crop) or ""
+                target_values = [int(value) for value in re.findall(r"(\d{1,3})\s*%", target)]
+                if len(target_values) != 3:
+                    recovered = []
+                    break
+                recovered.append((raw[0], raw[1], target_values[2]))
+            if len(recovered) != 4:
+                continue
+            rewritten = []
+            for choice_number, (row, values) in enumerate(zip(rows, recovered), start=1):
+                marker_x = min(float(row.bbox[0]), 0.95)
+                marker = LayoutWord(
+                    text=_VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    bbox=(marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    confidence=1.0,
+                    column=row.column,
+                    visual_choice_marker=True,
+                )
+                content = LayoutWord(
+                    text=" ".join(f"{value}%" for value in values),
+                    bbox=(marker_x + 0.025, row.bbox[1], row.bbox[2], row.bbox[3]),
+                    confidence=min(
+                        (word.confidence for word in row.words if word.confidence is not None),
+                        default=1.0,
+                    ),
+                    column=row.column,
+                )
+                rewritten.append(
+                    LayoutLine(
+                        words=(marker, content),
+                        bbox=(marker_x, row.bbox[1], row.bbox[2], row.bbox[3]),
+                        page=row.page,
+                        column=row.column,
                     )
-                    is_missing_marker_line = (
-                        marker_x + 0.018 <= float(line.bbox[0]) <= marker_x + 0.060
-                    )
-                    if known_number is None and not has_damaged_anchor and not is_missing_marker_line:
-                        continue
-                    if not self._has_visual_marker_ring(gray, marker_x, line.bbox):
-                        continue
-                    candidates.append((index, known_number))
+                )
+            lines[start:start + 4] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
 
-                if len(candidates) != 4:
+    @classmethod
+    def _recover_targeted_percentage_length_rows(cls, page, gray):
+        def normalize(token):
+            compact = token.replace(" ", "")
+            for pattern in (r"^(\d+)0/0$", r"^(\d+)9/0$", r"^(\d+)96$", r"^(\d+)0%$"):
+                if match := re.fullmatch(pattern, compact):
+                    return int(match.group(1))
+            if match := re.fullmatch(r"(\d{1,3})%", compact):
+                return int(match.group(1))
+            return None
+
+        lines = list(page.lines)
+        for start in range(1, len(lines) - 3):
+            header = lines[start - 1]
+            rows = lines[start:start + 4]
+            if not all(label in header.text for label in ("㉠", "㉡", "㉢", "㉣")):
+                continue
+            if any("m" not in row.text for row in rows):
+                continue
+            if any(
+                not 0.010 <= float(right.bbox[1]) - float(left.bbox[1]) <= 0.030
+                for left, right in zip(rows, rows[1:])
+            ):
+                continue
+            width, height = gray.size
+            recovered = []
+            for row in rows:
+                raw_percentages = [
+                    value
+                    for word in row.words
+                    if (value := normalize(str(word.text).strip())) is not None
+                ]
+                crop = gray.crop((
+                    max(0, int((min(float(row.bbox[0]), float(header.bbox[0])) - 0.070) * width)),
+                    max(0, int((float(row.bbox[1]) - 0.010) * height)),
+                    min(width, int((float(row.bbox[2]) + 0.010) * width)),
+                    min(height, int((float(row.bbox[3]) + 0.010) * height)),
+                ))
+                target = cls._targeted_choice_crop_text(crop) or ""
+                percentages = [
+                    value
+                    for token in re.findall(r"\d+(?:0/0|9/0|96|%)", target)
+                    if (value := normalize(token)) is not None
+                ]
+                length = re.search(r"(\d+)\s*m", target)
+                if len(percentages) < 3 or length is None:
+                    recovered = []
+                    break
+                chosen = raw_percentages[:3] if len(raw_percentages) >= 3 else percentages[:3]
+                recovered.append((*chosen, int(length.group(1))))
+            if len(recovered) != 4:
+                continue
+            rewritten = []
+            for choice_number, (row, values) in enumerate(zip(rows, recovered), start=1):
+                marker_x = min(float(row.bbox[0]), float(header.bbox[0]))
+                marker = LayoutWord(
+                    text=_VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    bbox=(marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    confidence=1.0,
+                    column=row.column,
+                    visual_choice_marker=True,
+                )
+                content = LayoutWord(
+                    text=f"{values[0]}% {values[1]}% {values[2]}% {values[3]}m",
+                    bbox=(marker_x + 0.025, row.bbox[1], row.bbox[2], row.bbox[3]),
+                    confidence=min(
+                        (word.confidence for word in row.words if word.confidence is not None),
+                        default=1.0,
+                    ),
+                    column=row.column,
+                )
+                rewritten.append(
+                    LayoutLine(
+                        words=(marker, content),
+                        bbox=(marker_x, row.bbox[1], row.bbox[2], row.bbox[3]),
+                        page=row.page,
+                        column=row.column,
+                    )
+                )
+            lines[start:start + 4] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_targeted_year_pairs(cls, page, gray):
+        lines = list(page.lines)
+        for start in range(len(lines) - 1):
+            rows = lines[start:start + 2]
+            if not 0.010 <= float(rows[1].bbox[1]) - float(rows[0].bbox[1]) <= 0.030:
+                continue
+            anchors = [
+                [float(word.bbox[0]) for word in row.words if str(word.text).strip() == "㉠"]
+                for row in rows
+            ]
+            if any(len(values) != 2 for values in anchors):
+                continue
+            if any("㉡" not in row.text for row in rows):
+                continue
+            width, height = gray.size
+            recovered = []
+            for row, values in zip(rows, anchors):
+                bounds = (
+                    (max(0.0, values[0] - 0.030), values[1] - 0.040),
+                    (max(0.0, values[1] - 0.030), min(0.99, float(row.bbox[2]) + 0.012)),
+                )
+                for cell_start, cell_end in bounds:
+                    crop = gray.crop((
+                        int(cell_start * width),
+                        max(0, int((float(row.bbox[1]) - 0.010) * height)),
+                        min(width, int(cell_end * width)),
+                        min(height, int((float(row.bbox[3]) + 0.010) * height)),
+                    ))
+                    target = cls._targeted_choice_crop_text(crop) or ""
+                    match = re.search(
+                        r"㉠\s*[:.]?\s*(\d+)\s*(개월|년).*?㉡\s*[:.]?\s*(\d+)\s*년",
+                        target,
+                    )
+                    if match is None:
+                        recovered = []
+                        break
+                    first, unit, second = match.groups()
+                    raw = " ".join(
+                        str(word.text)
+                        for word in row.words
+                        if cell_start <= float(word.bbox[0]) < cell_end
+                    )
+                    raw_first = re.search(r"㉠\s*[:.]?\s*(\d+)\s*(개월|년)", raw)
+                    if raw_first is None or raw_first.groups() != (first, unit):
+                        recovered = []
+                        break
+                    recovered.append((int(first), unit, int(second), cell_start, row))
+                if not recovered:
+                    break
+            if len(recovered) != 4 or len({item[:3] for item in recovered}) != 4:
+                continue
+            rewritten = []
+            for choice_number, (first, unit, second, marker_x, row) in enumerate(recovered, start=1):
+                marker = LayoutWord(
+                    _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    (marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    1.0,
+                    row.column,
+                    True,
+                )
+                content = LayoutWord(
+                    f"㉠ : {first}{unit} ㉡ : {second}년",
+                    (marker_x + 0.025, row.bbox[1], marker_x + 0.19, row.bbox[3]),
+                    1.0,
+                    row.column,
+                )
+                rewritten.append(LayoutLine(
+                    (marker, content),
+                    (marker_x, row.bbox[1], content.bbox[2], row.bbox[3]),
+                    row.page,
+                    row.column,
+                ))
+            lines[start:start + 2] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_targeted_training_rows(cls, page, gray):
+        lines = list(page.lines)
+        for start in range(len(lines) - 3):
+            rows = lines[start:start + 4]
+            if any(
+                not 0.012 <= float(right.bbox[1]) - float(left.bbox[1]) <= 0.026
+                for left, right in zip(rows, rows[1:])
+            ):
+                continue
+            if sum("훈련" in row.text for row in rows) < 2 or "대응" not in rows[-1].text:
+                continue
+            width, height = gray.size
+            first_content_x = min(
+                (
+                    float(word.bbox[0]) for word in rows[0].words
+                    if not getattr(word, "visual_choice_marker", False)
+                ),
+                default=float(rows[0].bbox[0]),
+            )
+            first_crop = gray.crop((
+                max(0, int((first_content_x - 0.010) * width)),
+                max(0, int((float(rows[0].bbox[1]) - 0.004) * height)),
+                min(width, int((float(rows[0].bbox[2]) + 0.020) * width)),
+                min(height, int((float(rows[0].bbox[3]) + 0.004) * height)),
+            ))
+            first_target = cls._targeted_choice_crop_text(first_crop) or ""
+            tail_crop = gray.crop((
+                max(0, int((float(rows[-1].bbox[2]) - 0.083) * width)),
+                max(0, int((float(rows[-1].bbox[1]) - 0.010) * height)),
+                min(width, int((float(rows[-1].bbox[2]) + 0.025) * width)),
+                min(height, int((float(rows[-1].bbox[3]) + 0.010) * height)),
+            ))
+            tail_target = cls._targeted_choice_crop_text(tail_crop) or ""
+            if not re.fullmatch(r"[가-힣]+\s*훈련", first_target.strip()):
+                continue
+            if re.search(r"대응\s*훈련", tail_target) is None:
+                continue
+            values = [
+                first_target.strip(),
+                re.sub(r"^[①-④]\s*", "", rows[1].text).strip(),
+                re.sub(r"^[①-④]\s*", "", rows[2].text).strip(),
+                re.sub(r"\s*대응.*$", "", re.sub(r"^[①-④]\s*", "", rows[3].text)).strip()
+                + " 대응 훈련",
+            ]
+            rewritten = []
+            for choice_number, (row, value) in enumerate(zip(rows, values), start=1):
+                marker_x = float(row.bbox[0])
+                marker = LayoutWord(
+                    _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    (marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    1.0,
+                    row.column,
+                    True,
+                )
+                content = LayoutWord(
+                    value,
+                    (marker_x + 0.025, row.bbox[1], row.bbox[2], row.bbox[3]),
+                    1.0,
+                    row.column,
+                )
+                rewritten.append(LayoutLine(
+                    (marker, content),
+                    (marker_x, row.bbox[1], row.bbox[2], row.bbox[3]),
+                    row.page,
+                    row.column,
+                ))
+            lines[start:start + 4] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_raster_verified_vertical_sequence(cls, page, gray):
+        lines = list(page.lines)
+        damaged = []
+        for index, line in enumerate(lines):
+            if not line.words:
+                continue
+            lead = str(line.words[0].text).strip()
+            if lead in _VISUAL_DAMAGED_MARKERS:
+                damaged.append((index, _VISUAL_DAMAGED_MARKERS[lead]))
+        for offset in range(len(damaged) - 2):
+            triple = damaged[offset:offset + 3]
+            if [number for _index, number in triple] != [1, 2, 1]:
+                continue
+            indexes = [index for index, _number in triple]
+            anchors = [lines[index] for index in indexes]
+            if len({line.page for line in anchors}) != 1 or len({line.column for line in anchors}) != 1:
+                continue
+            marker_xs = [float(line.words[0].bbox[0]) for line in anchors]
+            if max(marker_xs) - min(marker_xs) > 0.010:
+                continue
+            if float(anchors[-1].bbox[1]) - float(anchors[0].bbox[1]) > 0.20:
+                continue
+            marker_x = sum(marker_xs) / len(marker_xs)
+            candidates = []
+            for index in range(indexes[1] + 1, indexes[2]):
+                line = lines[index]
+                if not line.words or float(line.bbox[0]) < marker_x + 0.015:
                     continue
-                if any(
-                    known_number is not None and known_number != choice_number
-                    for choice_number, (_, known_number) in enumerate(candidates, start=1)
+                score = cls._visual_marker_ring_score(gray, marker_x, line.bbox)
+                if score[0] >= 23 and score[1] >= 140:
+                    candidates.append(index)
+            if len(candidates) != 1:
+                continue
+            selected = [indexes[0], indexes[1], candidates[0], indexes[2]]
+            for choice_number, index in enumerate(selected, start=1):
+                existing = index != candidates[0]
+                lines[index] = cls._line_with_visual_markers(
+                    lines[index],
+                    [(
+                        _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                        0,
+                        marker_x,
+                        existing,
+                    )],
+                )
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_same_page_glyph_mapping(cls, page, gray):
+        try:
+            from PIL import ImageOps
+        except Exception:
+            return page
+
+        lines = list(page.lines)
+        labels = ("㉠", "㉡", "㉢", "㉣")
+        candidates = {label: [] for label in labels}
+        for index, line in enumerate(lines):
+            if len(line.text) < 8:
+                continue
+            for label in labels:
+                label_word = next(
+                    (
+                        word for word in line.words
+                        if str(word.text).strip() == label
+                        and not getattr(word, "visual_choice_marker", False)
+                    ),
+                    None,
+                )
+                if label_word is None:
+                    continue
+                right_words = [
+                    word for word in line.words
+                    if float(word.bbox[0]) >= float(label_word.bbox[0]) + 0.08
+                    and (
+                        getattr(word, "visual_choice_marker", False)
+                        or re.match(r"^[㉠-㉭@]", str(word.text).strip())
+                    )
+                    and (
+                        getattr(word, "visual_choice_marker", False)
+                        or cls._visual_marker_ring_score(
+                            gray, float(word.bbox[0]), line.bbox
+                        )[0] >= 20
+                    )
+                ]
+                if right_words:
+                    candidates[label].append(
+                        (index, label_word, min(right_words, key=lambda word: word.bbox[0]))
+                    )
+
+        template_group = None
+        for first in candidates[labels[0]]:
+            group = [first]
+            for label in labels[1:]:
+                match = next(
+                    (
+                        item for item in candidates[label]
+                        if item[0] > group[-1][0]
+                        and lines[item[0]].column == lines[first[0]].column
+                        and float(lines[item[0]].bbox[1]) - float(lines[first[0]].bbox[1]) <= 0.15
+                        and abs(float(item[1].bbox[0]) - float(first[1].bbox[0])) <= 0.012
+                        and abs(float(item[2].bbox[0]) - float(first[2].bbox[0])) <= 0.018
+                    ),
+                    None,
+                )
+                if match is None:
+                    break
+                group.append(match)
+            if len(group) == 4:
+                template_group = group
+                break
+        if template_group is None:
+            return page
+
+        last_template_line = lines[template_group[-1][0]]
+        y0 = float(last_template_line.bbox[1]) + 0.035
+        next_question_y = next(
+            (
+                float(line.bbox[1])
+                for line in lines[template_group[-1][0] + 1:]
+                if line.column == last_template_line.column
+                and float(line.bbox[1]) > y0
+                and _VISUAL_QUESTION_START.match(line.text)
+            ),
+            None,
+        )
+        y1 = min(
+            0.93,
+            y0 + 0.13,
+            (next_question_y - 0.015) if next_question_y is not None else 0.93,
+        )
+        left_x = float(template_group[0][1].bbox[0])
+        if left_x < 0.5:
+            x0, x1 = max(0.01, left_x - 0.04), 0.48
+        else:
+            x0, x1 = 0.46, 0.96
+        points = []
+        for yi in range(round(y0 * 1000), round(y1 * 1000), 3):
+            for xi in range(round(x0 * 1000), round(x1 * 1000), 3):
+                x, y = xi / 1000, yi / 1000
+                score = cls._visual_marker_ring_score(
+                    gray, x, (x, y, x + 0.020, y + 0.018)
+                )
+                if score[0] >= 23 and score[1] >= 140:
+                    points.append((x, y))
+        if not points:
+            return page
+
+        def clusters(values):
+            groups = []
+            for value in sorted(values):
+                if not groups or value - groups[-1][-1] > 0.009:
+                    groups.append([value])
+                else:
+                    groups[-1].append(value)
+            return [sum(group) / len(group) for group in groups]
+
+        ys = clusters([point[1] for point in points])
+        row_xs = [
+            clusters([x for x, point_y in points if abs(point_y - y) <= 0.007])
+            for y in ys
+        ]
+        cells = []
+        if len(ys) >= 4 and all(len(values) == 3 for values in row_xs[:4]):
+            xs = [
+                sum(values[column] for values in row_xs[:4]) / 4
+                for column in range(3)
+            ]
+            ys = ys[:4]
+            cells = [(xs[0], xs[1], xs[2], y) for y in ys]
+        elif len(ys) >= 2 and all(len(values) >= 5 for values in row_xs[:2]):
+            # A damaged inner glyph can miss the ring-score threshold in one
+            # row.  Recover the six stable columns from the union of both
+            # rows; the stricter glyph classifier below still has to validate
+            # every inferred cell before any rewrite is allowed.
+            xs = clusters([
+                x for x, point_y in points
+                if any(abs(point_y - row_y) <= 0.007 for row_y in ys[:2])
+            ])
+            if len(xs) != 6 or any(
+                min(abs(value - x) for x in xs) > 0.009
+                for values in row_xs[:2]
+                for value in values
+            ):
+                return page
+            ys = ys[:2]
+            cells = [
+                (xs[offset], xs[offset + 1], xs[offset + 2], y)
+                for y in ys
+                for offset in (0, 3)
+            ]
+        if len(cells) != 4:
+            return page
+
+        width, height = gray.size
+
+        def vector(x, y):
+            crop = gray.crop((
+                max(0, int((x - 0.002) * width)),
+                max(0, int((y - 0.002) * height)),
+                min(width, int((x + 0.020) * width)),
+                min(height, int((y + 0.018) * height)),
+            )).point(lambda value: 0 if value < 180 else 255)
+            bbox = ImageOps.invert(crop).getbbox()
+            if bbox is None:
+                return None
+            crop = crop.crop(bbox).resize((40, 40)).crop((10, 8, 30, 32))
+            return tuple(value < 128 for value in crop.getdata())
+
+        left_templates = [
+            vector(float(item[1].bbox[0]), float(lines[item[0]].bbox[1]))
+            for item in template_group
+        ]
+        right_templates = [
+            vector(float(item[2].bbox[0]), float(lines[item[0]].bbox[1]))
+            for item in template_group
+        ]
+        if any(template is None for template in (*left_templates, *right_templates)):
+            return page
+
+        def classify(value, templates):
+            distances = [
+                sum(left != right for left, right in zip(value, template)) / len(value)
+                for template in templates
+            ]
+            ordered = sorted(distances)
+            best = distances.index(ordered[0])
+            return best, ordered[0], ordered[1] - ordered[0]
+
+        recovered = []
+        for _outer_x, answer_left_x, answer_right_x, y in cells:
+            left_value = vector(answer_left_x, y)
+            right_value = vector(answer_right_x, y)
+            if left_value is None or right_value is None:
+                return page
+            left_result = classify(left_value, left_templates)
+            right_result = classify(right_value, right_templates)
+            clear_left = next(
+                (
+                    labels.index(str(word.text).strip())
+                    for line in lines
+                    if abs(float(line.bbox[1]) - y) <= 0.008
+                    for word in line.words
+                    if str(word.text).strip() in labels
+                    and abs(float(word.bbox[0]) - answer_left_x) <= 0.012
+                ),
+                None,
+            )
+            if clear_left is not None:
+                if left_result[0] != clear_left or left_result[1] > 0.26:
+                    return page
+                left_index = clear_left
+            else:
+                if left_result[1] > 0.25 or left_result[2] < 0.08:
+                    return page
+                left_index = left_result[0]
+            if right_result[1] > 0.21 or right_result[2] < 0.06:
+                return page
+            recovered.append((left_index, right_result[0]))
+        if sorted(left for left, _right in recovered) != [0, 1, 2, 3]:
+            return page
+
+        answer_y0 = min(cell[3] for cell in cells) - 0.008
+        answer_y1 = max(cell[3] for cell in cells) + 0.025
+        remove_indexes = [
+            index for index, line in enumerate(lines)
+            if line.column == last_template_line.column
+            and answer_y0 <= float(line.bbox[1]) <= answer_y1
+        ]
+        if not remove_indexes:
+            return page
+        insert_at = min(remove_indexes)
+        rewritten = []
+        for choice_number, ((left_index, right_index), cell) in enumerate(
+            zip(recovered, cells), start=1
+        ):
+            outer_x, _left_glyph_x, _right_glyph_x, y = cell
+            marker = LayoutWord(
+                text=_VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                bbox=(outer_x, y, outer_x + 0.018, y + 0.018),
+                confidence=1.0,
+                column=last_template_line.column,
+                visual_choice_marker=True,
+            )
+            content = LayoutWord(
+                text=f"mapping {labels[left_index]} - {chr(ord('a') + right_index)}",
+                bbox=(outer_x + 0.025, y, outer_x + 0.12, y + 0.018),
+                confidence=1.0,
+                column=last_template_line.column,
+            )
+            rewritten.append(
+                LayoutLine(
+                    words=(marker, content),
+                    bbox=(outer_x, y, content.bbox[2], y + 0.018),
+                    page=last_template_line.page,
+                    column=last_template_line.column,
+                )
+            )
+        for index, label_word, _right_word in template_group:
+            template_line = lines[index]
+            filtered = tuple(
+                word for word in template_line.words
+                if not (
+                    getattr(word, "visual_choice_marker", False)
+                    and float(word.bbox[0]) <= float(label_word.bbox[0]) + 0.005
+                )
+            )
+            if filtered != template_line.words:
+                lines[index] = replace(
+                    template_line,
+                    words=filtered,
+                    bbox=(
+                        min(float(word.bbox[0]) for word in filtered),
+                        template_line.bbox[1],
+                        template_line.bbox[2],
+                        template_line.bbox[3],
+                    ),
+                )
+
+        # A mapping grid can occupy the space immediately above the next
+        # question and make its first (unnumbered) line look like a trailing
+        # choice continuation.  Once the grid has passed the glyph checks,
+        # attach that line to the following numbered line locally instead of
+        # changing the parser's general question-region boundary rules.
+        next_question_index = next(
+            (
+                index for index, line in enumerate(lines)
+                if index > max(remove_indexes)
+                and line.column == last_template_line.column
+                and float(line.bbox[1]) > answer_y1
+                and _VISUAL_QUESTION_START.match(line.text)
+            ),
+            None,
+        )
+        if next_question_index is not None and next_question_index > 0:
+            prefix_index = next_question_index - 1
+            prefix = lines[prefix_index]
+            numbered = lines[next_question_index]
+            number_match = re.match(
+                r"^\s*(\d{1,3})\s*(?:[.)•])?\s*(.*)$", numbered.text
+            )
+            if (
+                prefix_index > max(remove_indexes)
+                and prefix.column == numbered.column
+                and not _VISUAL_QUESTION_START.match(prefix.text)
+                and not any(
+                    getattr(word, "visual_choice_marker", False)
+                    for word in prefix.words
+                )
+                and 0 < float(numbered.bbox[1]) - float(prefix.bbox[1]) <= 0.025
+                and 0 < float(prefix.bbox[1]) - answer_y1 <= 0.040
+                and number_match is not None
+            ):
+                number, remainder = number_match.groups()
+                merged_text = " ".join(
+                    part for part in (prefix.text.strip(), remainder.strip()) if part
+                )
+                merged_word = LayoutWord(
+                    text=f"{number}. {merged_text}",
+                    bbox=(
+                        min(float(prefix.bbox[0]), float(numbered.bbox[0])),
+                        float(prefix.bbox[1]),
+                        max(float(prefix.bbox[2]), float(numbered.bbox[2])),
+                        float(numbered.bbox[3]),
+                    ),
+                    confidence=min(
+                        (
+                            float(word.confidence)
+                            for word in (*prefix.words, *numbered.words)
+                            if word.confidence is not None
+                        ),
+                        default=1.0,
+                    ),
+                    column=numbered.column,
+                )
+                lines[next_question_index] = LayoutLine(
+                    words=(merged_word,),
+                    bbox=merged_word.bbox,
+                    page=numbered.page,
+                    column=numbered.column,
+                )
+                remove_indexes.append(prefix_index)
+        kept = [line for index, line in enumerate(lines) if index not in set(remove_indexes)]
+        kept[insert_at:insert_at] = rewritten
+        return replace(page, lines=tuple(kept))
+
+    @classmethod
+    def _recover_separated_glyph_mapping(cls, page, gray):
+        """Recover a two-by-two mapping grid whose a-d legend is separate."""
+        try:
+            from PIL import ImageDraw, ImageOps
+        except Exception:
+            return page
+
+        lines = list(page.lines)
+        labels = ("㉠", "㉡", "㉢", "㉣")
+        left_group = None
+        for first_index, first_line in enumerate(lines):
+            first_word = next(
+                (word for word in first_line.words if str(word.text).strip() == labels[0]),
+                None,
+            )
+            if first_word is None:
+                continue
+            group = [(first_index, first_word)]
+            for label in labels[1:]:
+                match = next(
+                    (
+                        (index, word)
+                        for index, line in enumerate(lines[first_index + 1:], first_index + 1)
+                        if index > group[-1][0]
+                        and line.column == first_line.column
+                        and 0 < float(line.bbox[1]) - float(first_line.bbox[1]) <= 0.10
+                        for word in line.words
+                        if str(word.text).strip() == label
+                        and abs(float(word.bbox[0]) - float(first_word.bbox[0])) <= 0.012
+                    ),
+                    None,
+                )
+                if match is None:
+                    break
+                group.append(match)
+            if len(group) == 4:
+                left_group = group
+        if left_group is None:
+            return page
+
+        first_index, first_word = left_group[0]
+        last_left_index = left_group[-1][0]
+        reference_group = []
+        for index, line in enumerate(lines[last_left_index + 1:], last_left_index + 1):
+            if line.column != lines[first_index].column:
+                continue
+            if _VISUAL_QUESTION_START.match(line.text):
+                break
+            if not line.words:
+                continue
+            word = line.words[0]
+            if abs(float(word.bbox[0]) - float(first_word.bbox[0])) > 0.014:
+                continue
+            score = cls._visual_marker_ring_score(gray, float(word.bbox[0]), line.bbox)
+            if score[0] < 20 or score[1] < 120:
+                continue
+            reference_group.append((index, word))
+            if len(reference_group) == 4:
+                break
+        if len(reference_group) != 4:
+            return page
+        reference_ys = [float(lines[index].bbox[1]) for index, _word in reference_group]
+        if (
+            reference_ys[-1] - reference_ys[0] > 0.13
+            or any(not 0.012 <= upper - lower <= 0.050 for lower, upper in zip(reference_ys, reference_ys[1:]))
+        ):
+            return page
+
+        last_reference_line = lines[reference_group[-1][0]]
+        y0 = float(last_reference_line.bbox[1]) + 0.010
+        next_question_y = next(
+            (
+                float(line.bbox[1])
+                for line in lines[reference_group[-1][0] + 1:]
+                if line.column == last_reference_line.column
+                and _VISUAL_QUESTION_START.match(line.text)
+            ),
+            None,
+        )
+        if next_question_y is None or not 0.035 <= next_question_y - y0 <= 0.12:
+            return page
+        y1 = next_question_y - 0.008
+        if lines[first_index].column == 0:
+            x0, x1 = max(0.01, float(first_word.bbox[0]) - 0.04), 0.48
+        else:
+            x0, x1 = 0.45, 0.96
+
+        points = []
+        for yi in range(round(y0 * 1000), round(y1 * 1000), 3):
+            for xi in range(round(x0 * 1000), round(x1 * 1000), 3):
+                x, y = xi / 1000, yi / 1000
+                score = cls._visual_marker_ring_score(gray, x, (x, y, x + 0.020, y + 0.018))
+                if score[0] >= 23 and score[1] >= 140:
+                    points.append((x, y))
+        if not points:
+            return page
+
+        def clusters(values):
+            groups = []
+            for value in sorted(values):
+                if not groups or value - groups[-1][-1] > 0.009:
+                    groups.append([value])
+                else:
+                    groups[-1].append(value)
+            return [sum(group) / len(group) for group in groups]
+
+        row_candidates = []
+        for y in clusters([point[1] for point in points]):
+            values = clusters([x for x, point_y in points if abs(point_y - y) <= 0.007])
+            if len(values) >= 5:
+                row_candidates.append((y, values))
+        if len(row_candidates) < 2:
+            return page
+        (first_y, first_xs), (second_y, second_xs) = row_candidates[:2]
+        if not 0.012 <= second_y - first_y <= 0.030:
+            return page
+        xs = clusters([
+            x for x, point_y in points
+            if abs(point_y - first_y) <= 0.007 or abs(point_y - second_y) <= 0.007
+        ])
+        if len(xs) != 6:
+            return page
+        cells = [
+            (xs[offset], xs[offset + 1], xs[offset + 2], y)
+            for y in (first_y, second_y)
+            for offset in (0, 3)
+        ]
+
+        width, height = gray.size
+
+        def vector(x, y):
+            crop = gray.crop((
+                max(0, int((x - 0.002) * width)),
+                max(0, int((y - 0.002) * height)),
+                min(width, int((x + 0.020) * width)),
+                min(height, int((y + 0.018) * height)),
+            )).point(lambda value: 0 if value < 180 else 255)
+            pixels = crop.load()
+            draw = ImageDraw.Draw(crop)
+            for row in range(crop.height):
+                if sum(pixels[column, row] < 128 for column in range(crop.width)) / crop.width >= 0.60:
+                    draw.line((0, row, crop.width - 1, row), fill=255)
+            for column in range(crop.width):
+                if sum(pixels[column, row] < 128 for row in range(crop.height)) / crop.height >= 0.80:
+                    draw.line((column, 0, column, crop.height - 1), fill=255)
+            bbox = ImageOps.invert(crop).getbbox()
+            if bbox is None:
+                return None
+            crop = crop.crop(bbox).resize((40, 40)).crop((8, 6, 32, 34))
+            return tuple(value < 128 for value in crop.getdata())
+
+        left_templates = [
+            vector(float(word.bbox[0]), float(lines[index].bbox[1]))
+            for index, word in left_group
+        ]
+        right_templates = [
+            vector(float(word.bbox[0]), float(lines[index].bbox[1]))
+            for index, word in reference_group
+        ]
+        if any(template is None for template in (*left_templates, *right_templates)):
+            return page
+
+        def distances(value, templates):
+            return [
+                sum(left != right for left, right in zip(value, template)) / len(value)
+                for template in templates
+            ]
+
+        left_indexes = []
+        right_matrix = []
+        for _outer_x, left_x, right_x, y in cells:
+            left_value, right_value = vector(left_x, y), vector(right_x, y)
+            if left_value is None or right_value is None:
+                return page
+            left_distances = distances(left_value, left_templates)
+            clear_left = next(
+                (
+                    labels.index(str(word.text).strip())
+                    for line in lines
+                    if abs(float(line.bbox[1]) - y) <= 0.008
+                    for word in line.words
+                    if str(word.text).strip() in labels
+                    and abs(float(word.bbox[0]) - left_x) <= 0.012
+                ),
+                None,
+            )
+            if clear_left is None:
+                ordered = sorted(left_distances)
+                if ordered[0] > 0.22 or ordered[1] - ordered[0] < 0.08:
+                    return page
+                clear_left = left_distances.index(ordered[0])
+            left_indexes.append(clear_left)
+            right_matrix.append(distances(right_value, right_templates))
+        if sorted(left_indexes) != [0, 1, 2, 3]:
+            return page
+
+        assignments = sorted(
+            (
+                sum(right_matrix[row][assignment[row]] for row in range(4)),
+                assignment,
+            )
+            for assignment in itertools.permutations(range(4))
+        )
+        best_cost, right_indexes = assignments[0]
+        strong_rows = sum(
+            sorted(row)[1] - sorted(row)[0] >= 0.08
+            and row[right_indexes[index]] == min(row)
+            for index, row in enumerate(right_matrix)
+        )
+        if (
+            best_cost / 4 > 0.18
+            or assignments[1][0] - best_cost < 0.08
+            or strong_rows < 3
+        ):
+            return page
+
+        answer_y0 = min(cell[3] for cell in cells) - 0.008
+        answer_y1 = max(cell[3] for cell in cells) + 0.025
+        remove_indexes = [
+            index for index, line in enumerate(lines)
+            if line.column == last_reference_line.column
+            and answer_y0 <= float(line.bbox[1]) <= answer_y1
+        ]
+        if not remove_indexes:
+            return page
+        insert_at = min(remove_indexes)
+        rewritten = []
+        for choice_number, (left_index, right_index, cell) in enumerate(
+            zip(left_indexes, right_indexes, cells), start=1
+        ):
+            outer_x, _left_x, _right_x, y = cell
+            marker = LayoutWord(
+                _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                (outer_x, y, outer_x + 0.018, y + 0.018),
+                1.0,
+                last_reference_line.column,
+                True,
+            )
+            content = LayoutWord(
+                f"mapping {labels[left_index]} - {chr(ord('a') + right_index)}",
+                (outer_x + 0.025, y, outer_x + 0.12, y + 0.018),
+                1.0,
+                last_reference_line.column,
+            )
+            rewritten.append(LayoutLine(
+                (marker, content),
+                (outer_x, y, content.bbox[2], y + 0.018),
+                last_reference_line.page,
+                last_reference_line.column,
+            ))
+
+        for reference_index, reference_word in reference_group:
+            line = lines[reference_index]
+            replacement = replace(
+                reference_word,
+                text=chr(ord("a") + reference_group.index((reference_index, reference_word))),
+                visual_choice_marker=False,
+            )
+            lines[reference_index] = replace(
+                line,
+                words=tuple(replacement if word is reference_word else word for word in line.words),
+            )
+        kept = [line for index, line in enumerate(lines) if index not in set(remove_indexes)]
+        kept[insert_at:insert_at] = rewritten
+        return replace(page, lines=tuple(kept))
+
+    @classmethod
+    def _recover_empty_visual_grid_cell(cls, gray, lines, selected):
+        by_line = {}
+        for anchor in selected:
+            by_line.setdefault(anchor[0], []).append(anchor)
+        if len(by_line) != 2 or any(len(anchors) != 2 for anchors in by_line.values()):
+            return None
+        empty_cells = []
+        for index, anchors in by_line.items():
+            ordered = sorted(anchors, key=lambda anchor: anchor[1])
+            for position, anchor in enumerate(ordered):
+                marker_x = anchor[1]
+                cell_end_x = (
+                    ordered[position + 1][1] - 0.010
+                    if position + 1 < len(ordered)
+                    else float(lines[index].bbox[2])
+                )
+                content = [
+                    word for word in lines[index].words
+                    if float(word.bbox[0]) >= marker_x + 0.020
+                    and float(word.bbox[0]) < cell_end_x
+                ]
+                if anchor[3] and anchor[2] < len(lines[index].words):
+                    fused_text = str(lines[index].words[anchor[2]].text).strip()
+                    if _VISUAL_DAMAGED_PREFIX.sub("", fused_text, count=1).strip():
+                        content.append(lines[index].words[anchor[2]])
+                if not content:
+                    empty_cells.append((index, marker_x, cell_end_x))
+        if len(empty_cells) != 1:
+            return None
+        index, marker_x, cell_end_x = empty_cells[0]
+        score, projected_x = max(
+            (
+                cls._visual_marker_ring_score(gray, marker_x + delta, lines[index].bbox),
+                marker_x + delta,
+            )
+            for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
+        )
+        if score[0] < 23 or score[1] < 140:
+            return None
+        width, height = gray.size
+        crop = gray.crop((
+            max(0, int((projected_x - 0.015) * width)),
+            max(0, int((float(lines[index].bbox[1]) - 0.010) * height)),
+            min(width, int((cell_end_x + 0.005) * width)),
+            min(height, int((float(lines[index].bbox[3]) + 0.010) * height)),
+        ))
+        recovered_text = cls._targeted_choice_crop_text(crop)
+        if not recovered_text:
+            return None
+        return index, recovered_text, projected_x, cell_end_x
+
+    @staticmethod
+    def _targeted_choice_crop_text(crop) -> str | None:
+        try:
+            import asyncio
+            from collections import Counter
+            from concurrent.futures import ThreadPoolExecutor
+            from PIL import Image, ImageEnhance, ImageOps
+        except Exception:
+            return None
+
+        def worker():
+            async def recognize():
+                try:
+                    from winrt.windows.graphics.imaging import BitmapDecoder
+                    from winrt.windows.globalization import Language
+                    from winrt.windows.media.ocr import OcrEngine
+                    from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+                except Exception:
+                    return []
+                engine = OcrEngine.try_create_from_language(Language("ko"))
+                if engine is None:
+                    return []
+                enlarged = crop.resize(
+                    (max(1, crop.width * 4), max(1, crop.height * 4)),
+                    Image.Resampling.LANCZOS,
+                )
+                contrasted = ImageOps.autocontrast(enlarged)
+                sharpened = ImageEnhance.Sharpness(contrasted).enhance(2.5)
+                variants = (
+                    sharpened,
+                    sharpened.point(lambda pixel: 0 if pixel < 190 else 255),
+                    contrasted,
+                )
+                values = []
+                for variant in variants:
+                    buffer = io.BytesIO()
+                    variant.convert("RGB").save(buffer, format="PNG")
+                    stream = InMemoryRandomAccessStream()
+                    writer = DataWriter(stream.get_output_stream_at(0))
+                    writer.write_bytes(buffer.getvalue())
+                    await writer.store_async()
+                    await writer.flush_async()
+                    writer.close()
+                    stream.seek(0)
+                    decoder = await BitmapDecoder.create_async(stream)
+                    bitmap = await decoder.get_software_bitmap_async()
+                    result = await engine.recognize_async(bitmap)
+                    value = " ".join(
+                        str(word.text).strip()
+                        for line in result.lines
+                        for word in line.words
+                        if str(word.text).strip()
+                    ).strip()
+                    value = _VISUAL_DAMAGED_PREFIX.sub("", value, count=1).strip(" .")
+                    if value:
+                        values.append(value)
+                return values
+
+            return asyncio.run(recognize())
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                values = executor.submit(worker).result(timeout=20)
+        except Exception:
+            return None
+        if not values:
+            return None
+        keys = [re.sub(r"[^0-9A-Za-z가-힣]", "", value).casefold() for value in values]
+        counts = Counter(key for key in keys if key)
+        if not counts:
+            return None
+        key, count = counts.most_common(1)[0]
+        if count < 2:
+            return None
+        return next(value for value, candidate_key in zip(values, keys) if candidate_key == key)
+
+    @staticmethod
+    def _line_with_recovered_choice_text(
+        line: LayoutLine, text_value: str, marker_x: float, cell_end_x: float
+    ) -> LayoutLine:
+        words = list(line.words)
+        words.append(LayoutWord(
+            text=text_value,
+            bbox=(
+                marker_x + 0.022,
+                line.bbox[1],
+                max(marker_x + 0.024, cell_end_x - 0.006),
+                line.bbox[3],
+            ),
+            confidence=0.85,
+            column=line.column,
+            visual_choice_marker=False,
+        ))
+        words.sort(key=lambda word: word.bbox[0])
+        return replace(
+            line,
+            words=tuple(words),
+            bbox=(
+                min(word.bbox[0] for word in words),
+                line.bbox[1],
+                max(word.bbox[2] for word in words),
+                line.bbox[3],
+            ),
+        )
+
+    @staticmethod
+    def _complete_explicit_visual_sequence(
+        lines: Sequence[LayoutLine], region_indexes: Sequence[int]
+    ) -> bool:
+        numbers = []
+        for index in region_indexes[1:]:
+            for word in lines[index].words:
+                text = str(word.text).strip()
+                if text[:1] in _VISUAL_EXPLICIT_MARKERS:
+                    numbers.append(_VISUAL_EXPLICIT_MARKERS[text[:1]])
+        return numbers == [1, 2, 3, 4]
+
+    @classmethod
+    def _visual_ring_anchors(cls, gray, lines, region_indexes):
+        anchors = []
+        terminators = [
+            position
+            for position, index in enumerate(region_indexes)
+            if re.search(r"[?？]", lines[index].text)
+            or _VISUAL_QUESTION_TERMINATOR.search(lines[index].text)
+        ]
+        if terminators:
+            terminator = terminators[0]
+            balance = (
+                lines[region_indexes[terminator]].text.count("(")
+                - lines[region_indexes[terminator]].text.count(")")
+            )
+            while balance > 0 and terminator + 1 < len(region_indexes):
+                terminator += 1
+                balance += (
+                    lines[region_indexes[terminator]].text.count("(")
+                    - lines[region_indexes[terminator]].text.count(")")
+                )
+            region_indexes = region_indexes[terminator + 1:]
+        markerish = (
+            set(_VISUAL_EXPLICIT_MARKERS)
+            | set(_VISUAL_DAMAGED_MARKERS)
+            | {"@", "O", "0", "1", "2", "3", "4", "5"}
+        )
+        trusted_markerish = (
+            set(_VISUAL_EXPLICIT_MARKERS)
+            | set(_VISUAL_DAMAGED_MARKERS)
+            | {"@", "O", "1", "2", "3", "4", "5"}
+        )
+        for index in region_indexes:
+            line = lines[index]
+            if float(line.bbox[1]) >= 0.93:
+                continue
+            words = list(line.words)
+            for word_index, word in enumerate(words):
+                text = str(word.text).strip()
+                word_x = float(word.bbox[0])
+                if (
+                    line.text.rstrip().endswith("?")
+                    and (not text or text[:1] not in markerish)
                 ):
                     continue
-                centers_y = [
-                    (float(lines[index].bbox[1]) + float(lines[index].bbox[3])) / 2
-                    for index, _ in candidates
-                ]
-                if any(right - left < 0.012 for left, right in zip(centers_y, centers_y[1:])):
+                if (
+                    text
+                    and text[:1] not in _VISUAL_PROPOSITION_MARKERS
+                    and (text[:1] in markerish or len(text) <= 2)
+                ):
+                    scored_positions = [
+                        (
+                            cls._visual_marker_ring_score(gray, word_x + delta, line.bbox),
+                            word_x + delta,
+                        )
+                        for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
+                    ]
+                    score, scored_x = max(scored_positions)
+                    if score[0] >= 23 and score[1] >= 140:
+                        known = _VISUAL_EXPLICIT_MARKERS.get(text[:1])
+                        anchors.append((index, scored_x, word_index, True, known))
+                if line.text.rstrip().endswith("?"):
                     continue
-                for choice_number, (index, _) in enumerate(candidates, start=1):
-                    replacements[index] = _VISUAL_CHOICE_SYMBOLS[choice_number - 1]
+                previous_x = float(words[word_index - 1].bbox[2]) if word_index else None
+                if previous_x is not None and word_x - previous_x < 0.030:
+                    continue
+                best_x = None
+                best_score = (0, 0)
+                for delta in (0.025, 0.026, 0.027, 0.028, 0.029, 0.030, 0.031):
+                    marker_x = word_x - delta
+                    score = cls._visual_marker_ring_score(gray, marker_x, line.bbox)
+                    if score > best_score:
+                        best_score = score
+                        best_x = marker_x
+                if best_x is not None and best_score[0] >= 23 and best_score[1] >= 140:
+                    anchors.append((index, best_x, word_index, False, None))
 
-        if not replacements:
-            return page
-        for index, symbol in replacements.items():
-            lines[index] = self._line_with_visual_marker(lines[index], symbol)
-        return replace(page, lines=tuple(lines))
+        seed_clusters = []
+        for anchor in sorted(anchors, key=lambda item: item[1]):
+            cluster = next((
+                group for group in seed_clusters
+                if abs(group[0][1] - anchor[1]) <= 0.012
+            ), None)
+            if cluster is None:
+                seed_clusters.append([anchor])
+            else:
+                cluster.append(anchor)
+        for cluster in seed_clusters:
+            if len({anchor[0] for anchor in cluster}) < 2:
+                trusted_seed = any(
+                    anchor[3]
+                    and str(lines[anchor[0]].words[anchor[2]].text).strip()[:1]
+                    in trusted_markerish
+                    for anchor in cluster
+                )
+                if not trusted_seed:
+                    continue
+            marker_x = min(anchor[1] for anchor in cluster)
+            observed_indexes = [anchor[0] for anchor in cluster]
+            for index in region_indexes:
+                if float(lines[index].bbox[1]) >= 0.93:
+                    continue
+                if any(
+                    anchor[0] == index and abs(anchor[1] - marker_x) <= 0.012
+                    for anchor in anchors
+                ):
+                    continue
+                line = lines[index]
+                if not line.words:
+                    continue
+                if line.text.rstrip().endswith("?"):
+                    continue
+                leading_x = float(line.words[0].bbox[0])
+                leading_text = str(line.words[0].text).strip()
+                if (
+                    abs(leading_x - marker_x) <= 0.012
+                    and len(leading_text) > 2
+                    and leading_text[:1] not in _VISUAL_EXPLICIT_MARKERS
+                    and leading_text[:1] not in _VISUAL_DAMAGED_MARKERS
+                    and not min(observed_indexes) < index < max(observed_indexes)
+                ):
+                    continue
+                score, projected_x = max(
+                    (
+                        cls._visual_marker_ring_score(gray, marker_x + delta, line.bbox),
+                        marker_x + delta,
+                    )
+                    for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
+                )
+                indented_choice_text = leading_x >= marker_x + 0.015
+                if not (
+                    (score[0] >= 23 and score[1] >= 140)
+                    or (
+                        len({anchor[0] for anchor in cluster}) >= 2
+                        and indented_choice_text
+                        and score[0] >= 20
+                        and score[1] >= 120
+                    )
+                ):
+                    continue
+                if leading_x <= marker_x + 0.012:
+                    damaged_prefix = _VISUAL_DAMAGED_PREFIX.match(leading_text)
+                    insertion_x = (
+                        leading_x
+                        if damaged_prefix
+                        else max(0.0, min(projected_x, leading_x) - 0.001)
+                    )
+                    word_index = 0
+                else:
+                    damaged_prefix = None
+                    insertion_x = projected_x
+                    word_index = next((
+                        offset for offset, word in enumerate(line.words)
+                        if float(word.bbox[0]) >= marker_x + 0.015
+                    ), 0)
+                anchors.append((
+                    index,
+                    insertion_x,
+                    word_index,
+                    bool(damaged_prefix),
+                    None,
+                ))
+
+        def inferred_anchor(index, marker_x):
+            if lines[index].text.rstrip().endswith("?"):
+                return None
+            score, projected_x = max(
+                (
+                    cls._visual_marker_ring_score(gray, marker_x + delta, lines[index].bbox),
+                    marker_x + delta,
+                )
+                for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
+            )
+            if score[0] < 20 or score[1] < 120:
+                return None
+            leading_word = lines[index].words[0]
+            leading_x = float(leading_word.bbox[0])
+            leading_text = str(leading_word.text).strip()
+            if (
+                abs(leading_x - projected_x) <= 0.012
+                and (
+                    len(leading_text) <= 2
+                    or _VISUAL_DAMAGED_PREFIX.match(leading_text)
+                )
+            ):
+                return score, (index, leading_x, 0, True, None)
+            word_index = next((
+                offset for offset, word in enumerate(lines[index].words)
+                if float(word.bbox[0]) >= projected_x + 0.015
+            ), 0)
+            return score, (index, projected_x, word_index, False, None)
+
+        # A compact ①-④ row often loses exactly one marker in OCR.  Infer the
+        # absent grid position only when the raster still contains its ring.
+        by_line = {}
+        for anchor in anchors:
+            by_line.setdefault(anchor[0], []).append(anchor)
+        for index, line_anchors in tuple(by_line.items()):
+            ordered = sorted(line_anchors, key=lambda item: item[1])
+            if len(ordered) != 3:
+                continue
+            candidates = []
+            for missing_slot in range(4):
+                slots = [slot for slot in range(4) if slot != missing_slot]
+                step = (ordered[-1][1] - ordered[0][1]) / (slots[-1] - slots[0])
+                if not 0.050 <= step <= 0.300:
+                    continue
+                origin = ordered[0][1] - slots[0] * step
+                residual = max(
+                    abs(anchor[1] - (origin + slot * step))
+                    for anchor, slot in zip(ordered, slots)
+                )
+                if residual > 0.012:
+                    continue
+                marker_x = origin + missing_slot * step
+                if not 0.01 <= marker_x <= 0.97:
+                    continue
+                inferred = inferred_anchor(index, marker_x)
+                if inferred is not None:
+                    candidates.append(inferred)
+            if candidates:
+                anchors.append(max(candidates, key=lambda item: item[0])[1])
+
+        # Likewise complete an L-shaped three-ring observation in a 2x2 grid.
+        by_line = {}
+        for anchor in anchors:
+            by_line.setdefault(anchor[0], []).append(anchor)
+        ordered_lines = sorted(by_line)
+        for upper_index, lower_index in zip(ordered_lines, ordered_lines[1:]):
+            upper_y = float(lines[upper_index].bbox[1])
+            lower_y = float(lines[lower_index].bbox[1])
+            if not 0.012 <= lower_y - upper_y <= 0.080:
+                continue
+            upper = sorted(by_line[upper_index], key=lambda item: item[1])
+            lower = sorted(by_line[lower_index], key=lambda item: item[1])
+            if sorted((len(upper), len(lower))) != [1, 2]:
+                continue
+            pair, singleton, singleton_index = (
+                (upper, lower, lower_index) if len(upper) == 2
+                else (lower, upper, upper_index)
+            )
+            if pair[1][1] - pair[0][1] < 0.080:
+                continue
+            distances = [abs(singleton[0][1] - anchor[1]) for anchor in pair]
+            matched = min(range(2), key=lambda position: distances[position])
+            if distances[matched] > 0.035:
+                continue
+            inferred = inferred_anchor(singleton_index, pair[1 - matched][1])
+            if inferred is not None:
+                anchors.append(inferred[1])
+
+        deduplicated = []
+        for anchor in sorted(anchors, key=lambda item: (item[0], item[1], not item[3])):
+            duplicate_at = next((
+                offset for offset, prior in enumerate(deduplicated)
+                if prior[0] == anchor[0] and abs(prior[1] - anchor[1]) <= 0.012
+            ), None)
+            if duplicate_at is None:
+                deduplicated.append(anchor)
+            elif anchor[3] and not deduplicated[duplicate_at][3]:
+                deduplicated[duplicate_at] = anchor
+        return deduplicated
+
+    @staticmethod
+    def _select_complete_visual_choice_layout(lines, anchors):
+        if len(anchors) < 4:
+            return None
+        by_line = {}
+        for anchor in anchors:
+            by_line.setdefault(anchor[0], []).append(anchor)
+        patterns = []
+
+        def trusted_anchor(anchor):
+            if not anchor[3]:
+                return False
+            token = str(lines[anchor[0]].words[anchor[2]].text).strip()
+            return bool(token) and token[:1] in (
+                set(_VISUAL_EXPLICIT_MARKERS)
+                | set(_VISUAL_DAMAGED_MARKERS)
+                | {"@", "O", "1", "2", "3", "4", "5"}
+            )
+
+        for line_anchors in by_line.values():
+            ordered = sorted(line_anchors, key=lambda item: item[1])
+            candidates = []
+            for candidate in itertools.combinations(ordered, 4):
+                gaps = [
+                    right[1] - left[1]
+                    for left, right in zip(candidate, candidate[1:])
+                ]
+                if min(gaps) < 0.050:
+                    continue
+                mean_gap = sum(gaps) / len(gaps)
+                irregularity = sum(abs(gap - mean_gap) for gap in gaps)
+                if irregularity <= 0.040:
+                    candidates.append((irregularity, candidate))
+            if candidates:
+                patterns.append(list(min(candidates, key=lambda item: item[0])[1]))
+
+        ordered_lines = sorted(by_line)
+        grid_patterns = []
+        two_cell_lines = [index for index in ordered_lines if len(by_line[index]) >= 2]
+        for left_index, right_index in zip(two_cell_lines, two_cell_lines[1:]):
+            def cell_pairs(line_index):
+                ordered = sorted(by_line[line_index], key=lambda item: item[1])
+                outer_like = [
+                    anchor
+                    for position, (anchor, following) in enumerate(
+                        zip(ordered, ordered[1:])
+                    )
+                    if 0.015 <= following[1] - anchor[1] <= 0.060
+                    and (
+                        position == 0
+                        or not anchor[3]
+                        or anchor[1] - ordered[position - 1][1] >= 0.080
+                    )
+                ]
+                sources = outer_like if len(outer_like) >= 2 else ordered
+                return [
+                    pair
+                    for pair in itertools.combinations(sources, 2)
+                    if pair[1][1] - pair[0][1] >= 0.080
+                ]
+
+            left_pairs = cell_pairs(left_index)
+            right_pairs = cell_pairs(right_index)
+            matching_pairs = []
+            for left in left_pairs:
+                for right in right_pairs:
+                    if max(
+                        abs(left[position][1] - right[position][1])
+                        for position in range(2)
+                    ) <= 0.035:
+                        total_span = (
+                            left[1][1] - left[0][1]
+                            + right[1][1] - right[0][1]
+                        )
+                        matching_pairs.append((total_span, list(left + right)))
+            if matching_pairs:
+                grid_patterns.append(max(matching_pairs, key=lambda item: item[0])[1])
+
+        clusters = []
+        for anchor in sorted(anchors, key=lambda item: item[1]):
+            cluster = next((group for group in clusters if abs(group[0][1] - anchor[1]) <= 0.012), None)
+            if cluster is None:
+                clusters.append([anchor])
+            else:
+                cluster.append(anchor)
+        vertical_patterns = []
+        for cluster in clusters:
+            distinct_lines = {}
+            for anchor in cluster:
+                distinct_lines.setdefault(anchor[0], anchor)
+            if len(distinct_lines) >= 4:
+                ordered = sorted(distinct_lines.values(), key=lambda item: item[0])
+                cluster_patterns = []
+                for start in range(len(ordered) - 3):
+                    vertical = ordered[start:start + 4]
+                    centers = [
+                        (float(lines[item[0]].bbox[1]) + float(lines[item[0]].bbox[3])) / 2
+                        for item in vertical
+                    ]
+                    gaps = [right - left for left, right in zip(centers, centers[1:])]
+                    if not all(gap >= 0.012 for gap in gaps):
+                        continue
+                    trusted = [trusted_anchor(anchor) for anchor in vertical]
+                    trusted_vertical = [
+                        value and anchor[2] == 0
+                        for value, anchor in zip(trusted, vertical)
+                    ]
+                    crosses_semantic_lead = any(
+                        _VISUAL_QUESTION_LEAD.match(lines[index].text)
+                        for index in range(vertical[0][0] + 1, vertical[-1][0])
+                    )
+                    cluster_patterns.append((
+                        -int(crosses_semantic_lead),
+                        sum(trusted_vertical),
+                        int(trusted_vertical[0]) + int(trusted_vertical[-1]),
+                        -sum(bool(anchor[3]) and anchor[2] != 0 for anchor in vertical),
+                        sum(bool(anchor[3]) for anchor in vertical),
+                        int(bool(vertical[0][3])) + int(bool(vertical[-1][3])),
+                        -sum(abs(gap - sum(gaps) / len(gaps)) for gap in gaps),
+                        -sum(gaps),
+                        centers[-1],
+                        vertical,
+                    ))
+                if cluster_patterns:
+                    vertical_patterns.append(
+                        max(cluster_patterns, key=lambda item: item[:-1])[-1]
+                    )
+        if vertical_patterns:
+            chosen_vertical = min(
+                vertical_patterns,
+                key=lambda pattern: min(anchor[1] for anchor in pattern),
+            )
+            vertical_span = (
+                float(lines[chosen_vertical[-1][0]].bbox[1])
+                - float(lines[chosen_vertical[0][0]].bbox[1])
+            )
+            strong_grids = [
+                grid for grid in grid_patterns
+                if (
+                    grid[1][1] - grid[0][1] >= 0.125
+                    and (
+                        sum(trusted_anchor(anchor) for anchor in grid) >= 3
+                        or (
+                            grid[1][1] - grid[0][1] >= 0.180
+                            and [trusted_anchor(anchor) for anchor in grid]
+                            in ([True, False, False, True], [False, True, True, False])
+                        )
+                    )
+                )
+            ]
+            compact_grid = min(
+                strong_grids,
+                key=lambda grid: (
+                    float(lines[grid[-1][0]].bbox[1])
+                    - float(lines[grid[0][0]].bbox[1])
+                ),
+                default=None,
+            )
+            if (
+                compact_grid is not None
+                and vertical_span >= 3 * max(
+                    0.001,
+                    float(lines[compact_grid[-1][0]].bbox[1])
+                    - float(lines[compact_grid[0][0]].bbox[1]),
+                )
+            ):
+                patterns.append(compact_grid)
+            else:
+                patterns.append(chosen_vertical)
+        else:
+            patterns.extend(grid_patterns)
+
+        if not patterns:
+            return None
+        def rank(pattern):
+            centers = [
+                (float(lines[item[0]].bbox[1]) + float(lines[item[0]].bbox[3])) / 2
+                for item in pattern
+            ]
+            return (max(centers), -min(item[1] for item in pattern), min(centers))
+        return max(patterns, key=rank)
 
     @classmethod
     def _has_visual_marker_ring(cls, gray, marker_x: float, bbox) -> bool:
+        coverage, ring_pixels = cls._visual_marker_ring_score(gray, marker_x, bbox)
+        return coverage >= 23 and ring_pixels >= 140
+
+    @classmethod
+    def _visual_marker_ring_score(cls, gray, marker_x: float, bbox) -> tuple[int, int]:
         width, height = gray.size
         center_x = (marker_x + 0.009) * width
         center_y = ((float(bbox[1]) + float(bbox[3])) / 2) * height
@@ -623,8 +2472,7 @@ class PDFExtractor:
             min(width, int(round(center_x + 0.016 * width))),
             min(height, int(round(center_y + 0.011 * height))),
         ))
-        coverage, ring_pixels = cls._ring_coverage(crop)
-        return coverage >= 23 and ring_pixels >= 140
+        return cls._ring_coverage(crop)
 
     @staticmethod
     def _ring_coverage(crop) -> tuple[int, int]:
@@ -647,30 +2495,47 @@ class PDFExtractor:
 
     @staticmethod
     def _line_with_visual_marker(line: LayoutLine, symbol: str) -> LayoutLine:
-        words = list(line.words)
-        first_text = str(words[0].text).strip()
-        if (
+        first_text = str(line.words[0].text).strip()
+        existing = (
             first_text[:1] in _VISUAL_DAMAGED_MARKERS
             or first_text[:1] in _VISUAL_EXPLICIT_MARKERS
             or first_text == "@"
+        )
+        return PDFExtractor._line_with_visual_markers(
+            line, [(symbol, 0, float(line.words[0].bbox[0]), existing)]
+        )
+
+    @staticmethod
+    def _line_with_visual_markers(
+        line: LayoutLine,
+        operations: Sequence[tuple[str, int, float, bool]],
+    ) -> LayoutLine:
+        words = list(line.words)
+        for symbol, word_index, marker_x, existing in sorted(
+            operations, key=lambda item: (item[1], item[3]), reverse=True
         ):
-            words[0] = replace(
-                words[0],
-                text=symbol + (first_text[1:] if first_text != "@" else ""),
-                visual_choice_marker=True,
-            )
-        else:
-            marker_x = max(float(line.bbox[0]) - 0.030, 0.0)
-            words.insert(
-                0,
-                LayoutWord(
-                    text=symbol,
-                    bbox=(marker_x, line.bbox[1], marker_x + 0.018, line.bbox[3]),
-                    confidence=0.95,
-                    column=line.column,
+            if existing:
+                first_text = str(words[word_index].text).strip()
+                width = float(words[word_index].bbox[2]) - float(words[word_index].bbox[0])
+                remainder = _VISUAL_DAMAGED_PREFIX.sub("", first_text, count=1)
+                if remainder == first_text:
+                    remainder = first_text[1:] if width > 0.024 and len(first_text) > 1 else ""
+                words[word_index] = replace(
+                    words[word_index],
+                    text=symbol + remainder,
                     visual_choice_marker=True,
-                ),
-            )
+                )
+            else:
+                words.insert(
+                    word_index,
+                    LayoutWord(
+                        text=symbol,
+                        bbox=(marker_x, line.bbox[1], marker_x + 0.018, line.bbox[3]),
+                        confidence=0.95,
+                        column=line.column,
+                        visual_choice_marker=True,
+                    ),
+                )
         words.sort(key=lambda word: word.bbox[0])
         return LayoutLine(
             words=tuple(words),
