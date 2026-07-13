@@ -16,6 +16,7 @@ import re
 
 from ..parser.formatting import normalize_private_math_glyphs, repair_extracted_text_artifacts
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL, CHOICE_SYMBOL_TO_NUMBER
+from ..parser.question import ALL_CHOICES_CORRECT
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,12 @@ class DocxExporter:
                 rng = rng or random.Random()
                 rng.shuffle(choices)
 
-            if answer_number is not None and shuffle_choices and len(choices) == 4:
+            if (
+                answer_number is not None
+                and answer_number != ALL_CHOICES_CORRECT
+                and shuffle_choices
+                and len(choices) == 4
+            ):
                 new_answer = None
                 for idx, choice in enumerate(choices, start=1):
                     if choice.get('_orig_number') == answer_number:
@@ -206,7 +212,10 @@ class DocxExporter:
                 p = doc.add_paragraph()
                 self._format_paragraph(p)
                 symbol = choice.get('choice_symbol') or NUMBER_TO_CHOICE_SYMBOL.get(choice.get('choice_number')) or ''
-                is_correct = choice.get('choice_number') == answer_number
+                is_correct = (
+                    answer_number == ALL_CHOICES_CORRECT
+                    or choice.get('choice_number') == answer_number
+                )
                 self._add_formatted_text(
                     p,
                     choice.get('choice_text', ''),
@@ -224,6 +233,9 @@ class DocxExporter:
 
         if answer_number is None:
             return None
+
+        if answer_number == ALL_CHOICES_CORRECT:
+            return "전원 정답"
 
         return NUMBER_TO_CHOICE_SYMBOL.get(answer_number, str(answer_number))
 

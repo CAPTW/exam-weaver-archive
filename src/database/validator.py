@@ -4,6 +4,7 @@ from typing import Dict, List
 
 from ..parser.formatting import has_suspicious_text_artifact
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL
+from ..parser.question import ALL_CHOICES_CORRECT
 
 
 class QuestionValidator:
@@ -91,7 +92,11 @@ class QuestionValidator:
             if choice.get('choice_number') is not None
         }
         answer_available = bool(question.get('answer_available', True))
-        if answer_available and question.get('correct_answer') not in choice_numbers:
+        if (
+            answer_available
+            and question.get('correct_answer') != ALL_CHOICES_CORRECT
+            and question.get('correct_answer') not in choice_numbers
+        ):
             issues.append(self._issue('invalid_correct_answer', '정답 번호 이상', 'error'))
         elif not answer_available and question.get('correct_answer') != 0:
             issues.append(self._issue('invalid_answer_state', '정답 제공 상태 이상', 'error'))

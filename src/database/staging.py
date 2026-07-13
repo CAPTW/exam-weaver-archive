@@ -26,7 +26,7 @@ from src.parser.offline_sources import (
     classify_offline_document,
     parse_offline_question_pdf,
 )
-from src.parser.question import Choice, Question
+from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question
 
 
 PLACEHOLDER_TEXT = "원문 보기 참조"
@@ -582,7 +582,9 @@ def validate_staging_database(
                           != (SELECT COUNT(*) FROM question_choices c WHERE c.question_id = q.id)
                        OR q.answer_available NOT IN (0, 1)
                        OR (q.answer_available = 0 AND q.correct_answer != 0)
-                       OR (q.answer_available = 1 AND q.correct_answer NOT IN
+                       OR (q.answer_available = 1
+                           AND q.correct_answer != -1
+                           AND q.correct_answer NOT IN
                            (SELECT choice_number FROM question_choices c WHERE c.question_id = q.id))
                     """
                 ).fetchone()[0]
@@ -1566,8 +1568,13 @@ def _validate_expected_set(
             number not in by_number
             or int(by_number[number][2]) != 1
             or not isinstance(by_number[number][1], int)
-            or int(by_number[number][1]) < 1
-            or int(by_number[number][1]) > int(by_number[number][4])
+            or (
+                int(by_number[number][1]) != ALL_CHOICES_CORRECT
+                and (
+                    int(by_number[number][1]) < 1
+                    or int(by_number[number][1]) > int(by_number[number][4])
+                )
+            )
         )
     )
     if not expected.require_answers:
@@ -1633,7 +1640,8 @@ def _valid_answer_count(path: Path) -> int:
     with _readonly_connection(path) as connection:
         return int(
             connection.execute(
-                "SELECT COUNT(*) FROM questions WHERE correct_answer BETWEEN 1 AND 5"
+                "SELECT COUNT(*) FROM questions "
+                "WHERE correct_answer = -1 OR correct_answer BETWEEN 1 AND 5"
             ).fetchone()[0]
         )
 

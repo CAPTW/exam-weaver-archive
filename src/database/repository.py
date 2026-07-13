@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from ..utils.tagger import build_tags
+from ..parser.question import ALL_CHOICES_CORRECT
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class ExamRepository:
             if correct_answer != 0:
                 raise ValueError("answer_available=False requires correct_answer=0")
             return
-        if correct_answer not in choice_numbers:
+        if correct_answer != ALL_CHOICES_CORRECT and correct_answer not in choice_numbers:
             raise ValueError("answer_available=True requires a valid choice answer")
 
     @classmethod

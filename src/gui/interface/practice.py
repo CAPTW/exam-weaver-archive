@@ -40,6 +40,7 @@ from ...database.selection import (
     select_group_aware_questions,
 )
 from ...database.validator import QuestionValidator
+from ...parser.question import ALL_CHOICES_CORRECT
 
 
 GRADING_MODE_EXAM_END = "exam-end"
@@ -69,7 +70,9 @@ def evaluate_answers(questions, answers):
         question_id = question["id"]
         selected = answers.get(question_id)
         correct_answer = int(question.get("correct_answer") or 0)
-        is_correct = selected == correct_answer
+        is_correct = selected is not None and (
+            correct_answer == ALL_CHOICES_CORRECT or selected == correct_answer
+        )
         if is_correct:
             correct_count += 1
 
@@ -711,9 +714,16 @@ class PracticeInterface(QWidget):
             self.choiceLayout.addWidget(row)
 
     def _choice_button_style(self, number, selected, correct_answer, reveal):
-        if reveal and number == correct_answer:
+        if reveal and (
+            correct_answer == ALL_CHOICES_CORRECT or number == correct_answer
+        ):
             return CHOICE_CORRECT_STYLE
-        if reveal and selected == number and selected != correct_answer:
+        if (
+            reveal
+            and selected == number
+            and correct_answer != ALL_CHOICES_CORRECT
+            and selected != correct_answer
+        ):
             return CHOICE_WRONG_STYLE
         if selected == number:
             return CHOICE_SELECTED_STYLE
@@ -734,7 +744,9 @@ class PracticeInterface(QWidget):
         selected = self.answers.get(question["id"])
         correct_answer = int(question.get("correct_answer") or 0)
         correct_label = self._answer_label(question, correct_answer)
-        if selected == correct_answer:
+        if selected is not None and (
+            correct_answer == ALL_CHOICES_CORRECT or selected == correct_answer
+        ):
             message = f"정답입니다. 정답: {correct_label}"
             color = "#2e7d32"
         else:
@@ -887,6 +899,8 @@ class PracticeInterface(QWidget):
     def _answer_label(self, question, answer_number):
         if answer_number is None:
             return "-"
+        if int(answer_number) == ALL_CHOICES_CORRECT:
+            return "전원 정답"
         for choice in question.get("choices") or []:
             number = int(choice.get("number") or choice.get("choice_number") or 0)
             if number == int(answer_number):

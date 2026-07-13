@@ -373,3 +373,33 @@ def test_extra_quality_errors_marks_missing_answer_key():
     )
 
     assert "answer_key_missing" in extra_quality_errors(parsed, {})
+
+
+def test_extra_quality_errors_accepts_explicit_all_choices_answer():
+    choices = [Choice(number, str(number), str(number)) for number in range(1, 5)]
+    questions = [
+        Question(
+            number=number,
+            text=f"Q{number}",
+            choices=choices,
+            correct_answer=-1 if number == 1 else 1,
+            subject_name="항해술",
+        )
+        for number in range(1, 11)
+    ]
+    parsed = ComcbtParsedExam(
+        title="t",
+        source_url="u",
+        exam_type="해경",
+        subject_name="항해술",
+        year=2024,
+        session=1,
+        questions=questions,
+        attachments=[],
+    )
+    answer_key = {number: (-1 if number == 1 else 1) for number in range(1, 11)}
+
+    errors = extra_quality_errors(parsed, answer_key)
+
+    assert "invalid_answer_value" not in errors
+    assert "invalid_question_answer" not in errors

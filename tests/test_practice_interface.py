@@ -40,6 +40,24 @@ def test_evaluate_answers_scores_by_question_and_subject(sample_question, repo, 
     assert result["details"][0]["is_correct"] is True
 
 
+def test_evaluate_answers_treats_any_selection_as_correct_for_all_choices_answer():
+    question = {
+        "id": 7,
+        "exam_subject_id": 3,
+        "subject_name": "해사법규",
+        "correct_answer": -1,
+        "choices": [
+            {"number": number, "symbol": str(number), "text": str(number)}
+            for number in range(1, 5)
+        ],
+    }
+
+    for selected in range(1, 5):
+        result = evaluate_answers([question], {7: selected})
+        assert result["correct"] == 1
+        assert result["details"][0]["is_correct"] is True
+
+
 def test_save_practice_result_records_overall_and_subject_rows(repo, sample_metadata, sample_question):
     repo.save_questions([sample_question], sample_metadata)
     question = repo.get_questions_with_choices(exam_code="3급기관사", limit=1)[0]

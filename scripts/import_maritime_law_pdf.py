@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import hashlib
+import io
 import json
 import math
 import re
@@ -18,7 +20,7 @@ from types import SimpleNamespace
 from typing import Iterable
 
 import fitz
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -40,7 +42,8 @@ from src.parser.offline_sources import (  # noqa: E402
     require_persistable_offline_questions,
     select_group_questions,
 )
-from src.parser.question import Choice, Question  # noqa: E402
+from src.parser.extractor import _run_with_timeout  # noqa: E402
+from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question  # noqa: E402
 from src.web_import.importer import QuestionSource, QuestionSourceRegistry, sha256_file, utc_timestamp  # noqa: E402
 
 
@@ -230,6 +233,74 @@ class DigitAnswerTableReader:
         return 0 if score > 0.95 else value
 
     @staticmethod
+    def _read_crop_text_values(crop: Image.Image) -> tuple[str, ...]:
+        """OCR a non-numeric answer cell without weakening digit validation."""
+
+        def worker():
+            async def recognize() -> tuple[str, ...]:
+                try:
+                    from winrt.windows.graphics.imaging import BitmapDecoder
+                    from winrt.windows.globalization import Language
+                    from winrt.windows.media.ocr import OcrEngine
+                    from winrt.windows.storage.streams import (
+                        DataWriter,
+                        InMemoryRandomAccessStream,
+                    )
+                except Exception:
+                    return ()
+                engine = OcrEngine.try_create_from_language(Language("ko"))
+                if engine is None:
+                    return ()
+                enlarged = crop.resize(
+                    (max(1, crop.width * 4), max(1, crop.height * 4)),
+                    Image.Resampling.LANCZOS,
+                )
+                contrasted = ImageOps.autocontrast(enlarged)
+                sharpened = ImageEnhance.Sharpness(contrasted).enhance(2.5)
+                variants = (
+                    sharpened,
+                    sharpened.point(lambda pixel: 0 if pixel < 190 else 255),
+                    contrasted,
+                )
+                values: list[str] = []
+                for variant in variants:
+                    buffer = io.BytesIO()
+                    variant.convert("RGB").save(buffer, format="PNG")
+                    stream = InMemoryRandomAccessStream()
+                    writer = DataWriter(stream.get_output_stream_at(0))
+                    writer.write_bytes(buffer.getvalue())
+                    await writer.store_async()
+                    await writer.flush_async()
+                    writer.close()
+                    stream.seek(0)
+                    decoder = await BitmapDecoder.create_async(stream)
+                    bitmap = await decoder.get_software_bitmap_async()
+                    result = await engine.recognize_async(bitmap)
+                    value = " ".join(
+                        str(word.text).strip()
+                        for line in result.lines
+                        for word in line.words
+                        if str(word.text).strip()
+                    ).strip()
+                    if value:
+                        values.append(value)
+                return tuple(values)
+
+            return asyncio.run(recognize())
+
+        try:
+            return tuple(_run_with_timeout(worker, timeout_seconds=20))
+        except Exception:
+            return ()
+
+    def _classify_non_numeric_answer(self, crop: Image.Image) -> int:
+        for value in self._read_crop_text_values(crop):
+            normalized = re.sub(r"[^가-힣]", "", value)
+            if "전원" in normalized and "정답" in normalized:
+                return ALL_CHOICES_CORRECT
+        return 0
+
+    @staticmethod
     def _horizontal_lines(gray: Image.Image) -> list[dict]:
         width, height = gray.size
         pixels = gray.load()
@@ -298,7 +369,11 @@ class DigitAnswerTableReader:
                 else:
                     rows = 4 if height > 300 else 2
 
-                values = self._read_box(image, (top["y"], bottom["y"], x0, x1, rows))
+                values = self._read_box(
+                    image,
+                    (top["y"], bottom["y"], x0, x1, rows),
+                    recover_non_numeric=False,
+                )
                 valid = sum(1 for value in values if value)
                 if valid >= rows * 10 * 0.65:
                     candidates.append((top["y"], bottom["y"], x0, x1, rows, valid))
@@ -311,15 +386,32 @@ class DigitAnswerTableReader:
             chosen.append(candidate)
         return [(top, bottom, x0, x1, rows) for top, bottom, x0, x1, rows, _ in chosen]
 
-    def _read_box(self, image: Image.Image, box: tuple[int, int, int, int, int]) -> list[int]:
+    def _read_box(
+        self,
+        image: Image.Image,
+        box: tuple[int, int, int, int, int],
+        *,
+        recover_non_numeric: bool = True,
+    ) -> list[int]:
         top, bottom, x0, x1, rows = box
         if rows == 2:
             pair_answers = self._read_box_layout(image, box, "pair")
             single_answers = self._read_box_layout(image, box, "single")
             if sum(1 for value in single_answers if value) > sum(1 for value in pair_answers if value):
-                return single_answers
-            return pair_answers
-        return self._read_box_layout(image, box, "pair")
+                if not recover_non_numeric:
+                    return single_answers
+                return self._recover_non_numeric_answers(
+                    image, box, "single", single_answers
+                )
+            if not recover_non_numeric:
+                return pair_answers
+            return self._recover_non_numeric_answers(
+                image, box, "pair", pair_answers
+            )
+        answers = self._read_box_layout(image, box, "pair")
+        if not recover_non_numeric:
+            return answers
+        return self._recover_non_numeric_answers(image, box, "pair", answers)
 
     def _read_box_layout(self, image: Image.Image, box: tuple[int, int, int, int, int], layout: str) -> list[int]:
         top, bottom, x0, x1, rows = box
@@ -338,6 +430,39 @@ class DigitAnswerTableReader:
             crop = self._best_answer_crop(image, x_center, y_center)
             answers.append(self._classify_crop(crop))
         return answers
+
+    def _recover_non_numeric_answers(
+        self,
+        image: Image.Image,
+        box: tuple[int, int, int, int, int],
+        layout: str,
+        answers: list[int],
+    ) -> list[int]:
+        top, bottom, x0, x1, rows = box
+        cell = (x1 - x0) / 20
+        row_height = (bottom - top) / rows
+        recovered = list(answers)
+        for question_number, answer in enumerate(recovered, start=1):
+            if answer != 0:
+                continue
+            if layout == "single":
+                x_center = x0 + (question_number - 0.5) * cell
+                y_center = top + 1.5 * row_height
+            else:
+                row = (question_number - 1) // 10
+                pos = (question_number - 1) % 10
+                x_center = x0 + (pos * 2 + 1.5) * cell
+                y_center = top + (row + 0.5) * row_height
+            text_crop = image.crop((
+                int(x_center - 70),
+                int(y_center - 50),
+                int(x_center + 70),
+                int(y_center + 50),
+            ))
+            recovered[question_number - 1] = self._classify_non_numeric_answer(
+                text_crop
+            )
+        return recovered
 
     def _best_answer_crop(self, image: Image.Image, x_center: float, y_center: float) -> Image.Image:
         best_crop = None
@@ -484,7 +609,9 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
             topic_tags = [tag for tag in dict.fromkeys(tag for tag in topic_tags if tag and tag != "unknown")]
 
             correct_answer = int(answers[question_number - 1])
-            if correct_answer == 0:
+            if correct_answer == ALL_CHOICES_CORRECT:
+                parser_tags.append("official_all_choices_correct")
+            elif correct_answer == 0:
                 answer_review += 1
                 parser_tags.append("answer_requires_manual_review")
 

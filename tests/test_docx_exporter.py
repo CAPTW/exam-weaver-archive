@@ -267,6 +267,34 @@ def test_export_uses_reference_exam_layout_and_highlights_correct_choice(tmp_pat
     assert "Answer Key" not in "\n".join(_paragraph_text(p) for p in paragraphs)
 
 
+def test_export_highlights_every_choice_for_all_choices_correct(tmp_path):
+    output_path = tmp_path / "all-correct.docx"
+    questions = [{
+        "question_text": "전원 정답 문제",
+        "correct_answer": -1,
+        "choices": [
+            {
+                "choice_number": number,
+                "choice_symbol": symbol,
+                "choice_text": f"선택지 {number}",
+            }
+            for number, symbol in enumerate(("㉮", "㉯", "㉴", "㉵"), start=1)
+        ],
+    }]
+
+    DocxExporter().export("전원 정답", questions, str(output_path))
+
+    document_xml = _read_document_xml(output_path)
+    highlighted = [
+        _paragraph_text(paragraph)
+        for paragraph in _paragraphs(document_xml)
+        if paragraph.xpath(".//w:highlight[@w:val='yellow']", namespaces=NS)
+    ]
+    assert highlighted == [
+        "㉮ 선택지 1", "㉯ 선택지 2", "㉴ 선택지 3", "㉵ 선택지 4"
+    ]
+
+
 def test_shuffle_choices_moves_correct_answer_highlight_to_new_position(tmp_path):
     question = {
         "question_text": "정답 재배치 확인 문제",

@@ -5,6 +5,8 @@ import time
 from typing import Dict, List
 from datetime import datetime
 
+from src.parser.question import ALL_CHOICES_CORRECT
+
 class CLIQuizRunner:
     def __init__(self, repository):
         self.repo = repository
@@ -88,7 +90,7 @@ class CLIQuizRunner:
                     break
                 click.echo("Invalid input. Please enter 1-4.")
             
-            if user_input == correct_answer:
+            if correct_answer == ALL_CHOICES_CORRECT or user_input == correct_answer:
                 click.echo("\n[OK] Correct!")
                 correct_count += 1
                 subject_stats.setdefault(exam_subject_id, {'subject': subject, 'total': 0, 'correct': 0})

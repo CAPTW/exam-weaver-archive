@@ -928,6 +928,13 @@ def test_repository_enforces_answer_availability_invariant(repo, sample_metadata
         'correct_answer': 5,
     }) is False
 
+    sample_question.answer_available = True
+    sample_question.correct_answer = -1
+    repo.save_questions([sample_question], sample_metadata)
+    saved = repo.search_questions(limit=1)[0]
+    assert saved['correct_answer'] == -1
+    assert saved['answer_available'] == 1
+
 
 def test_answer_available_migration_backfills_only_legacy_zero_answers(tmp_path, sample_metadata, sample_question):
     path = tmp_path / "legacy-answer-state.db"

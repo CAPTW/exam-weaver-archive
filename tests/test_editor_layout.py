@@ -63,6 +63,60 @@ def test_question_editor_combo_items_store_user_data():
     APP.processEvents()
 
 
+def test_question_editor_preserves_all_choices_correct_answer():
+    editor = QuestionEditor(
+        question_data={
+            'year': 2022,
+            'session': 2,
+            'question_number': 8,
+            'subject_name': '해사법규',
+            'subject_code': 'law',
+            'exam_code': '해양경찰 해사법규',
+            'question_text': '전원 정답 처리 문제',
+            'correct_answer': -1,
+            'choices': [
+                {'choice_number': number, 'choice_text': str(number)}
+                for number in range(1, 5)
+            ],
+        },
+        subject_options=[{'code': 'law', 'name_ko': '해사법규'}],
+    )
+
+    assert editor.answerCombo.currentData() == -1
+    assert editor.answerCombo.currentText() == '전원 정답'
+    assert editor.get_data()['correct_answer'] == -1
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_question_editor_preserves_officially_unavailable_answer_state():
+    editor = QuestionEditor(
+        question_data={
+            'year': 2020,
+            'session': 1,
+            'question_number': 1,
+            'subject_name': '기관학',
+            'subject_code': 'engineering',
+            'exam_code': '해양경찰 경찰직 기관학',
+            'question_text': '공식 정답 미제공 문제',
+            'correct_answer': 0,
+            'answer_available': False,
+            'choices': [
+                {'choice_number': number, 'choice_text': str(number)}
+                for number in range(1, 5)
+            ],
+        },
+        subject_options=[{'code': 'engineering', 'name_ko': '기관학'}],
+    )
+
+    assert editor.answerCombo.currentData() == 0
+    assert editor.answerCombo.currentText() == '정답 없음'
+    assert editor.get_data()['correct_answer'] == 0
+    assert editor.get_data()['answer_available'] is False
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_question_editor_shows_shared_passage_as_read_only_context():
     editor = QuestionEditor(
         question_data={

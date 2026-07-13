@@ -21,6 +21,7 @@ from ...parser.formatting import (
     normalize_private_math_glyphs,
 )
 from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
+from ...parser.question import ALL_CHOICES_CORRECT
 
 
 class QuestionEditor(QDialog):
@@ -398,13 +399,23 @@ class QuestionEditor(QDialog):
         return f"{year}년 {session}회 {subject} {number}번"
 
     def _init_answer_and_choices(self):
+        answer_available = bool(
+            self.question_data.get(
+                'answer_available', self.question_data.get('correct_answer') != 0
+            )
+        )
+        if not answer_available:
+            self.answerCombo.addItem("정답 없음", userData=0)
+        self.answerCombo.addItem("전원 정답", userData=ALL_CHOICES_CORRECT)
         for number in range(1, 5):
             symbol = NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
             self.answerCombo.addItem(f"{symbol} ({number}번)", userData=number)
 
         correct_answer = self.question_data.get('correct_answer')
         index = self.answerCombo.findData(correct_answer)
-        self.answerCombo.setCurrentIndex(index if index >= 0 else 0)
+        if index < 0:
+            index = self.answerCombo.findData(1)
+        self.answerCombo.setCurrentIndex(index)
 
     def _init_subjects(self):
         for subject in self.subject_options:
@@ -736,6 +747,7 @@ class QuestionEditor(QDialog):
                 'choice_image_path': self.choiceImagePaths.get(number),
             })
 
+        correct_answer = self.answerCombo.currentData()
         return {
             'year': self.yearInput.value(),
             'session': self.sessionInput.value(),
@@ -744,7 +756,8 @@ class QuestionEditor(QDialog):
             'subject_code': self.subjectCombo.currentData() or self.question_data.get('subject_code'),
             'question_text': question_text,
             'question_format_json': question_format_json,
-            'correct_answer': self.answerCombo.currentData(),
+            'correct_answer': correct_answer,
+            'answer_available': correct_answer != 0,
             'tags': self.tagsInput.text(),
             'explanation': self.explanationEditor.toPlainText().strip() or None,
             'image_path': self.imagePath,

@@ -36,6 +36,10 @@ LEGACY_CHOICE_PATTERN = re.compile(
     r'(?:[\.\),，,]|(?=\s+[A-Za-z0-9\[\(]))'
 )
 
+# Official answer keys occasionally declare every listed choice correct.
+# Keep this distinct from 0, which means that no official answer is available.
+ALL_CHOICES_CORRECT = -1
+
 
 @dataclass
 class Choice:

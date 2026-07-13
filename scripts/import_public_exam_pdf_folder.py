@@ -47,7 +47,7 @@ from src.parser.offline_sources import (  # noqa: E402
     extract_offline_structured_pages,
     parse_offline_question_pdf,
 )
-from src.parser.question import Choice, Question  # noqa: E402
+from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question  # noqa: E402
 from src.web_import.importer import (  # noqa: E402
     ComcbtImportService,
     QuestionSource,
@@ -1333,13 +1333,20 @@ def extra_quality_errors(parsed: ComcbtParsedExam, answer_key: dict[int, int]) -
         errors.append("question_numbers_not_contiguous")
     if answer_key and len(questions) != len(answer_key):
         errors.append(f"answer_key_count_mismatch: questions={len(questions)} answers={len(answer_key)}")
-    if any(not isinstance(answer, int) or not 1 <= answer <= 5 for answer in answer_key.values()):
+    if any(
+        not isinstance(answer, int)
+        or not (answer == ALL_CHOICES_CORRECT or 1 <= answer <= 5)
+        for answer in answer_key.values()
+    ):
         errors.append("invalid_answer_value")
     if any(
         question.correct_answer is not None
         and (
             not isinstance(question.correct_answer, int)
-            or not 1 <= question.correct_answer <= len(question.choices)
+            or not (
+                question.correct_answer == ALL_CHOICES_CORRECT
+                or 1 <= question.correct_answer <= len(question.choices)
+            )
         )
         for question in questions
     ):

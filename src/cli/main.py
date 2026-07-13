@@ -5,6 +5,8 @@ import click
 import logging
 from pathlib import Path
 
+from ..parser.question import ALL_CHOICES_CORRECT
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -197,11 +199,13 @@ def show_question(question_id, db_path):
     click.echo(f"{'=' * 60}")
     click.echo(f"\n{q['question_text']}\n")
     
+    all_choices_correct = q['correct_answer'] == ALL_CHOICES_CORRECT
     for choice in q['choices']:
-        marker = "*" if choice['number'] == q['correct_answer'] else " "
+        marker = "*" if all_choices_correct or choice['number'] == q['correct_answer'] else " "
         click.echo(f"  {marker} {choice['symbol']} {choice['text']}")
-    
-    click.echo(f"\n정답: {q['correct_answer']}번")
+
+    answer_label = "전원 정답" if all_choices_correct else f"{q['correct_answer']}번"
+    click.echo(f"\n정답: {answer_label}")
 
 
 # ============ 모의고사 명령어 ============

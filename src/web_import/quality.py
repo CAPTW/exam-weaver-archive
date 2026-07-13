@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from src.web_import.models import ComcbtParsedExam
+from src.parser.question import ALL_CHOICES_CORRECT
 
 
 IMAGE_CHOICE_PLACEHOLDER = "[이미지 선지]"
@@ -92,7 +93,7 @@ def _validate_question(question: Any, errors: list[str], warnings: list[str]) ->
         )
 
     correct_answer = getattr(question, "correct_answer", None)
-    if correct_answer not in set(choice_numbers):
+    if correct_answer != ALL_CHOICES_CORRECT and correct_answer not in set(choice_numbers):
         errors.append(
             f"invalid_correct_answer: question {question_number} answer must match a choice number"
         )

@@ -13,6 +13,7 @@ from .extractor import PDFExtractor
 from .layout import StructuredPage
 from .offline_exam import OfflineExamParser, ParsedOfflineQuestion
 from .offline_quality import validate_offline_question
+from .question import ALL_CHOICES_CORRECT
 
 
 class DocumentRole(str, Enum):
@@ -172,7 +173,9 @@ def require_complete_offline_set(
     else:
         for number, answer in zip(expected, answers):
             choice_count = int(choice_counts.get(number, 0) or 0)
-            if not isinstance(answer, int) or not 1 <= answer <= choice_count:
+            if not isinstance(answer, int) or not (
+                answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
+            ):
                 invalid_answers.append((number, answer))
     if invalid_answers:
         raise OfflineSetValidationError(f"invalid_answers: {invalid_answers}")
@@ -187,7 +190,9 @@ def require_persistable_offline_questions(items: Iterable[object]) -> None:
         number = int(getattr(question, "number", 0) or 0)
         answer = getattr(question, "correct_answer", None)
         choice_count = len(getattr(question, "choices", ()) or ())
-        if not isinstance(answer, int) or not 1 <= answer <= choice_count:
+        if not isinstance(answer, int) or not (
+            answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
+        ):
             invalid.append((number, answer))
     if invalid:
         raise OfflineSetValidationError(f"invalid_answers: {invalid}")

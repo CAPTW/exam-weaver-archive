@@ -273,6 +273,30 @@ def test_persistence_gate_rejects_zero_answer_question():
         require_persistable_offline_questions([SimpleNamespace(question=question)])
 
 
+def test_complete_and_persistence_gates_accept_explicit_all_choices_answer():
+    from src.parser.offline_sources import (
+        require_complete_offline_set,
+        require_persistable_offline_questions,
+    )
+    from src.parser.question import Choice, Question
+
+    require_complete_offline_set(
+        {1: object()},
+        expected_numbers=[1],
+        answers=[-1],
+        rejected_count=0,
+        choice_counts={1: 4},
+    )
+    question = Question(
+        number=1,
+        text="본문",
+        choices=[Choice(number, str(number), str(number)) for number in range(1, 5)],
+        correct_answer=-1,
+    )
+
+    require_persistable_offline_questions([SimpleNamespace(question=question)])
+
+
 @pytest.mark.parametrize(
     "module_name",
     [

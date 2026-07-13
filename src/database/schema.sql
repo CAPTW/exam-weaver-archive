@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS questions (
     explanation TEXT,                    -- 사용자가 직접 작성한 상세 해설
     has_image BOOLEAN DEFAULT 0,         -- 이미지 포함 여부
     image_path TEXT,                     -- 이미지 경로
-    correct_answer INTEGER NOT NULL,     -- 1, 2, 3, 4
+    correct_answer INTEGER NOT NULL,     -- 1..N, -1 when every choice is officially correct
     answer_available BOOLEAN NOT NULL DEFAULT 1, -- 0 when the official source provides no answer
     source_page INTEGER,                 -- 원본 PDF 페이지
     tags TEXT,                           -- 태그 (comma separated)
