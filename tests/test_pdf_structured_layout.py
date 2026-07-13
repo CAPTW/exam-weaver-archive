@@ -944,6 +944,51 @@ def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypat
     ]
 
 
+def test_vertical_choice_table_replaces_fragment_merged_into_missing_cell(monkeypatch):
+    words = [
+        {"text": "24.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "내용은?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+    ]
+    rows = (
+        (("㉠", 79, 97), ("해양수산부장관", 108, 236), ("㉡", 242, 259),
+         ("31년", 270, 296), ("㉢", 336, 354), ("기본계획", 365, 435)),
+        (("㉠", 79, 97), ("해양경찰청장", 108, 217), ("㉡", 265, 283),
+         ("5년", 294, 320), ("㉢", 361, 378), ("기본계획", 389, 459)),
+        (("㉠", 79, 97), ("해양경찰청장", 108, 217), ("㉡", 265, 283),
+         ("3년", 294, 320), ("㉢", 361, 378), ("기본계획", 389, 459)),
+        (("㉠", 79, 97), ("해양경찰청장", 108, 217), ("㉡", 265, 283),
+         ("5년", 294, 320), ("㉢", 361, 378), ("시행계획", 389, 459)),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for marker, row, y in zip(("㉦", None, "㉭", None), rows, (120, 160, 200, 240)):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+        if marker:
+            words.append({"text": marker, "bbox": (50, y, 68, y + 14), "confidence": 0.8})
+        for text, x0, x1 in row:
+            words.append({"text": text, "bbox": (x0, y, x1, y + 14), "confidence": 0.98})
+
+    calls = 0
+
+    def recover_cell(_crop):
+        nonlocal calls
+        calls += 1
+        return "3년" if calls == 1 else None
+
+    monkeypatch.setattr(
+        PDFExtractor, "_targeted_choice_crop_text", staticmethod(recover_cell)
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices[0] == "㉠ 해양수산부장관 ㉡ 3년 ㉢ 기본계획"
+
+
 def test_vertical_choice_table_recovers_one_different_missing_cell_per_row(monkeypatch):
     words = [
         {"text": "26.", "bbox": (520, 40, 550, 54), "confidence": 0.98},
@@ -1101,6 +1146,77 @@ def test_inline_two_by_two_markers_do_not_override_later_vertical_choices():
     selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
 
     assert [anchor[0] for anchor in selected] == [2, 3, 4, 5]
+
+
+def test_vertical_choices_do_not_start_before_proposition_table_header():
+    lines = (
+        LayoutLine(
+            (LayoutWord("해양과학조사에", (0.544, 0.323, 0.67, 0.338), 0.98, 1),),
+            (0.544, 0.323, 0.67, 0.338), 1, 1,
+        ),
+        LayoutLine(
+            tuple(
+                LayoutWord(marker, (x, 0.412, x + 0.018, 0.427), 0.98, 1)
+                for marker, x in zip(("㉠", "㉡", "㉣"), (0.582, 0.639, 0.884))
+            ),
+            (0.582, 0.412, 0.902, 0.427), 1, 1,
+        ),
+        *tuple(
+            LayoutLine(
+                (LayoutWord(text, (x, y, 0.94, y + 0.015), 0.98, 1),),
+                (x, y, 0.94, y + 0.015), 1, 1,
+            )
+            for text, x, y in (
+                ("허가 6개월 외교부장관 해양수산부장관", 0.573, 0.432),
+                ("동의 6개월 외교부장관 해양경찰청장", 0.572, 0.452),
+                ("㉭ 동의 6개월 외교부장관 해양수산부장관", 0.542, 0.472),
+                ("허가 6개월 해양수산부장관 외교부장관", 0.573, 0.492),
+            )
+        ),
+    )
+    anchors = (
+        (0, 0.542, 0, False, None),
+        (2, 0.542, 0, False, None),
+        (3, 0.542, 0, False, None),
+        (4, 0.542, 0, True, None),
+        (5, 0.542, 0, False, None),
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert [anchor[0] for anchor in selected] == [2, 3, 4, 5]
+
+
+def test_proposition_order_choices_are_not_treated_as_table_headers():
+    def line(tokens, y):
+        words = tuple(
+            LayoutWord(token, (0.532 + index * 0.028, y, 0.552 + index * 0.028, y + 0.015), 0.98, 1)
+            for index, token in enumerate(tokens)
+        )
+        return LayoutLine(words, (words[0].bbox[0], y, words[-1].bbox[2], y + 0.015), 1, 1)
+
+    lines = (
+        line(("(단,", "좁은", "수로"), 0.118),
+        line(("라고", "가정)"), 0.137),
+        line(("㉣", "어로에", "종사하지", "않고"), 0.247),
+        line(("㉦", "㉣", "-", "㉤", "-", "㉢", "-", "㉡", "-", "㉠"), 0.291),
+        line(("9㉤", "-", "㉣", "-", "㉡", "-", "㉢", "-", "㉠"), 0.310),
+        line(("㉣", "-", "㉤", "-", "㉡", "-", "㉢", "-", "㉠"), 0.329),
+        line(("㉦㉣", "-", "㉤", "-", "㉢", "-", "㉠", "-", "㉡"), 0.348),
+    )
+    anchors = (
+        (0, 0.532, 0, False, None),
+        (1, 0.532, 0, False, None),
+        (2, 0.532, 0, False, None),
+        (3, 0.532, 0, True, None),
+        (4, 0.532, 0, True, None),
+        (5, 0.532, 0, False, None),
+        (6, 0.532, 0, True, None),
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert [anchor[0] for anchor in selected] == [3, 4, 5, 6]
 
 
 def test_inline_explicit_markers_do_not_block_later_damaged_vertical_choices(monkeypatch):

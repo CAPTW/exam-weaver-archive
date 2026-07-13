@@ -2243,7 +2243,7 @@ class PDFExtractor:
             crop_end_x = min(0.99, column_x + 0.060)
             recovered.append((
                 index, value, max(0.0, column_x - 0.022),
-                crop_end_x, False,
+                crop_end_x, True,
             ))
         return recovered
 
@@ -2814,6 +2814,18 @@ class PDFExtractor:
             word_x = float(lines[anchor[0]].words[anchor[2]].bbox[0])
             return word_x >= anchor[1] + 0.020
 
+        def proposition_table_header(line):
+            tokens = [str(word.text).strip() for word in line.words]
+            markers = {token for token in tokens if token in _VISUAL_PROPOSITION_MARKERS}
+            return (
+                len(markers) >= 2
+                and all(token in _VISUAL_PROPOSITION_MARKERS for token in tokens)
+                and not any(
+                    getattr(word, "visual_choice_marker", False)
+                    for word in line.words
+                )
+            )
+
         def strong_grid(grid, *, allow_inferred_rings=False):
             span = grid[1][1] - grid[0][1]
             supported = [
@@ -2970,8 +2982,12 @@ class PDFExtractor:
                         _VISUAL_QUESTION_LEAD.match(lines[index].text)
                         for index in range(vertical[0][0] + 1, vertical[-1][0])
                     )
+                    crosses_table_header = any(
+                        proposition_table_header(lines[index])
+                        for index in range(vertical[0][0] + 1, vertical[-1][0])
+                    )
                     cluster_patterns.append((
-                        -int(crosses_semantic_lead),
+                        -int(crosses_semantic_lead or crosses_table_header),
                         sum(trusted_vertical),
                         int(trusted_vertical[0]) + int(trusted_vertical[-1]),
                         -sum(bool(anchor[3]) and anchor[2] != 0 for anchor in vertical),
