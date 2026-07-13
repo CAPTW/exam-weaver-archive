@@ -418,16 +418,27 @@ class OfflineExamParser:
         number = int(start.group(1))
         first_stem_text = start.group(2).strip()
 
-        labeled_numeric_recovery = (
-            self._recover_labeled_numeric_table(region[1:])
-            or self._recover_wrapped_labeled_table(region[1:])
-        )
-        shifted_grid_recovery = self._recover_shifted_two_by_two_grid(region)
-        shifted_recovery = self._recover_shifted_visual_choices(region)
-        table_recovery = self._recover_transposed_percentage_table(region[1:])
-        recovery = self._recover_coordinate_choice_row(region[1:])
+        visual_choice_start = self._visual_choice_sequence_start(region)
+
+        if visual_choice_start is not None:
+            labeled_numeric_recovery = None
+            shifted_grid_recovery = None
+            shifted_recovery = None
+            table_recovery = None
+            recovery = None
+        else:
+            labeled_numeric_recovery = (
+                self._recover_labeled_numeric_table(region[1:])
+                or self._recover_wrapped_labeled_table(region[1:])
+            )
+            shifted_grid_recovery = self._recover_shifted_two_by_two_grid(region)
+            shifted_recovery = self._recover_shifted_visual_choices(region)
+            table_recovery = self._recover_transposed_percentage_table(region[1:])
+            recovery = self._recover_coordinate_choice_row(region[1:])
         has_explicit_choices = any(
-            self._explicit_choice_pieces(record.text) for record in region[1:]
+            self._explicit_choice_pieces(record.text)
+            for index, record in enumerate(region[1:], start=1)
+            if visual_choice_start is None or index >= visual_choice_start
         ) and shifted_recovery is None and labeled_numeric_recovery is None and shifted_grid_recovery is None
         recovered_index: int | None = None
         recovered_choices: list[str] = []
@@ -480,6 +491,7 @@ class OfflineExamParser:
         explicit_records = [
             (index, self._explicit_choice_pieces(record.text))
             for index, record in enumerate(region[1:], start=1)
+            if visual_choice_start is None or index >= visual_choice_start
             if self._explicit_choice_pieces(record.text)
         ]
         explicit_numbers = [
@@ -512,6 +524,9 @@ class OfflineExamParser:
                     ).strip()
 
         for index, record in enumerate(region[1:], start=1):
+            if visual_choice_start is not None and index < visual_choice_start:
+                stem_parts.append(record.text)
+                continue
             if use_table_recovery and index in table_indexes:
                 continue
             if use_recovery and index == recovered_index:
@@ -643,6 +658,30 @@ class OfflineExamParser:
             confidence=confidence,
             diagnostics=tuple(diagnostics),
         )
+
+    def _visual_choice_sequence_start(
+        self, region: Sequence[_LineRecord],
+    ) -> int | None:
+        markers = []
+        for index, record in enumerate(region[1:], start=1):
+            for word in sorted(record.words, key=lambda item: item.bbox[0]):
+                if not getattr(word, "visual_choice_marker", False):
+                    continue
+                text = str(word.text).strip()
+                if text[:1] in _CHOICE_MARKERS:
+                    markers.append((index, _CHOICE_MARKERS[text[:1]]))
+        numbers = [number for _index, number in markers]
+        if numbers not in ([1, 2, 3, 4], [1, 2, 3, 4, 5]):
+            return None
+        first_visual = markers[0][0]
+        prior_explicit = [
+            number
+            for record in region[1:first_visual]
+            for number, _text in self._explicit_choice_pieces(record.text)
+        ]
+        if prior_explicit != [1, 2, 3, 4]:
+            return None
+        return first_visual
 
     def _recover_shifted_visual_choices(
         self, region: Sequence[_LineRecord]

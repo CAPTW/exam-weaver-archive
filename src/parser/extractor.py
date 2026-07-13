@@ -38,7 +38,7 @@ _VISUAL_PROPOSITION_MARKERS = set("㉠㉡㉢㉣㉤㉥")
 _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:[?？]|고려하지\s*아니한다[.)])\s*$"
 )
-_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭]\)?\s*")
+_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭年]\)?\s*")
 _TARGETED_OCR_STATE_LOCK = threading.Lock()
 _TARGETED_OCR_ACTIVE_TOKEN: object | None = None
 _TARGETED_OCR_CIRCUIT_OPEN = False
@@ -655,7 +655,7 @@ class PDFExtractor:
         gray = image.convert("L")
         lines = list(page.lines)
         replacements: dict[int, list[tuple[str, int, float, bool]]] = {}
-        recovered_cells: dict[int, tuple[str, float, float]] = {}
+        recovered_cells: dict[int, list[tuple[str, float, float, bool]]] = {}
         columns = sorted({line.column for line in lines})
 
         for column in columns:
@@ -795,18 +795,19 @@ class PDFExtractor:
                 recovered = self._recover_empty_visual_grid_cell(gray, lines, selected)
                 if recovered is not None:
                     recovered_index, recovered_text, marker_x, cell_end_x = recovered
-                    recovered_cells[recovered_index] = (
-                        recovered_text,
-                        marker_x,
-                        cell_end_x,
-                    )
+                    recovered_cells.setdefault(recovered_index, []).append((
+                        recovered_text, marker_x, cell_end_x, False
+                    ))
                 for recovered in self._recover_empty_vertical_table_cells(
                     gray, lines, selected
                 ):
-                    recovered_index, recovered_text, marker_x, cell_end_x = recovered
-                    recovered_cells[recovered_index] = (
-                        recovered_text, marker_x, cell_end_x
-                    )
+                    (
+                        recovered_index, recovered_text, marker_x,
+                        cell_end_x, replace_existing,
+                    ) = recovered
+                    recovered_cells.setdefault(recovered_index, []).append((
+                        recovered_text, marker_x, cell_end_x, replace_existing
+                    ))
                 for choice_number, (index, marker_x, word_index, existing, known) in enumerate(selected, start=1):
                     if known is not None and known != choice_number:
                         break
@@ -822,14 +823,105 @@ class PDFExtractor:
                     replacements.pop(index, None)
                     recovered_cells.pop(index, None)
 
+        # Garbled question terminators can make the semantic-start pass split
+        # a valid choice region before it reaches the ring selector.  Recheck
+        # only consecutive numbered questions anchored at the page gutter;
+        # numeric-looking choice rows are indented and therefore excluded.
+        for column in columns:
+            indexes = [
+                index for index, line in enumerate(lines)
+                if line.column == column
+            ]
+            numbered_positions = [
+                position for position, index in enumerate(indexes)
+                if _VISUAL_QUESTION_START.match(lines[index].text)
+                and lines[index].words
+            ]
+            if not numbered_positions:
+                continue
+            question_gutter = min(
+                float(lines[indexes[position]].words[0].bbox[0])
+                for position in numbered_positions
+            )
+            question_positions = [
+                position for position in numbered_positions
+                if float(lines[indexes[position]].words[0].bbox[0])
+                <= question_gutter + 0.020
+            ]
+            for offset, start_position in enumerate(question_positions):
+                end_position = (
+                    question_positions[offset + 1]
+                    if offset + 1 < len(question_positions)
+                    else len(indexes)
+                )
+                region_indexes = indexes[start_position:end_position]
+                anchors = self._visual_ring_anchors(
+                    gray, lines, region_indexes[1:]
+                )
+                selected = self._select_complete_visual_choice_layout(
+                    lines, anchors
+                )
+                if selected is None:
+                    continue
+                conflicting_indexes = {
+                    index for index in region_indexes if index in replacements
+                }
+                if conflicting_indexes:
+                    if (
+                        len({index for index, *_ in selected}) == 4
+                        and len(conflicting_indexes) < 4
+                    ):
+                        for index in conflicting_indexes:
+                            replacements.pop(index, None)
+                            recovered_cells.pop(index, None)
+                    else:
+                        continue
+                if any(
+                    known is not None and known != choice_number
+                    for choice_number, (*_prefix, known) in enumerate(
+                        selected, start=1
+                    )
+                ):
+                    continue
+                recovered = self._recover_empty_visual_grid_cell(
+                    gray, lines, selected
+                )
+                if recovered is not None:
+                    recovered_index, recovered_text, marker_x, cell_end_x = recovered
+                    recovered_cells.setdefault(recovered_index, []).append((
+                        recovered_text, marker_x, cell_end_x, False
+                    ))
+                for recovered in self._recover_empty_vertical_table_cells(
+                    gray, lines, selected
+                ):
+                    (
+                        recovered_index, recovered_text, marker_x,
+                        cell_end_x, replace_existing,
+                    ) = recovered
+                    recovered_cells.setdefault(recovered_index, []).append((
+                        recovered_text, marker_x, cell_end_x, replace_existing
+                    ))
+                for choice_number, (
+                    index, marker_x, word_index, existing, _known
+                ) in enumerate(selected, start=1):
+                    replacements.setdefault(index, []).append((
+                        _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                        word_index,
+                        marker_x,
+                        existing,
+                    ))
+
         if replacements:
             for index, operations in replacements.items():
                 lines[index] = self._line_with_visual_markers(lines[index], operations)
                 if index in recovered_cells:
-                    text_value, marker_x, cell_end_x = recovered_cells[index]
-                    lines[index] = self._line_with_recovered_choice_text(
-                        lines[index], text_value, marker_x, cell_end_x
-                    )
+                    for (
+                        text_value, marker_x, cell_end_x, replace_existing
+                    ) in recovered_cells[index]:
+                        lines[index] = self._line_with_recovered_choice_text(
+                            lines[index], text_value, marker_x, cell_end_x,
+                            replace_existing=replace_existing,
+                        )
             page = replace(page, lines=tuple(lines))
         page = self._recover_targeted_ton_hour_rows(page, gray)
         page = self._recover_targeted_three_field_rows(page, gray)
@@ -2028,41 +2120,128 @@ class PDFExtractor:
                 if float(word.bbox[0]) >= marker_x + 0.040
                 and not (existing and offset == word_index)
             ]
-            rows.append((index, marker_x, content))
-        rich = [content for _index, _marker_x, content in rows if len(content) == 3]
-        sparse = [
-            (index, marker_x, content)
-            for index, marker_x, content in rows
-            if len(content) == 2
-        ]
-        if len(rich) < 1 or not 1 <= len(sparse) <= 2:
+            cells = []
+            for word in sorted(content, key=lambda item: item.bbox[0]):
+                start_x, end_x = float(word.bbox[0]), float(word.bbox[2])
+                if not cells or start_x - cells[-1][1] >= 0.035:
+                    cells.append([start_x, end_x, [word]])
+                else:
+                    cells[-1][1] = max(cells[-1][1], end_x)
+                    cells[-1][2].append(word)
+            rows.append((index, marker_x, cells))
+
+        position_clusters = []
+        for value in sorted(cell[0] for _index, _marker_x, cells in rows for cell in cells):
+            cluster = next((
+                group for group in position_clusters
+                if abs(sum(group) / len(group) - value) <= 0.030
+            ), None)
+            if cluster is None:
+                position_clusters.append([value])
+            else:
+                cluster.append(value)
+        if len(position_clusters) != 3:
             return []
-        columns = [
-            sum(float(content[position].bbox[0]) for content in rich) / len(rich)
-            for position in range(3)
-        ]
+        columns = [sum(group) / len(group) for group in position_clusters]
         if min(right - left for left, right in zip(columns, columns[1:])) < 0.060:
             return []
-        if any(
-            abs(float(content[0].bbox[0]) - columns[1]) > 0.020
-            or abs(float(content[1].bbox[0]) - columns[2]) > 0.020
-            for _index, _marker_x, content in sparse
-        ):
+
+        sparse = []
+        observed_cells = []
+        for index, marker_x, cells in rows:
+            occupied = []
+            for start_x, end_x, cell_words in cells:
+                nearest = min(range(3), key=lambda position: abs(columns[position] - start_x))
+                if abs(columns[nearest] - start_x) > 0.030 or nearest in occupied:
+                    return []
+                occupied.append(nearest)
+                observed_cells.append((
+                    index, nearest, start_x, end_x, cell_words
+                ))
+            missing = sorted(set(range(3)) - set(occupied))
+            if not missing:
+                continue
+            if len(missing) != 1:
+                return []
+            sparse.append((index, marker_x, missing[0]))
+        if not sparse:
             return []
+
         width, height = gray.size
         recovered = []
-        for index, marker_x, _content in sparse:
+        # A present cell can still be a damaged OCR fragment.  Correct only
+        # the standalone caret-like artifacts observed in broken Hangul OCR;
+        # normal punctuation such as middots, slashes, and hyphens is valid
+        # choice content.  Run corrections first because these narrow crops
+        # are the most sensitive to OCR engine state.
+        correction_variants = (
+            (0.005, 0.035, 0.007, 0.009),
+            (0.005, 0.055, 0.005, 0.009),
+            (0.005, 0.055, 0.007, 0.005),
+            (0.005, 0.055, 0.009, 0.005),
+            (0.010, 0.045, 0.003, 0.005),
+        )
+        for index, column_number, observed_x, _end_x, cell_words in observed_cells:
+            text_value = " ".join(str(word.text).strip() for word in cell_words).strip()
+            if not any(
+                token in {"^", "＾", "∧"}
+                for token in text_value.split()
+            ):
+                continue
             line = lines[index]
-            crop = gray.crop((
-                max(0, int((columns[0] - 0.025) * width)),
-                max(0, int((float(line.bbox[1]) - 0.010) * height)),
-                min(width, int((columns[1] - 0.025) * width)),
-                min(height, int((float(line.bbox[3]) + 0.010) * height)),
+            column_x = observed_x
+            corrected = None
+            for left_pad, right_pad, top_pad, bottom_pad in correction_variants:
+                for x_shift in (0.0, 0.00025, 0.00075):
+                    crop = gray.crop((
+                        max(0, int((column_x + x_shift - left_pad) * width)),
+                        max(0, int((float(line.bbox[1]) - top_pad) * height)),
+                        min(width, int((column_x + x_shift + right_pad) * width)),
+                        min(height, int((float(line.bbox[3]) + bottom_pad) * height)),
+                    ))
+                    corrected = cls._targeted_choice_crop_text(crop)
+                    if corrected:
+                        break
+                if corrected:
+                    break
+            if not corrected or len(corrected.split()) > 2:
+                return []
+            cell_end_x = (
+                columns[column_number + 1] - 0.020
+                if column_number + 1 < len(columns)
+                else min(0.99, column_x + 0.060)
+            )
+            recovered.append((
+                index, corrected, max(0.0, column_x - 0.022),
+                cell_end_x, True,
             ))
-            value = cls._targeted_choice_crop_text(crop)
+
+        crop_variants = (
+            (0.015, 0.055, 0.006, 0.006),
+            (0.015, 0.045, 0.005, 0.007),
+            (0.010, 0.045, 0.003, 0.005),
+        )
+        for index, _marker_x, missing_column in sparse:
+            line = lines[index]
+            column_x = columns[missing_column]
+            value = None
+            for left_pad, right_pad, top_pad, bottom_pad in crop_variants:
+                crop = gray.crop((
+                    max(0, int((column_x - left_pad) * width)),
+                    max(0, int((float(line.bbox[1]) - top_pad) * height)),
+                    min(width, int((column_x + right_pad) * width)),
+                    min(height, int((float(line.bbox[3]) + bottom_pad) * height)),
+                ))
+                value = cls._targeted_choice_crop_text(crop)
+                if value:
+                    break
             if not value or len(value.split()) > 2:
                 return []
-            recovered.append((index, value, marker_x, columns[1] - 0.025))
+            crop_end_x = min(0.99, column_x + 0.060)
+            recovered.append((
+                index, value, max(0.0, column_x - 0.022),
+                crop_end_x, False,
+            ))
         return recovered
 
     @classmethod
@@ -2209,13 +2388,28 @@ class PDFExtractor:
 
     @staticmethod
     def _line_with_recovered_choice_text(
-        line: LayoutLine, text_value: str, marker_x: float, cell_end_x: float
+        line: LayoutLine,
+        text_value: str,
+        marker_x: float,
+        cell_end_x: float,
+        *,
+        replace_existing: bool = False,
     ) -> LayoutLine:
         words = list(line.words)
+        content_x = marker_x + 0.022
+        if replace_existing:
+            words = [
+                word for word in words
+                if not (
+                    float(word.bbox[0]) >= content_x - 0.010
+                    and float(word.bbox[0]) < cell_end_x
+                    and not getattr(word, "visual_choice_marker", False)
+                )
+            ]
         words.append(LayoutWord(
             text=text_value,
             bbox=(
-                marker_x + 0.022,
+                content_x,
                 line.bbox[1],
                 max(marker_x + 0.024, cell_end_x - 0.006),
                 line.bbox[3],
@@ -2372,6 +2566,7 @@ class PDFExtractor:
                     and len(leading_text) > 2
                     and leading_text[:1] not in _VISUAL_EXPLICIT_MARKERS
                     and leading_text[:1] not in _VISUAL_DAMAGED_MARKERS
+                    and len({anchor[0] for anchor in cluster}) < 3
                     and not min(observed_indexes) < index < max(observed_indexes)
                 ):
                     continue
@@ -2383,6 +2578,13 @@ class PDFExtractor:
                     for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
                 )
                 indented_choice_text = leading_x >= marker_x + 0.015
+                weak_compact_marker = (
+                    len({anchor[0] for anchor in cluster}) >= 3
+                    and abs(leading_x - projected_x) <= 0.012
+                    and len(leading_text) <= 2
+                    and score[0] >= 20
+                    and score[1] >= 120
+                )
                 if not (
                     (score[0] >= 23 and score[1] >= 140)
                     or (
@@ -2391,6 +2593,7 @@ class PDFExtractor:
                         and score[0] >= 20
                         and score[1] >= 120
                     )
+                    or weak_compact_marker
                 ):
                     continue
                 if leading_x <= marker_x + 0.012:
@@ -2415,6 +2618,57 @@ class PDFExtractor:
                     bool(damaged_prefix),
                     None,
                 ))
+
+        # Projection can reveal a third strong ring only after an earlier
+        # compact OCR token was visited.  Revisit compact damaged tokens once
+        # three distinct rows now establish the shared marker column.
+        verified_clusters = []
+        for anchor in sorted(anchors, key=lambda item: item[1]):
+            cluster = next((
+                group for group in verified_clusters
+                if abs(group[0][1] - anchor[1]) <= 0.012
+            ), None)
+            if cluster is None:
+                verified_clusters.append([anchor])
+            else:
+                cluster.append(anchor)
+        for cluster in verified_clusters:
+            if len({anchor[0] for anchor in cluster}) < 3:
+                continue
+            marker_x = min(anchor[1] for anchor in cluster)
+            for index in region_indexes:
+                if any(
+                    anchor[0] == index and abs(anchor[1] - marker_x) <= 0.012
+                    for anchor in anchors
+                ):
+                    continue
+                line = lines[index]
+                if not line.words or line.text.rstrip().endswith("?"):
+                    continue
+                leading_word = line.words[0]
+                leading_text = str(leading_word.text).strip()
+                leading_x = float(leading_word.bbox[0])
+                damaged_prefix = _VISUAL_DAMAGED_PREFIX.match(leading_text)
+                if (
+                    damaged_prefix is None
+                    or damaged_prefix.end() != len(leading_text)
+                    or abs(leading_x - marker_x) > 0.012
+                ):
+                    continue
+                score, _projected_x = max(
+                    (
+                        cls._visual_marker_ring_score(
+                            gray, marker_x + delta, line.bbox
+                        ),
+                        marker_x + delta,
+                    )
+                    for delta in (
+                        -0.004, -0.003, -0.002, -0.001, 0.0,
+                        0.001, 0.002, 0.003, 0.004,
+                    )
+                )
+                if score[0] >= 20 and score[1] >= 120:
+                    anchors.append((index, leading_x, 0, True, None))
 
         def inferred_anchor(index, marker_x):
             if lines[index].text.rstrip().endswith("?"):
@@ -2547,7 +2801,36 @@ class PDFExtractor:
                     continue
                 mean_gap = sum(gaps) / len(gaps)
                 irregularity = sum(abs(gap - mean_gap) for gap in gaps)
-                if irregularity <= 0.040:
+                line_index = candidate[0][0]
+                has_cell_content = all(
+                    any(
+                        (
+                            (
+                                (not anchor[3] or offset != anchor[2])
+                                and float(word.bbox[0]) >= anchor[1] + 0.020
+                                and float(word.bbox[0]) < cell_end
+                            )
+                            or (
+                                anchor[3]
+                                and offset == anchor[2]
+                                and bool(
+                                    _VISUAL_DAMAGED_PREFIX.sub(
+                                        "", str(word.text).strip(), count=1
+                                    ).strip()
+                                )
+                            )
+                        )
+                        for offset, word in enumerate(lines[line_index].words)
+                    )
+                    for anchor, cell_end in zip(
+                        candidate,
+                        [
+                            following[1] - 0.010
+                            for following in candidate[1:]
+                        ] + [float(lines[line_index].bbox[2]) + 0.005],
+                    )
+                )
+                if irregularity <= 0.040 and has_cell_content:
                     candidates.append((irregularity, candidate))
             if candidates:
                 patterns.append(list(min(candidates, key=lambda item: item[0])[1]))
@@ -2558,23 +2841,41 @@ class PDFExtractor:
         for left_index, right_index in zip(two_cell_lines, two_cell_lines[1:]):
             def cell_pairs(line_index):
                 ordered = sorted(by_line[line_index], key=lambda item: item[1])
-                outer_like = [
-                    anchor
-                    for position, (anchor, following) in enumerate(
-                        zip(ordered, ordered[1:])
+                sources = ordered
+
+                def has_content(anchor, left_x, right_x):
+                    return any(
+                        (
+                            (
+                                (not anchor[3] or offset != anchor[2])
+                                and float(word.bbox[0]) >= left_x
+                                and float(word.bbox[0]) < right_x
+                            )
+                            or (
+                                anchor[3]
+                                and offset == anchor[2]
+                                and bool(
+                                    _VISUAL_DAMAGED_PREFIX.sub(
+                                        "", str(word.text).strip(), count=1
+                                    ).strip()
+                                )
+                            )
+                        )
+                        for offset, word in enumerate(lines[line_index].words)
                     )
-                    if 0.015 <= following[1] - anchor[1] <= 0.060
-                    and (
-                        position == 0
-                        or not anchor[3]
-                        or anchor[1] - ordered[position - 1][1] >= 0.080
-                    )
-                ]
-                sources = outer_like if len(outer_like) >= 2 else ordered
+
                 return [
                     pair
                     for pair in itertools.combinations(sources, 2)
                     if pair[1][1] - pair[0][1] >= 0.080
+                    and has_content(
+                        pair[0], pair[0][1] + 0.020,
+                        pair[1][1] - 0.010,
+                    )
+                    and has_content(
+                        pair[1], pair[1][1] + 0.020,
+                        float(lines[line_index].bbox[2]) + 0.005,
+                    )
                 ]
 
             left_pairs = cell_pairs(left_index)
@@ -2585,7 +2886,7 @@ class PDFExtractor:
                     if max(
                         abs(left[position][1] - right[position][1])
                         for position in range(2)
-                    ) <= 0.035:
+                    ) <= 0.025:
                         total_span = (
                             left[1][1] - left[0][1]
                             + right[1][1] - right[0][1]
@@ -2658,11 +2959,7 @@ class PDFExtractor:
                     grid[1][1] - grid[0][1] >= 0.125
                     and (
                         sum(trusted_anchor(anchor) for anchor in grid) >= 3
-                        or (
-                            grid[1][1] - grid[0][1] >= 0.180
-                            and [trusted_anchor(anchor) for anchor in grid]
-                            in ([True, False, False, True], [False, True, True, False])
-                        )
+                        or grid[1][1] - grid[0][1] >= 0.180
                     )
                 )
             ]
@@ -2676,6 +2973,7 @@ class PDFExtractor:
             )
             if (
                 compact_grid is not None
+                and compact_grid[0][0] >= chosen_vertical[0][0]
                 and vertical_span >= 3 * max(
                     0.001,
                     float(lines[compact_grid[-1][0]].bbox[1])

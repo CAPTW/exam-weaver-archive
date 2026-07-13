@@ -789,6 +789,110 @@ def test_choice_ring_prevents_citation_choice_from_becoming_semantic_question_st
     ]
 
 
+def test_three_strong_choice_rings_restore_weak_year_shaped_first_marker(monkeypatch):
+    words = [
+        {"text": "14.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "문제는?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+    ]
+    for marker, y in zip(("年", "2", "셋째", "㉦"), (100, 180, 260, 340)):
+        marker_x = 50 if marker != "셋째" else 83
+        words.extend([
+            {"text": marker, "bbox": (marker_x, y, marker_x + 18, y + 14), "confidence": 0.80},
+            {"text": f"선택지-{y}", "bbox": (100, y, 300, y + 14), "confidence": 0.98},
+        ])
+
+    def ring_score(_gray, marker_x, bbox):
+        if abs(marker_x - 0.05) > 0.001:
+            return 0, 0
+        return (20, 168) if float(bbox[1]) == pytest.approx(0.10) else (24, 200)
+
+    monkeypatch.setattr(
+        PDFExtractor, "_visual_marker_ring_score", staticmethod(ring_score)
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(
+        structured, Image.new("L", (1000, 1000), 255)
+    )
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "선택지-100", "선택지-180", "셋째 선택지-260", "선택지-340"
+    ]
+
+
+def test_weak_year_shaped_ring_is_not_restored_without_three_strong_peers(monkeypatch):
+    words = [
+        {"text": "14.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "문제는?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+        {"text": "年", "bbox": (50, 100, 68, 114), "confidence": 0.80},
+        {"text": "연도 설명", "bbox": (100, 100, 300, 114), "confidence": 0.98},
+    ]
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_visual_marker_ring_score",
+        staticmethod(lambda _gray, marker_x, _bbox: (20, 168) if abs(marker_x - 0.05) <= 0.006 else (0, 0)),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(
+        structured, Image.new("L", (1000, 1000), 255)
+    )
+
+    assert restored.lines[-1].text == "年 연도 설명"
+    assert restored.lines[-1].words[0].visual_choice_marker is False
+
+
+@pytest.mark.parametrize(
+    ("first_token", "expected_first"),
+    [
+        pytest.param("취득한", "취득한 선택지-100", id="missing-marker-bbox"),
+        pytest.param("年㉠최대", "㉠최대 선택지-100", id="fused-damaged-marker"),
+    ],
+)
+def test_three_aligned_peers_restore_strong_first_ring_at_content_bbox(
+    monkeypatch, first_token, expected_first
+):
+    words = [
+        {"text": "33.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "가장 옳지", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+        {"text": "0들으 LÉ =", "bbox": (52, 60, 150, 74), "confidence": 0.70},
+    ]
+    for marker, y in zip((first_token, "2", "㉭", "㉦"), (100, 180, 260, 340)):
+        words.extend([
+            {"text": marker, "bbox": (50, y, 95, y + 14), "confidence": 0.80},
+            {"text": f"선택지-{y}", "bbox": (110, y, 300, y + 14), "confidence": 0.98},
+        ])
+
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_visual_marker_ring_score",
+        staticmethod(
+            lambda _gray, marker_x, _bbox: (24, 200)
+            if abs(marker_x - 0.05) <= 0.004 else (0, 0)
+        ),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(
+        structured, Image.new("L", (1000, 1000), 255)
+    )
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        expected_first, "선택지-180", "선택지-260", "선택지-340"
+    ]
+
+
 def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypatch):
     words = [
         {"text": "23.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
@@ -830,6 +934,91 @@ def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypat
     ]
 
 
+def test_vertical_choice_table_recovers_one_different_missing_cell_per_row(monkeypatch):
+    words = [
+        {"text": "26.", "bbox": (520, 40, 550, 54), "confidence": 0.98},
+        {"text": "내용은?", "bbox": (560, 40, 650, 54), "confidence": 0.98},
+    ]
+    rows = (
+        ("감정", None, "검량"),
+        ("검량", None, "감정"),
+        ("거 ^", None, "검량"),
+        ("검량", "감정", None),
+    )
+    for marker, row, y in zip(("年", "2", "㉭", "㉦"), rows, (120, 160, 200, 240)):
+        words.append({"text": marker, "bbox": (535, y, 553, y + 14), "confidence": 0.8})
+        for value, x in zip(row, (623, 751, 879)):
+            if value:
+                words.append({"text": value, "bbox": (x, y, x + 40, y + 14), "confidence": 0.98})
+    targets = iter(("검수", "검수", "검수", "감정", "검수"))
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: next(targets)),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (120, 160, 200, 240):
+        draw.ellipse((535, y, 553, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "감정 검수 검량", "검량 검수 감정", "검수 감정 검량", "검량 감정 검수"
+    ]
+
+
+def test_vertical_choice_table_preserves_normal_standalone_punctuation(monkeypatch):
+    words = [
+        {"text": "26.", "bbox": (520, 40, 550, 54), "confidence": 0.98},
+        {"text": "내용은?", "bbox": (560, 40, 650, 54), "confidence": 0.98},
+    ]
+    rows = (
+        (("감정", "·"), None, ("검량",)),
+        (("검량",), None, ("감정",)),
+        (("검수",), None, ("검량",)),
+        (("검량",), ("감정",), None),
+    )
+    for marker, row, y in zip(("年", "2", "㉭", "㉦"), rows, (120, 160, 200, 240)):
+        words.append({"text": marker, "bbox": (535, y, 553, y + 14), "confidence": 0.8})
+        for values, x in zip(row, (623, 751, 879)):
+            if not values:
+                continue
+            for offset, value in enumerate(values):
+                token_x = x + offset * 43
+                words.append({
+                    "text": value,
+                    "bbox": (token_x, y, token_x + 40, y + 14),
+                    "confidence": 0.98,
+                })
+    targets = iter(("검수", "검수", "감정", "검수"))
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: next(targets)),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (120, 160, 200, 240):
+        draw.ellipse((535, y, 553, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "감정 · 검수 검량", "검량 검수 감정", "검수 감정 검량", "검량 감정 검수"
+    ]
+
+
 def test_compact_inline_damaged_choices_restore_missing_inner_marker():
     words = [
         {"text": "27.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
@@ -855,6 +1044,137 @@ def test_compact_inline_damaged_choices_restore_missing_inner_marker():
     question = OfflineExamParser().parse_pages([restored])[0]
 
     assert question.choices == ["㉠", "㉠, ㉣", "㉠, ㉡, ㉣", "㉡, ㉢, ㉣"]
+
+
+def test_inline_two_by_two_markers_do_not_override_later_vertical_choices():
+    lines = (
+        LayoutLine(
+            (
+                LayoutWord("①", (0.18, 0.10, 0.20, 0.115), 0.98, 0),
+                LayoutWord("발문내용", (0.21, 0.10, 0.40, 0.115), 0.98, 0),
+                LayoutWord("②", (0.45, 0.10, 0.47, 0.115), 0.98, 0),
+                LayoutWord("발문내용", (0.48, 0.10, 0.68, 0.115), 0.98, 0),
+            ),
+            (0.18, 0.10, 0.68, 0.115), 1, 0,
+        ),
+        LayoutLine(
+            (
+                LayoutWord("③", (0.18, 0.13, 0.20, 0.145), 0.98, 0),
+                LayoutWord("발문내용", (0.21, 0.13, 0.40, 0.145), 0.98, 0),
+                LayoutWord("④", (0.45, 0.13, 0.47, 0.145), 0.98, 0),
+                LayoutWord("발문내용", (0.48, 0.13, 0.68, 0.145), 0.98, 0),
+            ),
+            (0.18, 0.13, 0.68, 0.145), 1, 0,
+        ),
+        *tuple(
+            LayoutLine(
+                (
+                    LayoutWord(marker, (0.05, y, 0.07, y + 0.015), 0.98, 0),
+                    LayoutWord(text, (0.08, y, 0.50, y + 0.015), 0.98, 0),
+                ),
+                (0.05, y, 0.50, y + 0.015), 1, 0,
+            )
+            for marker, text, y in zip(
+                ("①", "②", "③", "④"),
+                ("첫째선택지", "둘째선택지", "셋째선택지", "넷째선택지"),
+                (0.20, 0.30, 0.40, 0.50),
+            )
+        ),
+    )
+    anchors = tuple(
+        (line_index, word.bbox[0], word_index, True)
+        for line_index, line in enumerate(lines)
+        for word_index, word in enumerate(line.words)
+        if word.text in {"①", "②", "③", "④"}
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert [anchor[0] for anchor in selected] == [2, 3, 4, 5]
+
+
+def test_inline_explicit_markers_do_not_block_later_damaged_vertical_choices(monkeypatch):
+    words = [
+        {"text": "27.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "OCR로 종결부가 손상된 발문", "bbox": (52, 40, 350, 54), "confidence": 0.70},
+    ]
+    for y, markers in ((100, (("①", 180), ("②", 450))), (130, (("③", 180), ("④", 450)))):
+        for marker, x in markers:
+            words.extend((
+                {"text": marker, "bbox": (x, y, x + 18, y + 14), "confidence": 0.98},
+                {"text": "발문내용", "bbox": (x + 30, y, x + 240, y + 14), "confidence": 0.98},
+            ))
+    for marker, text, y in zip(
+        ("年", "2", None, "㉦"),
+        ("첫째선택지", "둘째선택지", "셋째선택지", "넷째선택지"),
+        (200, 300, 400, 500),
+    ):
+        if marker:
+            words.append({"text": marker, "bbox": (50, y, 68, y + 14), "confidence": 0.80})
+        words.append({"text": text, "bbox": (80, y, 400, y + 14), "confidence": 0.98})
+
+    def ring_score(_gray, marker_x, bbox):
+        y = round(float(bbox[1]), 2)
+        expected = {0.10: (0.18, 0.45), 0.13: (0.18, 0.45)}.get(y, (0.05,))
+        return (24, 200) if any(abs(marker_x - x) <= 0.004 for x in expected) else (0, 0)
+
+    monkeypatch.setattr(
+        PDFExtractor, "_visual_marker_ring_score", staticmethod(ring_score)
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(
+        structured, Image.new("L", (1000, 1000), 255)
+    )
+    visual_lines = [
+        line.text
+        for line in restored.lines
+        if any(word.visual_choice_marker for word in line.words)
+    ]
+    assert visual_lines == [
+        "① 첫째선택지", "② 둘째선택지", "③ 셋째선택지", "④ 넷째선택지"
+    ]
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "첫째선택지", "둘째선택지", "셋째선택지", "넷째선택지"
+    ]
+
+
+def test_two_by_two_choice_grid_allows_small_column_stagger():
+    lines = (
+        LayoutLine(
+            (
+                LayoutWord("①", (0.534, 0.20, 0.552, 0.215), 0.98, 0),
+                LayoutWord("어항기본사업", (0.56, 0.20, 0.70, 0.215), 0.98, 0),
+                LayoutWord("②", (0.725, 0.20, 0.743, 0.215), 0.98, 0),
+                LayoutWord("레저관광기반시설사업", (0.75, 0.20, 0.96, 0.215), 0.98, 0),
+            ),
+            (0.534, 0.20, 0.96, 0.215), 1, 0,
+        ),
+        LayoutLine(
+            (
+                LayoutWord("③", (0.534, 0.24, 0.552, 0.255), 0.98, 0),
+                LayoutWord("어항환경개선사업", (0.56, 0.24, 0.72, 0.255), 0.98, 0),
+                LayoutWord("④", (0.748, 0.24, 0.766, 0.255), 0.98, 0),
+                LayoutWord("어항관광발전사업", (0.77, 0.24, 0.96, 0.255), 0.98, 0),
+            ),
+            (0.534, 0.24, 0.96, 0.255), 1, 0,
+        ),
+    )
+    anchors = tuple(
+        (line_index, word.bbox[0], word_index, True)
+        for line_index, line in enumerate(lines)
+        for word_index, word in enumerate(line.words)
+        if word.text in {"①", "②", "③", "④"}
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert [anchor[0] for anchor in selected] == [0, 0, 1, 1]
 
 
 def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
