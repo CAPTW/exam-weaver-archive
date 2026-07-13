@@ -787,6 +787,27 @@ def test_real_provider_preflight_enumerates_registered_contract_without_ocr():
     assert report["missing_answer_associations"] == 0
 
 
+def test_registered_answer_path_treats_bracketed_filename_as_literal(tmp_path):
+    from src.database.staging import _registered_answer_path
+
+    answer_name = "[기출정답]해사법규(24년-13년).pdf"
+    answer_dir = tmp_path / "정답안"
+    answer_dir.mkdir()
+    expected = answer_dir / answer_name
+    expected.write_bytes(b"answer")
+    module = SimpleNamespace(
+        __name__="scripts.import_maritime_law_pdf",
+        ANSWER_FILENAMES={"archive": answer_name},
+        ANSWER_KEYS={"archive": ["archive-key"]},
+    )
+
+    actual = _registered_answer_path(
+        module, {"answer_key": "archive-key"}, 1, tmp_path,
+    )
+
+    assert actual == expected
+
+
 def test_production_build_runs_registration_preflight_before_provider_or_writes(tmp_path, monkeypatch):
     from src.database import staging
 

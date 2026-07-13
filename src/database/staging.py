@@ -1292,9 +1292,13 @@ def _registered_answer_path(module: object, group: Mapping[str, object], group_i
         )
     if bucket is None:
         raise ValueError(f"registered answer association missing for group {group_index}")
-    matches = list(root.rglob(str(filenames[bucket])))
+    answer_filename = str(filenames[bucket])
+    matches = [
+        path for path in root.rglob("*.pdf")
+        if path.name == answer_filename
+    ]
     if len(matches) != 1:
-        raise ValueError(f"registered answer file missing or ambiguous: {filenames[bucket]}")
+        raise ValueError(f"registered answer file missing or ambiguous: {answer_filename}")
     return matches[0]
 
 
