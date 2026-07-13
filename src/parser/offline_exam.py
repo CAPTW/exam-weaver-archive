@@ -76,6 +76,7 @@ class OfflineExamParser:
         self, pages: list[StructuredPage]
     ) -> list[ParsedOfflineQuestion]:
         records, removed_noise_pages = self._document_lines(pages)
+        records = self._restore_corrupted_question_numbers(records)
         regions = self._question_regions(records)
         return [
             self._parse_region(region, removed_noise_pages)
@@ -106,6 +107,45 @@ class OfflineExamParser:
                 if record.text:
                     records.append(record)
         return records, removed_noise_pages
+
+    @staticmethod
+    def _restore_corrupted_question_numbers(
+        records: Sequence[_LineRecord],
+    ) -> list[_LineRecord]:
+        restored = list(records)
+        starts = [
+            (index, int(match.group(1)))
+            for index, record in enumerate(restored)
+            if (match := _QUESTION_START.match(record.text)) is not None
+        ]
+        gutters: dict[tuple[int, int | None], float] = {}
+        for index, _number in starts:
+            record = restored[index]
+            key = (record.page, record.column)
+            gutters[key] = min(gutters.get(key, float("inf")), float(record.bbox[0]))
+        for (left_index, left_number), (right_index, right_number) in zip(
+            starts, starts[1:]
+        ):
+            if right_number != left_number + 2:
+                continue
+            candidates = []
+            for index in range(left_index + 1, right_index):
+                record = restored[index]
+                match = re.match(r"^\S{1,5}(다음\b.*)$", record.text)
+                gutter = gutters.get((record.page, record.column))
+                if (
+                    match is not None
+                    and gutter is not None
+                    and abs(float(record.bbox[0]) - gutter) <= 0.020
+                ):
+                    candidates.append((index, match.group(1)))
+            if len(candidates) != 1:
+                continue
+            index, remainder = candidates[0]
+            restored[index] = replace(
+                restored[index], text=f"{left_number + 1}. {remainder}"
+            )
+        return restored
 
     def _record(self, line: LayoutLine, fallback_page: int) -> _LineRecord:
         words = tuple(sorted(line.words, key=lambda word: word.bbox[0]))
@@ -569,8 +609,20 @@ class OfflineExamParser:
         )
         if has_visual_choice_sequence and explicit_sequence_valid:
             recovered_margin_indexes.update(explicit_choice_indexes)
+        def followed_by_explicit_choices(index: int, record: _LineRecord) -> bool:
+            return any(
+                choice_index > index
+                and region[choice_index].page == record.page
+                and region[choice_index].column == record.column
+                and 0
+                < float(region[choice_index].bbox[1]) - float(record.bbox[1])
+                <= 0.050
+                for choice_index in explicit_choice_indexes
+            )
+
         if any(
             record.ambiguous_bottom_margin
+            and not followed_by_explicit_choices(index, record)
             for index, record in enumerate(region)
             if index not in recovered_margin_indexes
         ):

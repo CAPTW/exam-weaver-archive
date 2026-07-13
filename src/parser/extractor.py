@@ -733,6 +733,23 @@ class PDFExtractor:
             for position in range(len(indexes)):
                 if not _VISUAL_QUESTION_LEAD.match(lines[indexes[position]].text):
                     continue
+                candidate_line = lines[indexes[position]]
+                if candidate_line.words:
+                    word_x = float(candidate_line.words[0].bbox[0])
+                    ring_positions = [
+                        word_x + delta
+                        for delta in (-0.004, -0.002, 0.0, 0.002, 0.004)
+                    ]
+                    ring_positions.extend(
+                        word_x - delta for delta in (0.025, 0.027, 0.029, 0.031)
+                    )
+                    if any(
+                        self._has_visual_marker_ring(
+                            gray, marker_x, candidate_line.bbox
+                        )
+                        for marker_x in ring_positions
+                    ):
+                        continue
                 prior = max(
                     (
                         candidate
@@ -770,6 +787,10 @@ class PDFExtractor:
                 anchors = self._visual_ring_anchors(gray, lines, region_indexes[1:])
                 selected = self._select_complete_visual_choice_layout(lines, anchors)
                 if selected is None:
+                    selected = self._recover_compact_inline_visual_layout(
+                        gray, lines, region_indexes[1:]
+                    )
+                if selected is None:
                     continue
                 recovered = self._recover_empty_visual_grid_cell(gray, lines, selected)
                 if recovered is not None:
@@ -778,6 +799,13 @@ class PDFExtractor:
                         recovered_text,
                         marker_x,
                         cell_end_x,
+                    )
+                for recovered in self._recover_empty_vertical_table_cells(
+                    gray, lines, selected
+                ):
+                    recovered_index, recovered_text, marker_x, cell_end_x = recovered
+                    recovered_cells[recovered_index] = (
+                        recovered_text, marker_x, cell_end_x
                     )
                 for choice_number, (index, marker_x, word_index, existing, known) in enumerate(selected, start=1):
                     if known is not None and known != choice_number:
@@ -1988,6 +2016,123 @@ class PDFExtractor:
             return None
         return index, recovered_text, projected_x, cell_end_x
 
+    @classmethod
+    def _recover_empty_vertical_table_cells(cls, gray, lines, selected):
+        if len(selected) != 4 or len({anchor[0] for anchor in selected}) != 4:
+            return []
+        rows = []
+        for anchor in sorted(selected, key=lambda item: item[0]):
+            index, marker_x, word_index, existing, _known = anchor
+            content = [
+                word for offset, word in enumerate(lines[index].words)
+                if float(word.bbox[0]) >= marker_x + 0.040
+                and not (existing and offset == word_index)
+            ]
+            rows.append((index, marker_x, content))
+        rich = [content for _index, _marker_x, content in rows if len(content) == 3]
+        sparse = [
+            (index, marker_x, content)
+            for index, marker_x, content in rows
+            if len(content) == 2
+        ]
+        if len(rich) < 1 or not 1 <= len(sparse) <= 2:
+            return []
+        columns = [
+            sum(float(content[position].bbox[0]) for content in rich) / len(rich)
+            for position in range(3)
+        ]
+        if min(right - left for left, right in zip(columns, columns[1:])) < 0.060:
+            return []
+        if any(
+            abs(float(content[0].bbox[0]) - columns[1]) > 0.020
+            or abs(float(content[1].bbox[0]) - columns[2]) > 0.020
+            for _index, _marker_x, content in sparse
+        ):
+            return []
+        width, height = gray.size
+        recovered = []
+        for index, marker_x, _content in sparse:
+            line = lines[index]
+            crop = gray.crop((
+                max(0, int((columns[0] - 0.025) * width)),
+                max(0, int((float(line.bbox[1]) - 0.010) * height)),
+                min(width, int((columns[1] - 0.025) * width)),
+                min(height, int((float(line.bbox[3]) + 0.010) * height)),
+            ))
+            value = cls._targeted_choice_crop_text(crop)
+            if not value or len(value.split()) > 2:
+                return []
+            recovered.append((index, value, marker_x, columns[1] - 0.025))
+        return recovered
+
+    @classmethod
+    def _recover_compact_inline_visual_layout(cls, gray, lines, region_indexes):
+        for index in region_indexes:
+            line = lines[index]
+            words = sorted(line.words, key=lambda word: word.bbox[0])
+            if len(words) < 9:
+                continue
+            first_text = str(words[0].text).strip()
+            damaged_indexes = [
+                offset for offset, word in enumerate(words)
+                if str(word.text).strip() in _VISUAL_DAMAGED_MARKERS
+            ]
+            second_indexes = [
+                offset for offset, word in enumerate(words)
+                if str(word.text).strip() == "2"
+            ]
+            if (
+                first_text not in _VISUAL_DAMAGED_MARKERS
+                or len(damaged_indexes) != 2
+                or damaged_indexes[0] != 0
+                or len(second_indexes) != 1
+                or not 0 < second_indexes[0] < damaged_indexes[1]
+            ):
+                continue
+            second_index = second_indexes[0]
+            fourth_index = damaged_indexes[1]
+            gaps = [
+                (
+                    float(words[offset + 1].bbox[0])
+                    - float(words[offset].bbox[2]),
+                    offset + 1,
+                )
+                for offset in range(second_index + 1, fourth_index - 1)
+            ]
+            if not gaps:
+                continue
+            gap, third_index = max(gaps)
+            if gap < 0.035:
+                continue
+            third_x = float(words[third_index].bbox[0]) - 0.029
+            candidates = (
+                (0, float(words[0].bbox[0])),
+                (second_index, float(words[second_index].bbox[0])),
+                (third_index, third_x),
+                (fourth_index, float(words[fourth_index].bbox[0])),
+            )
+            scores = [
+                cls._visual_marker_ring_score(gray, marker_x, line.bbox)
+                for _word_index, marker_x in candidates
+            ]
+            if any(
+                score[0] < (22 if choice_number in (1, 4) else 23)
+                or score[1] < 140
+                for choice_number, score in enumerate(scores, start=1)
+            ):
+                continue
+            return [
+                (
+                    index,
+                    marker_x,
+                    word_index,
+                    choice_number != 3,
+                    choice_number if choice_number == 2 else None,
+                )
+                for choice_number, (word_index, marker_x) in enumerate(candidates, start=1)
+            ]
+        return None
+
     @staticmethod
     def _targeted_choice_crop_text(crop) -> str | None:
         try:
@@ -2161,7 +2306,12 @@ class PDFExtractor:
                         for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
                     ]
                     score, scored_x = max(scored_positions)
-                    if score[0] >= 23 and score[1] >= 140:
+                    trusted_damaged_ring = (
+                        text[:1] in _VISUAL_DAMAGED_MARKERS
+                        and score[0] >= 22
+                        and score[1] >= 140
+                    )
+                    if (score[0] >= 23 and score[1] >= 140) or trusted_damaged_ring:
                         known = _VISUAL_EXPLICIT_MARKERS.get(text[:1])
                         anchors.append((index, scored_x, word_index, True, known))
                 if line.text.rstrip().endswith("?"):

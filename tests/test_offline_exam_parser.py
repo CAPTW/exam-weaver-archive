@@ -992,6 +992,49 @@ def test_lines_above_next_page_question_number_leave_completed_prior_question():
     assert "사례의 둘째 줄" in second.stem
 
 
+def test_corrupted_question_number_is_inferred_from_neighbors_and_gutter():
+    first_page = _page(
+        _line(["9.", "아홉"], y=0.10, xs=[0.52, 0.56], page=1, column=1),
+        _line(["①", "가"], y=0.14, xs=[0.54, 0.58], page=1, column=1),
+        _line(["②", "나"], y=0.18, xs=[0.54, 0.58], page=1, column=1),
+        _line(["③", "다"], y=0.22, xs=[0.54, 0.58], page=1, column=1),
+        _line(["④", "라"], y=0.26, xs=[0.54, 0.58], page=1, column=1),
+        _line(["1이다음", "보상은?"], y=0.32, xs=[0.52, 0.60], page=1, column=1),
+        _line(["①", "하나"], y=0.36, xs=[0.54, 0.58], page=1, column=1),
+        _line(["②", "둘"], y=0.40, xs=[0.54, 0.58], page=1, column=1),
+        _line(["③", "셋"], y=0.44, xs=[0.54, 0.58], page=1, column=1),
+        _line(["④", "넷"], y=0.48, xs=[0.54, 0.58], page=1, column=1),
+        number=1,
+    )
+    second_page = _page(
+        _line(["11.", "열하나"], y=0.10, page=2),
+        _line(["①", "A"], y=0.14, page=2),
+        _line(["②", "B"], y=0.18, page=2),
+        _line(["③", "C"], y=0.22, page=2),
+        _line(["④", "D"], y=0.26, page=2),
+        number=2,
+    )
+
+    questions = OfflineExamParser().parse_pages([first_page, second_page])
+
+    assert [question.number for question in questions] == [9, 10, 11]
+    assert questions[1].choices == ["하나", "둘", "셋", "넷"]
+
+
+def test_bottom_margin_stem_continuation_before_choices_is_not_ambiguous():
+    page = _page(
+        _line(["16.", "보기에서", "고르시오?"], y=0.76),
+        _line(["㉣", "긴", "보기"], y=0.84),
+        _line(["마지막", "계속문장"], y=0.883),
+        _line(["①", "1개", "②", "2개", "③", "3개", "④", "4개"], y=0.908),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["1개", "2개", "3개", "4개"]
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+
+
 def test_four_spaced_numeric_choices_recover_through_damaged_inline_markers():
     page = _page(
         _line(["12.", "합을", "고르시오?"], y=0.12),

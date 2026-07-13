@@ -763,6 +763,100 @@ def test_visual_choice_markers_restore_all_rejected_ronpark_boundaries(
     assert question.choices == expected_choices
 
 
+def test_choice_ring_prevents_citation_choice_from_becoming_semantic_question_start():
+    words = [
+        {"text": "13.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "문제는?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    starts = ("年", "둘째", "「해운법」", "㉦")
+    for number, (text, y) in enumerate(zip(starts, (100, 180, 260, 340)), start=1):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+        x = 50 if text in {"年", "「해운법」", "㉦"} else 80
+        words.append({"text": text, "bbox": (x, y, x + 80, y + 14), "confidence": 0.8})
+        words.append({"text": f"선택지{number}", "bbox": (140, y, 300, y + 14), "confidence": 0.98})
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "선택지1", "둘째 선택지2", "「해운법」 선택지3", "선택지4"
+    ]
+
+
+def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypatch):
+    words = [
+        {"text": "23.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "내용은?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+        {"text": "(가)", "bbox": (145, 80, 180, 94), "confidence": 0.98},
+        {"text": "(나)", "bbox": (285, 80, 320, 94), "confidence": 0.98},
+        {"text": "(다)", "bbox": (405, 80, 440, 94), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    rows = (
+        (None, "2", "20"),
+        (None, "2", "20"),
+        ("정류", "3", "20"),
+        ("정박", "3", "100"),
+    )
+    for number, (row, y) in enumerate(zip(rows, (120, 160, 200, 240)), start=1):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+        words.append({"text": "㉦", "bbox": (50, y, 68, y + 14), "confidence": 0.8})
+        for value, x in zip(row, (145, 285, 405)):
+            if value:
+                words.append({"text": value, "bbox": (x, y, x + 40, y + 14), "confidence": 0.98})
+    targets = iter(("정류", "정박"))
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: next(targets)),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "정류 2 20", "정박 2 20", "정류 3 20", "정박 3 100"
+    ]
+
+
+def test_compact_inline_damaged_choices_restore_missing_inner_marker():
+    words = [
+        {"text": "27.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "고른 것은?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+    ]
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    tokens = (
+        ("㉦", 50), ("㉠", 80), ("2", 123), ("㉠,", 152), ("㉣", 186),
+        ("㉠,", 258), ("㉡,", 292), ("㉣", 326), ("㉦", 368),
+        ("㉡,", 397), ("㉢,", 431), ("㉣", 465),
+    )
+    for x in (50, 123, 229, 368):
+        draw.ellipse((x, 100, x + 18, 114), outline=0, width=2)
+    for text, x in tokens:
+        words.append({"text": text, "bbox": (x, 100, x + 18, 114), "confidence": 0.9})
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["㉠", "㉠, ㉣", "㉠, ㉡, ㉣", "㉡, ㉢, ㉣"]
+
+
 def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
     words = [
         {"text": "17.", "bbox": (20, 650, 42, 664), "confidence": 0.98},
