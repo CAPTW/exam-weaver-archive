@@ -17,6 +17,7 @@ class LayoutWord:
     confidence: Optional[float] = None
     column: int = 0
     visual_choice_marker: bool = False
+    underlined_choice_word: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bbox", tuple(float(value) for value in self.bbox))

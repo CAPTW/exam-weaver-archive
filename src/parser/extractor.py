@@ -11,6 +11,8 @@ import re
 import math
 import itertools
 import queue
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -40,6 +42,7 @@ _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:것\s*은|것인가|무엇인가|있는가|거\s*은)\s*\d?)\s*$"
 )
 _VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-59@①-⑤㉦㉨㉩㉭年]\)?\s*")
+_MUPDF_RENDER_LOCK = threading.RLock()
 _TARGETED_OCR_STATE_LOCK = threading.Lock()
 _TARGETED_OCR_ACTIVE_TOKEN: object | None = None
 _TARGETED_OCR_CIRCUIT_OPEN = False
@@ -622,7 +625,9 @@ class PDFExtractor:
             zoom = min(zoom, 2200 / page_width, 3000 / page_height)
             zoom = max(0.5, zoom)
 
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        pix = self._render_page_pixmap(
+            page, matrix=fitz.Matrix(zoom, zoom), alpha=False,
+        )
         image = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
         buffer = io.BytesIO()
         image.save(buffer, format='PNG')
@@ -649,7 +654,122 @@ class PDFExtractor:
             image_height=image.height,
             divider_x=detected_split,
         )
+        structured_page = self._merge_false_split_column_fragments(structured_page)
         return self._restore_visual_choice_markers(structured_page, image)
+
+    @staticmethod
+    def _merge_false_split_column_fragments(page: StructuredPage) -> StructuredPage:
+        """Join a one-column page accidentally split through its text block."""
+
+        lines = list(page.lines)
+        if {line.column for line in lines} != {0, 1}:
+            return page
+        left_body = [
+            (index, line) for index, line in enumerate(lines)
+            if line.column == 0 and 0.12 <= float(line.bbox[1]) <= 0.88
+        ]
+        right_body = [
+            (index, line) for index, line in enumerate(lines)
+            if line.column == 1 and 0.12 <= float(line.bbox[1]) <= 0.88
+        ]
+        if (
+            len(right_body) < 6
+            or any(_VISUAL_QUESTION_START.match(line.text) for _index, line in right_body)
+        ):
+            return page
+
+        strict_matches = []
+        used_left: set[int] = set()
+        for right_index, right in right_body:
+            candidates = sorted(
+                (
+                    abs(float(left.bbox[1]) - float(right.bbox[1])),
+                    left_index,
+                    left,
+                )
+                for left_index, left in left_body
+                if left_index not in used_left
+            )
+            if not candidates:
+                continue
+            y_gap, left_index, left = candidates[0]
+            horizontal_gap = float(right.bbox[0]) - float(left.bbox[2])
+            if y_gap <= 0.004 and -0.020 <= horizontal_gap <= 0.060:
+                strict_matches.append((left_index, right_index))
+                used_left.add(left_index)
+        if (
+            len(strict_matches) < 6
+            or len(strict_matches) / len(right_body) < 0.65
+        ):
+            return page
+
+        matches: dict[int, int] = {}
+        used_right: set[int] = set()
+        for left_index, left in enumerate(lines):
+            if left.column != 0:
+                continue
+            candidates = sorted(
+                (
+                    abs(float(left.bbox[1]) - float(right.bbox[1])),
+                    right_index,
+                )
+                for right_index, right in enumerate(lines)
+                if right.column == 1 and right_index not in used_right
+            )
+            if not candidates:
+                continue
+            y_gap, right_index = candidates[0]
+            right = lines[right_index]
+            horizontal_gap = float(right.bbox[0]) - float(left.bbox[2])
+            if y_gap <= 0.004 and -0.020 <= horizontal_gap <= 0.180:
+                matches[left_index] = right_index
+                used_right.add(right_index)
+
+        rewritten = []
+        consumed_right = set(matches.values())
+        for index, line in enumerate(lines):
+            if index in consumed_right:
+                continue
+            right_index = matches.get(index)
+            if right_index is None:
+                rewritten.append(line)
+                continue
+            right = lines[right_index]
+            words = tuple(sorted(
+                (
+                    replace(word, column=0) if word.column != 0 else word
+                    for word in (*line.words, *right.words)
+                ),
+                key=lambda word: word.bbox[0],
+            ))
+            rewritten.append(LayoutLine(
+                words,
+                (
+                    min(float(line.bbox[0]), float(right.bbox[0])),
+                    min(float(line.bbox[1]), float(right.bbox[1])),
+                    max(float(line.bbox[2]), float(right.bbox[2])),
+                    max(float(line.bbox[3]), float(right.bbox[3])),
+                ),
+                line.page,
+                0,
+            ))
+        return replace(page, lines=tuple(rewritten))
+
+    @staticmethod
+    def _render_page_pixmap(page, *, matrix, alpha=False):
+        """Render while keeping recoverable MuPDF diagnostics out of callbacks."""
+        import fitz
+
+        with _MUPDF_RENDER_LOCK:
+            display_errors = bool(fitz.TOOLS.mupdf_display_errors())
+            display_warnings = bool(fitz.TOOLS.mupdf_display_warnings())
+            try:
+                fitz.TOOLS.mupdf_display_errors(False)
+                fitz.TOOLS.mupdf_display_warnings(False)
+                return page.get_pixmap(matrix=matrix, alpha=alpha)
+            finally:
+                fitz.TOOLS.mupdf_display_errors(display_errors)
+                fitz.TOOLS.mupdf_display_warnings(display_warnings)
 
     def _restore_visual_choice_markers(self, page: StructuredPage, image) -> StructuredPage:
         """Restore a complete ①-④ layout only with raster ring evidence."""
@@ -932,7 +1052,687 @@ class PDFExtractor:
         page = self._recover_targeted_training_rows(page, gray)
         page = self._recover_raster_verified_vertical_sequence(page, gray)
         page = self._recover_same_page_glyph_mapping(page, gray)
-        return self._recover_separated_glyph_mapping(page, gray)
+        page = self._recover_separated_glyph_mapping(page, gray)
+        page = self._recover_legacy_proposition_sequence_grid(page, gray)
+        page = self._recover_missing_proposition_combination_row(page, gray)
+        page = self._recover_legacy_abc_choice_rows(page, gray)
+        page = self._recover_indented_duplicate_grid_cell(page, gray)
+        return self._mark_raster_underlined_choice_words(page, gray)
+
+    @classmethod
+    def _recover_indented_duplicate_grid_cell(cls, page, gray):
+        """Re-OCR one visibly indented cell when it duplicates another choice."""
+
+        lines = list(page.lines)
+        for first_index in range(len(lines) - 1):
+            pair = (lines[first_index], lines[first_index + 1])
+            if pair[0].column != pair[1].column:
+                continue
+            cells = []
+            marker_numbers = []
+            for line_index, line in zip((first_index, first_index + 1), pair):
+                ordered = sorted(line.words, key=lambda word: word.bbox[0])
+                marker_positions = [
+                    index for index, word in enumerate(ordered)
+                    if getattr(word, "visual_choice_marker", False)
+                    and str(word.text).strip()[:1] in _VISUAL_EXPLICIT_MARKERS
+                ]
+                if len(marker_positions) != 2:
+                    break
+                for offset, marker_position in enumerate(marker_positions):
+                    marker = ordered[marker_position]
+                    number = _VISUAL_EXPLICIT_MARKERS[str(marker.text).strip()[:1]]
+                    marker_numbers.append(number)
+                    end_position = (
+                        marker_positions[offset + 1]
+                        if offset + 1 < len(marker_positions)
+                        else len(ordered)
+                    )
+                    content = [
+                        word for word in ordered[marker_position + 1:end_position]
+                        if not getattr(word, "visual_choice_marker", False)
+                    ]
+                    if not content:
+                        break
+                    cells.append((line_index, line, marker, content))
+            if marker_numbers != [1, 2, 3, 4] or len(cells) != 4:
+                continue
+            texts = [" ".join(str(word.text).strip() for word in cell[3]) for cell in cells]
+            normalized = [re.sub(r"\s+", "", text).casefold() for text in texts]
+            duplicate_keys = {key for key in normalized if normalized.count(key) == 2}
+            if len(duplicate_keys) != 1:
+                continue
+            duplicate_indexes = [
+                index for index, key in enumerate(normalized)
+                if key in duplicate_keys
+            ]
+            gaps = [
+                float(cells[index][3][0].bbox[0]) - float(cells[index][2].bbox[2])
+                for index in duplicate_indexes
+            ]
+            suspect_offset = max(range(2), key=lambda offset: gaps[offset])
+            other_offset = 1 - suspect_offset
+            if gaps[suspect_offset] < 0.045 or gaps[other_offset] > 0.030:
+                continue
+            suspect_index = duplicate_indexes[suspect_offset]
+            line_index, line, marker, _content = cells[suspect_index]
+            peer_spans = [
+                float(cell[3][-1].bbox[2]) - float(cell[2].bbox[0])
+                for index, cell in enumerate(cells)
+                if index != suspect_index
+            ]
+            cell_end_x = min(
+                0.995,
+                float(marker.bbox[0]) + max(peer_spans, default=0.12) + 0.020,
+            )
+            width, height = gray.size
+            crop = gray.crop((
+                max(0, int((float(marker.bbox[0]) - 0.005) * width)),
+                max(0, int((float(line.bbox[1]) - 0.004) * height)),
+                min(width, int(cell_end_x * width)),
+                min(height, int((float(line.bbox[3]) + 0.008) * height)),
+            ))
+            recovered = cls._targeted_english_choice_crop_text(crop) or ""
+            recovered = re.sub(
+                r"^\s*(?:[①-④]|[1-4][.)]?|[@O0])\s*", "", recovered
+            ).strip(" .")
+            recovered_key = re.sub(r"\s+", "", recovered).casefold()
+            if (
+                len(recovered_key) <= len(normalized[suspect_index])
+                or recovered_key == normalized[suspect_index]
+                or not recovered_key.endswith(normalized[suspect_index])
+            ):
+                continue
+            lines[line_index] = cls._line_with_recovered_choice_text(
+                line,
+                recovered,
+                float(marker.bbox[0]),
+                cell_end_x,
+                replace_existing=True,
+            )
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @staticmethod
+    def _targeted_english_choice_crop_text(crop) -> str | None:
+        """Use an installed English OCR engine for one ambiguous tiny cell."""
+
+        executable = shutil.which("tesseract")
+        if executable is None:
+            fallback = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            executable = str(fallback) if fallback.exists() else None
+        if executable is None:
+            return None
+        try:
+            from PIL import Image, ImageEnhance, ImageOps
+
+            enlarged = crop.resize(
+                (max(1, crop.width * 4), max(1, crop.height * 4)),
+                Image.Resampling.LANCZOS,
+            )
+            contrasted = ImageOps.autocontrast(enlarged)
+            variants = (
+                ImageEnhance.Sharpness(contrasted).enhance(2.5),
+                contrasted,
+            )
+            values = []
+            for variant in variants:
+                buffer = io.BytesIO()
+                variant.convert("RGB").save(buffer, format="PNG")
+                completed = subprocess.run(
+                    [executable, "stdin", "stdout", "-l", "eng", "--psm", "7"],
+                    input=buffer.getvalue(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=20,
+                    check=False,
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW
+                        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW")
+                        else 0
+                    ),
+                )
+                value = completed.stdout.decode("utf-8", errors="ignore").strip()
+                if value:
+                    values.append(value)
+            if not values:
+                return None
+            return min(values, key=lambda value: (len(value.splitlines()), -len(value)))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _mark_raster_underlined_choice_words(page, gray):
+        """Annotate OCR words backed by a real horizontal underline."""
+
+        if "밑줄" not in page.text:
+            return page
+        gray = gray.convert("L")
+        width, height = gray.size
+        pixels = gray.load()
+        allowed_indexes: set[int] = set()
+        for column in sorted({line.column for line in page.lines}):
+            indexes = sorted(
+                (index for index, line in enumerate(page.lines) if line.column == column),
+                key=lambda index: float(page.lines[index].bbox[1]),
+            )
+            underline_prompt = False
+            prompt_finished = False
+            for index in indexes:
+                text = page.lines[index].text
+                if _VISUAL_QUESTION_START.match(text):
+                    underline_prompt = False
+                    prompt_finished = False
+                if "밑줄" in text:
+                    underline_prompt = True
+                if underline_prompt and re.search(r"[?？]", text):
+                    prompt_finished = True
+                    continue
+                if underline_prompt and prompt_finished:
+                    allowed_indexes.add(index)
+        changed = False
+        rewritten_lines = []
+        for line_index, line in enumerate(page.lines):
+            rewritten_words = []
+            for word in line.words:
+                text = str(word.text).strip()
+                x0 = float(word.bbox[0])
+                x1 = float(word.bbox[2])
+                fused_marker = bool(re.match(r"^[0O④][A-Za-z]", text))
+                if fused_marker:
+                    x0 += (x1 - x0) * 0.30
+                left = max(0, min(width - 1, int(x0 * width)))
+                right = max(left + 1, min(width, int(x1 * width)))
+                top = max(0, min(height - 1, int((float(word.bbox[3]) - 0.004) * height)))
+                bottom = max(top + 1, min(height, int((float(word.bbox[3]) + 0.012) * height)))
+                marked = False
+                if (
+                    line_index in allowed_indexes
+                    and not re.fullmatch(r"[①-⑤㉠-㉭]", text)
+                ):
+                    center = (left + right) // 2
+                    for y in range(top, bottom):
+                        density = (
+                            sum(pixels[x, y] < 180 for x in range(left, right))
+                            / max(1, right - left)
+                        )
+                        minimum_density = 0.72 if fused_marker else 0.95
+                        if density < minimum_density or pixels[center, y] >= 180:
+                            continue
+                        run_left = center
+                        while run_left > 0 and pixels[run_left - 1, y] < 180:
+                            run_left -= 1
+                        run_right = center
+                        while run_right + 1 < width and pixels[run_right + 1, y] < 180:
+                            run_right += 1
+                        if (run_right - run_left + 1) / width < 0.25:
+                            marked = True
+                            break
+                if marked != getattr(word, "underlined_choice_word", False):
+                    word = replace(word, underlined_choice_word=marked)
+                    changed = True
+                rewritten_words.append(word)
+            rewritten_lines.append(
+                replace(line, words=tuple(rewritten_words))
+                if tuple(rewritten_words) != line.words
+                else line
+            )
+        return replace(page, lines=tuple(rewritten_lines)) if changed else page
+
+    @classmethod
+    def _recover_missing_proposition_combination_row(cls, page, gray):
+        """Restore one raster-only row in a four-choice proposition block."""
+
+        lines = list(page.lines)
+        proposition_pattern = re.compile(r"[㉠-㉥]")
+        by_column: dict[int, list[tuple[int, tuple[str, str]]]] = {}
+        for index, line in enumerate(lines):
+            symbols = tuple(proposition_pattern.findall(line.text))
+            if len(symbols) == 2:
+                by_column.setdefault(line.column, []).append(
+                    (index, (symbols[0], symbols[1]))
+                )
+
+        for column, candidates in by_column.items():
+            for offset in range(len(candidates) - 2):
+                triple = candidates[offset:offset + 3]
+                indexes = [item[0] for item in triple]
+                rows = [lines[index] for index in indexes]
+                if any(row.column != column for row in rows):
+                    continue
+                y_values = [float(row.bbox[1]) for row in rows]
+                gaps = [right - left for left, right in zip(y_values, y_values[1:])]
+                small_gap, large_gap = min(gaps), max(gaps)
+                if (
+                    not 0.012 <= small_gap <= 0.045
+                    or not 1.60 * small_gap <= large_gap <= 2.45 * small_gap
+                ):
+                    continue
+
+                prior_symbols = {
+                    symbol
+                    for line in lines[:indexes[0]]
+                    if line.column == column
+                    for symbol in proposition_pattern.findall(line.text)
+                    if len(line.text) >= 8
+                }
+                if len(prior_symbols) < 4:
+                    continue
+
+                missing_position = 1 if gaps[0] == large_gap else 2
+                missing_y = y_values[missing_position - 1] + small_gap
+                width, height = gray.size
+                marker_x = min(float(row.bbox[0]) for row in rows)
+                content_end_x = max(float(row.bbox[2]) for row in rows)
+                crop = gray.crop((
+                    max(0, int((marker_x - 0.015) * width)),
+                    max(0, int((missing_y - 0.012) * height)),
+                    min(width, int((content_end_x + 0.080) * width)),
+                    min(height, int((missing_y + 0.030) * height)),
+                ))
+                recovered_text = cls._targeted_choice_crop_text(crop) or ""
+                recovered_symbols = tuple(
+                    proposition_pattern.findall(recovered_text)
+                )
+                if len(recovered_symbols) != 2:
+                    continue
+
+                values = [item[1] for item in triple]
+                values.insert(
+                    missing_position,
+                    (recovered_symbols[0], recovered_symbols[1]),
+                )
+                row_specs = [
+                    (y_values[0] + small_gap * choice_offset, value)
+                    for choice_offset, value in enumerate(values)
+                ]
+                rewritten = []
+                row_height = max(
+                    0.010,
+                    sum(float(row.bbox[3]) - float(row.bbox[1]) for row in rows)
+                    / len(rows),
+                )
+                for choice_number, (y, value) in enumerate(row_specs, start=1):
+                    marker = LayoutWord(
+                        _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                        (marker_x, y, marker_x + 0.018, y + row_height),
+                        1.0, column, True,
+                    )
+                    content = LayoutWord(
+                        f"{value[0]}, {value[1]}",
+                        (marker_x + 0.028, y, content_end_x, y + row_height),
+                        0.90, column,
+                    )
+                    rewritten.append(LayoutLine(
+                        (marker, content),
+                        (marker_x, y, content_end_x, y + row_height),
+                        rows[0].page, column,
+                    ))
+
+                removed = set(indexes)
+                insert_at = min(indexes)
+                kept = [line for index, line in enumerate(lines) if index not in removed]
+                kept[insert_at:insert_at] = rewritten
+                return replace(page, lines=tuple(kept))
+        return page
+
+    @classmethod
+    def _recover_legacy_abc_choice_rows(cls, page, gray):
+        """Re-OCR compact A/B/C answer tables when their left cells vanish."""
+
+        lines = list(page.lines)
+        for start in range(len(lines) - 3):
+            rows = lines[start:start + 4]
+            if len({(row.page, row.column) for row in rows}) != 1:
+                continue
+            if any(_VISUAL_QUESTION_START.match(row.text) for row in rows):
+                continue
+            gaps = [
+                float(right.bbox[1]) - float(left.bbox[1])
+                for left, right in zip(rows, rows[1:])
+            ]
+            if any(not 0.015 <= gap <= 0.035 for gap in gaps):
+                continue
+            if not all(
+                re.search(r"\bB\b", row.text, re.IGNORECASE)
+                and re.search(r"\bC\b", row.text, re.IGNORECASE)
+                for row in rows
+            ):
+                continue
+            if sum(
+                bool(re.search(r"\bA\b", row.text, re.IGNORECASE))
+                for row in rows
+            ) < 2:
+                continue
+
+            width, height = gray.size
+            crop_x0 = min(float(row.bbox[0]) for row in rows) + 0.015
+            crop_x1 = 0.96 if rows[0].column else 0.49
+            recovered = []
+            centers = [
+                (float(row.bbox[1]) + float(row.bbox[3])) / 2
+                for row in rows
+            ]
+            for offset, row in enumerate(rows):
+                crop_y0 = (
+                    (centers[offset - 1] + centers[offset]) / 2
+                    if offset
+                    else centers[offset] - 0.020
+                )
+                crop_y1 = (
+                    (centers[offset] + centers[offset + 1]) / 2
+                    if offset + 1 < len(rows)
+                    else centers[offset] + 0.020
+                )
+                crop = gray.crop((
+                    max(0, int(crop_x0 * width)),
+                    max(0, int(crop_y0 * height)),
+                    min(width, int(crop_x1 * width)),
+                    min(height, int(crop_y1 * height)),
+                ))
+                value = cls._targeted_choice_crop_text(crop)
+                value = re.sub(
+                    r"^[^A-Za-z가-힣0-9]+", "", value or ""
+                ).strip()
+                if (
+                    not re.search(r"\bA\b", value, re.IGNORECASE)
+                    and re.search(r"\bB\b", value, re.IGNORECASE)
+                    and re.search(r"\bC\b", value, re.IGNORECASE)
+                ):
+                    value = f"A : {value}"
+                if not re.search(
+                    r"\bA\b.*\bB\b.*\bC\b", value, re.IGNORECASE
+                ):
+                    recovered = []
+                    break
+                recovered.append(value)
+            if len(recovered) != 4:
+                continue
+
+            marker_x = min(float(row.bbox[0]) for row in rows)
+            rewritten = []
+            for choice_number, (row, value) in enumerate(
+                zip(rows, recovered), start=1
+            ):
+                marker = LayoutWord(
+                    _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                    (marker_x, row.bbox[1], marker_x + 0.018, row.bbox[3]),
+                    1.0,
+                    row.column,
+                    True,
+                )
+                content = LayoutWord(
+                    value,
+                    (marker_x + 0.025, row.bbox[1], crop_x1, row.bbox[3]),
+                    0.90,
+                    row.column,
+                )
+                rewritten.append(LayoutLine(
+                    (marker, content),
+                    (marker_x, row.bbox[1], crop_x1, row.bbox[3]),
+                    row.page,
+                    row.column,
+                ))
+            lines[start:start + 4] = rewritten
+            return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_legacy_proposition_sequence_grid(cls, page, gray):
+        """Classify ㄱ-ㄹ option sequences from same-page raster templates."""
+
+        try:
+            from PIL import Image, ImageOps
+        except Exception:
+            return page
+
+        lines = list(page.lines)
+        short_label = re.compile(r"^\S{1,3}[.]$")
+        legend = None
+        for index in range(len(lines) - 1):
+            upper, lower = lines[index:index + 2]
+            if upper.page != lower.page or upper.column != lower.column:
+                continue
+            if not 0.012 <= float(lower.bbox[1]) - float(upper.bbox[1]) <= 0.035:
+                continue
+            upper_labels = [
+                word for word in upper.words
+                if short_label.fullmatch(str(word.text).strip())
+            ]
+            lower_labels = [
+                word for word in lower.words
+                if short_label.fullmatch(str(word.text).strip())
+            ]
+            if len(upper_labels) != 2 or len(lower_labels) != 2:
+                continue
+            if any(
+                abs(float(upper_labels[position].bbox[0]) - float(lower_labels[position].bbox[0]))
+                > 0.020
+                for position in range(2)
+            ):
+                continue
+            legend = (index, upper, lower, upper_labels + lower_labels)
+            break
+        if legend is None:
+            return page
+
+        legend_index, upper, lower, template_words = legend
+        next_question_index = next(
+            (
+                index for index in range(legend_index + 2, len(lines))
+                if lines[index].column == upper.column
+                and _VISUAL_QUESTION_START.match(lines[index].text)
+            ),
+            None,
+        )
+        if next_question_index is None:
+            return page
+        next_question_y = float(lines[next_question_index].bbox[1])
+        scan_y0 = float(lower.bbox[3]) + 0.006
+        scan_y1 = next_question_y - 0.008
+        if not 0.025 <= scan_y1 - scan_y0 <= 0.12:
+            return page
+
+        width, height = gray.size
+        column_left, column_right = (
+            (0.47, 0.92) if upper.column else (0.05, 0.49)
+        )
+
+        def components(box):
+            x0, y0, x1, y1 = box
+            crop = gray.crop((x0, y0, x1, y1)).convert("L")
+            pixels = crop.load()
+            dark = {
+                (x, y)
+                for y in range(crop.height)
+                for x in range(crop.width)
+                if pixels[x, y] < 180
+            }
+            result = []
+            while dark:
+                seed = dark.pop()
+                stack = [seed]
+                points = [seed]
+                while stack:
+                    x, y = stack.pop()
+                    for adjacent_y in range(max(0, y - 2), min(crop.height, y + 3)):
+                        for adjacent_x in range(max(0, x - 2), min(crop.width, x + 3)):
+                            adjacent = (adjacent_x, adjacent_y)
+                            if adjacent not in dark:
+                                continue
+                            dark.remove(adjacent)
+                            stack.append(adjacent)
+                            points.append(adjacent)
+                if len(points) < 3:
+                    continue
+                left = min(x for x, _y in points)
+                top = min(y for _x, y in points)
+                right = max(x for x, _y in points) + 1
+                bottom = max(y for _x, y in points) + 1
+                mask = Image.new("L", (right - left, bottom - top), 255)
+                mask_pixels = mask.load()
+                for x, y in points:
+                    mask_pixels[x - left, y - top] = 0
+                result.append(((left, top, right, bottom), len(points), mask))
+            return result
+
+        def vector(mask):
+            bbox = ImageOps.invert(mask).getbbox()
+            if bbox is None:
+                return None
+            glyph = mask.crop(bbox)
+            scale = min(28 / max(glyph.width, 1), 28 / max(glyph.height, 1))
+            glyph = glyph.resize(
+                (
+                    max(1, round(glyph.width * scale)),
+                    max(1, round(glyph.height * scale)),
+                ),
+                Image.Resampling.NEAREST,
+            )
+            canvas = Image.new("L", (32, 32), 255)
+            canvas.paste(glyph, ((32 - glyph.width) // 2, (32 - glyph.height) // 2))
+            return tuple(value < 128 for value in canvas.getdata())
+
+        templates = []
+        for word in template_words:
+            bbox = word.bbox
+            word_components = components((
+                max(0, int((float(bbox[0]) - 0.003) * width)),
+                max(0, int((float(bbox[1]) - 0.004) * height)),
+                min(width, int((float(bbox[2]) + 0.003) * width)),
+                min(height, int((float(bbox[3]) + 0.004) * height)),
+            ))
+            candidates = [
+                item for item in word_components
+                if 0.004 <= (item[0][2] - item[0][0]) / width <= 0.020
+                and 0.0035 <= (item[0][3] - item[0][1]) / height <= 0.014
+            ]
+            if not candidates:
+                return page
+            selected_template = max(candidates, key=lambda item: item[1])
+            value = vector(selected_template[2])
+            if value is None:
+                return page
+            templates.append((value, selected_template[1]))
+
+        x0 = max(0, int(column_left * width))
+        x1 = min(width, int(column_right * width))
+        dark_rows = []
+        minimum_ink = max(3, round((x1 - x0) * 0.01))
+        for y in range(max(0, int(scan_y0 * height)), min(height, int(scan_y1 * height))):
+            count = sum(gray.getpixel((x, y)) < 180 for x in range(x0, x1))
+            if minimum_ink <= count < (x1 - x0) * 0.45:
+                dark_rows.append(y)
+        bands = []
+        for y in dark_rows:
+            if not bands or y - bands[-1][-1] > 2:
+                bands.append([y])
+            else:
+                bands[-1].append(y)
+        bands = [
+            band for band in bands
+            if 0.003 <= (band[-1] - band[0] + 1) / height <= 0.016
+        ]
+        if len(bands) != 2:
+            return page
+
+        cell_bounds = (
+            (column_left, (column_left + column_right) / 2),
+            ((column_left + column_right) / 2, column_right),
+        )
+        option_components = []
+        for band in bands:
+            band_top = max(0, band[0] - 2)
+            band_bottom = min(height, band[-1] + 3)
+            for cell_left, cell_right in cell_bounds:
+                cell_x0 = max(0, int(cell_left * width))
+                cell_x1 = min(width, int(cell_right * width))
+                cell_components = components((
+                    cell_x0, band_top, cell_x1, band_bottom,
+                ))
+                glyphs = [
+                    item for item in cell_components
+                    if 0.006 <= (item[0][2] - item[0][0]) / width <= 0.018
+                    and 0.0035 <= (item[0][3] - item[0][1]) / height <= 0.014
+                ]
+                glyphs.sort(key=lambda item: item[0][0])
+                if len(glyphs) < 4:
+                    return page
+                option_components.append((glyphs[-4:], cell_left, band[0] / height))
+
+        template_labels = ("ㄱ", "ㄷ", "ㄴ", "ㄹ")
+        recovered = []
+        for glyphs, cell_left, row_y in option_components:
+            values = [(vector(item[2]), item[1]) for item in glyphs]
+            if any(value is None for value, _ink in values):
+                return page
+            matrix = [
+                [
+                    (
+                        sum(
+                            left != right
+                            for left, right in zip(value, template_value)
+                        )
+                        / len(template_value)
+                        + 0.40
+                        * abs(ink - template_ink)
+                        / max(template_ink, 1)
+                    )
+                    for template_value, template_ink in templates
+                ]
+                for value, ink in values
+            ]
+            assignments = sorted(
+                (
+                    sum(matrix[position][assignment[position]] for position in range(4)),
+                    assignment,
+                )
+                for assignment in itertools.permutations(range(4))
+            )
+            best_cost, assignment = assignments[0]
+            if best_cost / 4 > 0.35 or assignments[1][0] - best_cost < 0.005:
+                return page
+            recovered.append((
+                " - ".join(template_labels[index] for index in assignment),
+                cell_left,
+                row_y,
+            ))
+
+        answer_y0 = bands[0][0] / height - 0.004
+        answer_y1 = bands[-1][-1] / height + 0.006
+        remove_indexes = [
+            index for index, line in enumerate(lines)
+            if line.column == upper.column
+            and answer_y0 <= float(line.bbox[1]) <= answer_y1
+        ]
+        insert_at = min(remove_indexes, default=next_question_index)
+        kept = [
+            line for index, line in enumerate(lines) if index not in set(remove_indexes)
+        ]
+        rewritten = []
+        for choice_number, (value, cell_left, row_y) in enumerate(recovered, start=1):
+            marker_x = cell_left + 0.010
+            marker = LayoutWord(
+                _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                (marker_x, row_y, marker_x + 0.018, row_y + 0.016),
+                1.0,
+                upper.column,
+                True,
+            )
+            content = LayoutWord(
+                value,
+                (marker_x + 0.025, row_y, cell_left + 0.20, row_y + 0.016),
+                1.0,
+                upper.column,
+            )
+            rewritten.append(LayoutLine(
+                (marker, content),
+                (marker_x, row_y, content.bbox[2], row_y + 0.016),
+                upper.page,
+                upper.column,
+            ))
+        kept[insert_at:insert_at] = rewritten
+        return replace(page, lines=tuple(kept))
 
     @classmethod
     def _recover_targeted_ton_hour_rows(cls, page, gray):
@@ -2065,6 +2865,9 @@ class PDFExtractor:
         if len(by_line) != 2 or any(len(anchors) != 2 for anchors in by_line.values()):
             return None
         empty_cells = []
+        shared_right_edge = max(
+            float(lines[index].bbox[2]) for index in by_line
+        )
         for index, anchors in by_line.items():
             ordered = sorted(anchors, key=lambda anchor: anchor[1])
             for position, anchor in enumerate(ordered):
@@ -2072,7 +2875,7 @@ class PDFExtractor:
                 cell_end_x = (
                     ordered[position + 1][1] - 0.010
                     if position + 1 < len(ordered)
-                    else float(lines[index].bbox[2])
+                    else max(float(lines[index].bbox[2]), shared_right_edge)
                 )
                 content = [
                     word for word in lines[index].words
@@ -2485,6 +3288,7 @@ class PDFExtractor:
             for word_index, word in enumerate(words):
                 text = str(word.text).strip()
                 word_x = float(word.bbox[0])
+                damaged_prefix = _VISUAL_DAMAGED_PREFIX.match(text)
                 if (
                     line.text.rstrip().endswith("?")
                     and (not text or text[:1] not in markerish)
@@ -2493,7 +3297,11 @@ class PDFExtractor:
                 if (
                     text
                     and text[:1] not in _VISUAL_PROPOSITION_MARKERS
-                    and (text[:1] in markerish or len(text) <= 2)
+                    and (
+                        text[:1] in markerish
+                        or len(text) <= 2
+                        or damaged_prefix is not None
+                    )
                 ):
                     scored_positions = [
                         (
@@ -2504,7 +3312,10 @@ class PDFExtractor:
                     ]
                     score, scored_x = max(scored_positions)
                     trusted_damaged_ring = (
-                        text[:1] in _VISUAL_DAMAGED_MARKERS
+                        (
+                            text[:1] in _VISUAL_DAMAGED_MARKERS
+                            or damaged_prefix is not None
+                        )
                         and score[0] >= 22
                         and score[1] >= 140
                     )
@@ -2799,6 +3610,7 @@ class PDFExtractor:
                     | {"@", "O"}
                 )
                 or token in {"1", "2", "3", "4", "5"}
+                or _VISUAL_DAMAGED_PREFIX.match(token) is not None
             )
 
         def fused_choice_content(anchor, offset, word):
@@ -2946,7 +3758,7 @@ class PDFExtractor:
                     if max(
                         abs(left[position][1] - right[position][1])
                         for position in range(2)
-                    ) <= 0.025 and left_content_count + right_content_count >= 3:
+                    ) <= 0.030 and left_content_count + right_content_count >= 3:
                         total_span = (
                             left[1][1] - left[0][1]
                             + right[1][1] - right[0][1]
@@ -3032,6 +3844,10 @@ class PDFExtractor:
             if (
                 compact_grid is not None
                 and compact_grid[0][0] >= chosen_vertical[0][0]
+                and sum(
+                    trusted_anchor(anchor) and anchor[2] == 0
+                    for anchor in chosen_vertical
+                ) < 4
                 and vertical_span >= 3 * max(
                     0.001,
                     float(lines[compact_grid[-1][0]].bbox[1])

@@ -35,7 +35,10 @@ _NON_BLOCKING_DIAGNOSTICS = {
     "coordinate_choice_recovery",
     "document_noise_removed",
     "damaged_choice_recovery",
+    "explicit_proposition_choices",
+    "legacy_choice_grid_recovery",
     "table_choice_recovery",
+    "underlined_choice_recovery",
 }
 
 
@@ -66,7 +69,10 @@ def validate_offline_question(
         reasons.append("placeholder_choice")
     if len(set(_normalized(choice) for choice in choices)) != len(choices):
         reasons.append("duplicate_choice")
-    if _looks_like_promoted_propositions(choices):
+    if (
+        _looks_like_promoted_propositions(choices)
+        and "explicit_proposition_choices" not in question.diagnostics
+    ):
         reasons.append("proposition_choices")
     if any(_CONTAMINATION.search(choice) for choice in choices):
         reasons.append("contaminated_choice")

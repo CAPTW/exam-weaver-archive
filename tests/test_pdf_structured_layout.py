@@ -13,6 +13,7 @@ from src.parser import extractor as extractor_module
 from src.parser.extractor import PDFExtractor
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
 from src.parser.offline_exam import OfflineExamParser
+from src.parser.offline_quality import validate_offline_question
 
 
 def _word(x0, y0, x1, text, *, height=12):
@@ -36,6 +37,40 @@ class _Page:
         assert xref == 7
         return [SimpleNamespace(x0=0, y0=0, x1=self.rect.width, y1=self.rect.height)]
 
+
+def test_page_rasterization_suppresses_and_restores_mupdf_diagnostics():
+    original_errors = bool(fitz.TOOLS.mupdf_display_errors())
+    original_warnings = bool(fitz.TOOLS.mupdf_display_warnings())
+    observed = []
+    sentinel = object()
+
+    class RecoverablePage:
+        def get_pixmap(self, *, matrix, alpha):
+            observed.append((
+                bool(fitz.TOOLS.mupdf_display_errors()),
+                bool(fitz.TOOLS.mupdf_display_warnings()),
+                matrix,
+                alpha,
+            ))
+            if observed[-1][0] or observed[-1][1]:
+                raise UnicodeEncodeError("utf-8", "\udcd6", 0, 1, "surrogate")
+            return sentinel
+
+    try:
+        fitz.TOOLS.mupdf_display_errors(True)
+        fitz.TOOLS.mupdf_display_warnings(True)
+
+        rendered = PDFExtractor._render_page_pixmap(
+            RecoverablePage(), matrix="matrix", alpha=False,
+        )
+
+        assert rendered is sentinel
+        assert observed == [(False, False, "matrix", False)]
+        assert bool(fitz.TOOLS.mupdf_display_errors()) is True
+        assert bool(fitz.TOOLS.mupdf_display_warnings()) is True
+    finally:
+        fitz.TOOLS.mupdf_display_errors(original_errors)
+        fitz.TOOLS.mupdf_display_warnings(original_warnings)
 
 def _texts(page: StructuredPage):
     return [" ".join(word.text for word in line.words) for line in page.lines]
@@ -1470,6 +1505,43 @@ def test_garbled_question_terminator_allows_one_empty_two_by_two_grid_cell(monke
     ]
 
 
+def test_empty_right_grid_cell_uses_the_other_row_width_for_targeted_ocr(monkeypatch):
+    words = [
+        {"text": "7.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+        {"text": "빈칸에 들어갈 것은?", "bbox": (532, 40, 720, 54), "confidence": 0.98},
+        {"text": "①", "bbox": (535, 100, 552, 114), "confidence": 0.98},
+        {"text": "scanning zone", "bbox": (564, 100, 685, 114), "confidence": 0.98},
+        {"text": "②", "bbox": (772, 100, 790, 114), "confidence": 0.98},
+        {"text": "side lobe effect", "bbox": (801, 100, 942, 114), "confidence": 0.98},
+        {"text": "③", "bbox": (535, 140, 552, 154), "confidence": 0.98},
+        {"text": "blind sector", "bbox": (564, 140, 668, 154), "confidence": 0.98},
+        {"text": "④", "bbox": (773, 140, 790, 154), "confidence": 0.98},
+    ]
+    crop_widths = []
+
+    def recover(crop):
+        crop_widths.append(crop.width)
+        return "super-refraction" if crop.width >= 150 else None
+
+    monkeypatch.setattr(
+        PDFExtractor, "_targeted_choice_crop_text", staticmethod(recover),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for x, y in ((535, 100), (772, 100), (535, 140), (773, 140)):
+        draw.ellipse((x, y, x + 18, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert max(crop_widths) >= 150
+    assert question.choices[-1] == "super-refraction"
+
+
 def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
     words = [
         {"text": "17.", "bbox": (20, 650, 42, 664), "confidence": 0.98},
@@ -1698,6 +1770,33 @@ def test_visual_rings_restore_parenthesized_zero_fused_with_first_choice():
     assert question.choices == ["5년", "10년", "15년", "20년"]
 
 
+def test_visual_rings_restore_parenthesized_numeric_vertical_markers():
+    words = [
+        {"text": "11.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
+        {"text": "빈칸에 들어갈 것은?", "bbox": (52, 50, 240, 64), "confidence": 0.98},
+        {"text": "(0 high sea", "bbox": (50, 100, 180, 114), "confidence": 0.70},
+        {"text": "contiguous zone", "bbox": (80, 150, 220, 164), "confidence": 0.98},
+        {"text": "(3) exclusive economic zone", "bbox": (50, 200, 300, 214), "confidence": 0.70},
+        {"text": "(4) traffic separation schemes", "bbox": (50, 250, 330, 264), "confidence": 0.70},
+    ]
+    structured = build_structured_page(
+        words, page_number=3, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (100, 150, 200, 250):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "high sea", "contiguous zone", "exclusive economic zone",
+        "traffic separation schemes",
+    ]
+
+
 def test_visual_rings_restore_nine_fused_with_right_grid_choice():
     words = [
         {"text": "24.", "bbox": (20, 50, 42, 64), "confidence": 0.98},
@@ -1750,6 +1849,867 @@ def test_offline_choice_text_repairs_split_fishery_port_compounds():
     assert question.choices == [
         "국가어항", "지역어항", "어촌정주어항", "마을공동어항",
     ]
+
+
+def test_offline_parser_reconstructs_four_by_four_proposition_choice_table():
+    words = [
+        {"text": "17.", "bbox": (500, 50, 530, 64), "confidence": 0.98},
+        {"text": "빈칸 순서로 옳은 것은?", "bbox": (540, 50, 800, 64), "confidence": 0.98},
+    ]
+    for text, x in zip(("㉠", "㉡", "㉢", "㉣"), (625, 716, 810, 912)):
+        words.append({"text": text, "bbox": (x, 100, x + 18, 114), "confidence": 0.98})
+    table_words = (
+        (120, ((600, "Fairway"), (705, "SWL"), (770, "Emergency"), (878, "Unloading"))),
+        (130, ((610, "speed"), (784, "steering"))),
+        (140, ((797, "team"),)),
+        (170, ((612, "Limit"), (705, "SWL"), (782, "Abandon"), (887, "Jettison"))),
+        (180, ((610, "speed"), (802, "ship"))),
+        (190, ((797, "team"),)),
+        (220, ((600, "Fairway"), (705, "SWL"), (785, "Damage"), (887, "Jettison"))),
+        (230, ((610, "speed"), (789, "control"))),
+        (240, ((797, "team"),)),
+        (270, ((612, "Limit"), (705, "MBL"), (785, "Damage"), (891, "Let"))),
+        (280, ((610, "speed"), (789, "control"), (931, "go"))),
+        (290, ((797, "team"),)),
+    )
+    for y, cells in table_words:
+        for x, text in cells:
+            words.append({
+                "text": text, "bbox": (x, y, x + max(18, len(text) * 9), y + 12),
+                "confidence": 0.98,
+            })
+    structured = build_structured_page(
+        words, page_number=4, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "Fairway speed SWL Emergency steering team Unloading",
+        "Limit speed SWL Abandon ship team Jettison",
+        "Fairway speed SWL Damage control team Jettison",
+        "Limit speed MBL Damage control team Let go",
+    ]
+
+
+def test_offline_parser_reconstructs_two_column_proposition_choice_table():
+    words = [
+        {"text": "3.", "bbox": (500, 50, 530, 64), "confidence": 0.98},
+        {"text": "빈칸 순서로 옳은 것은?", "bbox": (540, 50, 800, 64), "confidence": 0.98},
+        {"text": "㉠", "bbox": (620, 100, 638, 114), "confidence": 0.98},
+        {"text": "㉡", "bbox": (800, 100, 818, 114), "confidence": 0.98},
+    ]
+    for y, marker, left, right in (
+        (130, "㉦", "red", "white"),
+        (160, None, "red", "green"),
+        (190, None, "white", "red"),
+        (220, "㉦", "white", "white"),
+    ):
+        if marker:
+            words.append({"text": marker, "bbox": (550, y, 568, y + 12), "confidence": 0.70})
+        words.extend((
+            {"text": left, "bbox": (620, y, 680, y + 12), "confidence": 0.98},
+            {"text": right, "bbox": (800, y, 860, y + 12), "confidence": 0.98},
+        ))
+    structured = build_structured_page(
+        words, page_number=11, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "red white", "red green", "white red", "white white",
+    ]
+
+
+def test_offline_parser_reconstructs_two_field_proposition_choice_rows():
+    words = [
+        {"text": "13.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "빈칸 조합으로 옳은 것은?", "bbox": (52, 40, 260, 54), "confidence": 0.98},
+    ]
+    rows = (
+        ("㉦", "explosive limit temperature", "28"),
+        (None, "explosive limit temperature", "45"),
+        ("①", "flashpoint", "②8"),
+        ("③", "flashpoint", "45"),
+    )
+    for offset, (marker, name, value) in enumerate(rows):
+        y = 100 + offset * 25
+        if marker:
+            words.append({"text": marker, "bbox": (50, y, 68, y + 14), "confidence": 0.70})
+        words.extend((
+            {"text": "㉠", "bbox": (80, y, 98, y + 14), "confidence": 0.98},
+            {"text": ":", "bbox": (105, y, 109, y + 14), "confidence": 0.98},
+            {"text": name, "bbox": (120, y, 300, y + 14), "confidence": 0.98},
+            {"text": "㉡", "bbox": (320, y, 338, y + 14), "confidence": 0.98},
+            {"text": ":", "bbox": (345, y, 349, y + 14), "confidence": 0.98},
+            {"text": value, "bbox": (360, y, 390, y + 14), "confidence": 0.80},
+        ))
+    structured = build_structured_page(
+        words, page_number=12, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "㉠ : explosive limit temperature ㉡ : 28",
+        "㉠ : explosive limit temperature ㉡ : 45",
+        "㉠ : flashpoint ㉡ : 28",
+        "㉠ : flashpoint ㉡ : 45",
+    ]
+
+
+def test_offline_parser_reconstructs_four_rows_with_two_coordinate_labels():
+    words = [
+        {"text": "10.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "각 빈칸에 들어갈 말은?", "bbox": (52, 40, 250, 54), "confidence": 0.98},
+    ]
+    values = (
+        ("one short", "seven prolonged"),
+        ("one prolonged", "seven short"),
+        ("seven short", "one prolonged"),
+        ("seven prolonged", "one short"),
+    )
+    for offset, (left, right) in enumerate(values):
+        y = 100 + offset * 25
+        if offset < 3:
+            words.append({"text": ("㉦", "①", "③")[offset], "bbox": (50, y, 68, y + 14), "confidence": 0.70})
+        words.extend((
+            {"text": "㉦", "bbox": (80, y, 98, y + 14), "confidence": 0.70},
+            {"text": left, "bbox": (110, y, 230, y + 14), "confidence": 0.98},
+            {"text": ("㉭", "②", "④", "㉥")[offset],
+             "bbox": (290, y, 308, y + 14), "confidence": 0.70},
+            {"text": right, "bbox": (320, y, 460, y + 14), "confidence": 0.98},
+        ))
+    structured = build_structured_page(
+        words, page_number=45, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "㉠ : one short ㉡ : seven prolonged",
+        "㉠ : one prolonged ㉡ : seven short",
+        "㉠ : seven short ㉡ : one prolonged",
+        "㉠ : seven prolonged ㉡ : one short",
+    ]
+
+
+def test_declarative_blank_stem_allows_compact_legacy_choice_recovery():
+    structured = build_structured_page(
+        [
+            {"text": "13.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+            {"text": "The difference is called ( ).", "bbox": (532, 40, 800, 54), "confidence": 0.98},
+            {"text": "0", "bbox": (530, 100, 548, 114), "confidence": 0.70},
+            {"text": "slip", "bbox": (560, 100, 600, 114), "confidence": 0.98},
+            {"text": "cavitation", "bbox": (660, 100, 740, 114), "confidence": 0.98},
+            {"text": "㉭", "bbox": (770, 100, 788, 114), "confidence": 0.70},
+            {"text": "gain", "bbox": (800, 100, 840, 114), "confidence": 0.98},
+            {"text": "speed", "bbox": (900, 100, 950, 114), "confidence": 0.98},
+        ],
+        page_number=58, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["slip", "cavitation", "gain", "speed"]
+
+
+def test_damaged_inline_field_labels_are_normalized_before_quality_check():
+    structured = build_structured_page(
+        [
+            {"text": "11.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "빈칸 조합은?", "bbox": (52, 40, 180, 54), "confidence": 0.98},
+            {"text": "①", "bbox": (50, 100, 68, 114), "confidence": 0.98},
+            {"text": "@: right ㉧ : starboard bow", "bbox": (80, 100, 400, 114), "confidence": 0.80},
+            {"text": "②", "bbox": (50, 130, 68, 144), "confidence": 0.98},
+            {"text": "@: right ㉧ : starboard quarter", "bbox": (80, 130, 430, 144), "confidence": 0.80},
+            {"text": "③", "bbox": (50, 160, 68, 174), "confidence": 0.98},
+            {"text": "@: right ㉧ : port bow", "bbox": (80, 160, 360, 174), "confidence": 0.80},
+            {"text": "④", "bbox": (50, 190, 68, 204), "confidence": 0.98},
+            {"text": "@: left ㉧ : port quarter", "bbox": (80, 190, 390, 204), "confidence": 0.80},
+        ],
+        page_number=55, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices[0] == "㉠ : right ㉡ : starboard bow"
+    assert validate_offline_question(question).importable is True
+
+
+def test_offline_parser_recovers_headerless_four_by_four_choice_table():
+    words = [
+        {"text": "8.", "bbox": (20, 100, 42, 114), "confidence": 0.98},
+        {"text": "다음 보기의 빈칸 조합으로 옳은 것은?", "bbox": (52, 100, 360, 114), "confidence": 0.98},
+        {"text": "㉠ statement", "bbox": (60, 130, 220, 144), "confidence": 0.98},
+    ]
+    values = (
+        (("port", "Side"), ("100", "metres"), ("making", "way"), ("engaged", "in", "towing")),
+        (("port", "Side"), ("100", "metres"), ("making", "no", "way"), ("towed",)),
+        (("starboard", "Side"), ("50", "metres"), ("making", "way"), ("towed",)),
+        (("port", "Side"), ("50", "metres"), ("making", "no", "way"), ("engaged", "in", "towing")),
+    )
+    column_xs = (130, 220, 330, 420)
+    for row_index, row in enumerate(values):
+        base_y = 180 + row_index * 42
+        for column_index, cell in enumerate(row):
+            for line_index, value in enumerate(cell):
+                x = column_xs[column_index]
+                y = base_y + line_index * 10
+                words.append({
+                    "text": value,
+                    "bbox": (x, y, x + max(25, len(value) * 8), y + 9),
+                    "confidence": 0.98,
+                })
+    structured = build_structured_page(
+        words, page_number=34, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "port Side 100 metres making way engaged in towing",
+        "port Side 100 metres making no way towed",
+        "starboard Side 50 metres making way towed",
+        "port Side 50 metres making no way engaged in towing",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_extractor_marks_only_raster_underlined_choice_words():
+    structured = build_structured_page(
+        [
+            {"text": "15.", "bbox": (50, 100, 75, 114), "confidence": 0.98},
+            {"text": "밑줄의 내용 중 옳지 않은 것은?", "bbox": (85, 100, 350, 114), "confidence": 0.98},
+            {"text": "100/0", "bbox": (100, 200, 160, 214), "confidence": 0.98},
+            {"text": "plain", "bbox": (180, 200, 230, 214), "confidence": 0.98},
+            {"text": "0fire", "bbox": (300, 250, 360, 264), "confidence": 0.98},
+        ],
+        page_number=55,
+        width=1000,
+        height=1000,
+        source="ocr",
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    draw.line((100, 220, 160, 220), fill=0, width=2)
+    draw.line((320, 270, 360, 270), fill=0, width=2)
+
+    marked = PDFExtractor()._mark_raster_underlined_choice_words(structured, image)
+    by_text = {
+        word.text: word.underlined_choice_word
+        for line in marked.lines
+        for word in line.words
+    }
+
+    assert by_text["100/0"] is True
+    assert by_text["plain"] is False
+    assert by_text["0fire"] is True
+
+
+def test_extractor_recovers_indented_duplicate_choice_cell_with_english_ocr(monkeypatch):
+    first = LayoutLine(
+        words=(
+            LayoutWord("①", (0.10, 0.40, 0.12, 0.42), 0.98, 0, True),
+            LayoutWord("Wing", (0.14, 0.40, 0.19, 0.42), 0.98, 0),
+            LayoutWord("tank", (0.20, 0.40, 0.24, 0.42), 0.98, 0),
+            LayoutWord("②", (0.50, 0.40, 0.52, 0.42), 0.98, 0, True),
+            LayoutWord("tank", (0.59, 0.40, 0.63, 0.42), 0.98, 0),
+        ),
+        bbox=(0.10, 0.40, 0.63, 0.42),
+        page=39,
+        column=0,
+    )
+    second = LayoutLine(
+        words=(
+            LayoutWord("③", (0.10, 0.45, 0.12, 0.47), 0.98, 0, True),
+            LayoutWord("Center", (0.14, 0.45, 0.20, 0.47), 0.98, 0),
+            LayoutWord("tank", (0.21, 0.45, 0.25, 0.47), 0.98, 0),
+            LayoutWord("④", (0.50, 0.45, 0.52, 0.47), 0.98, 0, True),
+            LayoutWord("Tank", (0.54, 0.45, 0.58, 0.47), 0.98, 0),
+        ),
+        bbox=(0.10, 0.45, 0.58, 0.47),
+        page=39,
+        column=0,
+    )
+    page = StructuredPage(39, 1.0, 1.0, "scanned", (first, second), ())
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_english_choice_crop_text",
+        staticmethod(lambda _crop: "② Slop tank"),
+    )
+
+    recovered = PDFExtractor()._recover_indented_duplicate_grid_cell(
+        page, Image.new("L", (1000, 1000), 255)
+    )
+
+    assert recovered.lines[0].text == "① Wing tank ② Slop tank"
+
+
+def test_extractor_merges_repeated_false_column_spillover_fragments():
+    lines = []
+    for index in range(10):
+        y = 0.15 + index * 0.05
+        left = LayoutWord(f"left-{index}", (0.08, y, 0.49, y + 0.02), 0.98, 0)
+        right = LayoutWord(f"right-{index}", (0.505, y, 0.70, y + 0.02), 0.98, 1)
+        lines.extend((
+            LayoutLine((left,), left.bbox, 73, 0),
+            LayoutLine((right,), right.bbox, 73, 1),
+        ))
+    page = StructuredPage(73, 1.0, 1.0, "scanned", tuple(lines), ())
+
+    merged = PDFExtractor._merge_false_split_column_fragments(page)
+
+    assert {line.column for line in merged.lines} == {0}
+    assert [line.text for line in merged.lines] == [
+        f"left-{index} right-{index}" for index in range(10)
+    ]
+
+
+def test_complete_explicit_choices_beat_proposition_statement_fallback():
+    words = [
+        {"text": "16.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+        {"text": "가장 옳지 않은 것은?", "bbox": (532, 40, 730, 54), "confidence": 0.98},
+    ]
+    for offset, label in enumerate(("㉠", "㉡", "㉢", "㉣")):
+        y = 80 + offset * 35
+        words.extend((
+            {"text": label, "bbox": (540, y, 558, y + 14), "confidence": 0.98},
+            {"text": f"statement {offset + 1}", "bbox": (570, y, 760, y + 14), "confidence": 0.98},
+        ))
+    for number, x in enumerate((530, 630, 730, 830), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (x, 250, x + 18, 264), "confidence": 0.98},
+            {"text": ("㉠", "㉡", "㉢", "㉣")[number - 1],
+             "bbox": (x + 28, 250, x + 46, 264), "confidence": 0.98},
+        ))
+    words.append(
+        {"text": "Of", "bbox": (475, 275, 491, 289), "confidence": 0.45},
+    )
+    structured = build_structured_page(
+        words, page_number=31, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["㉠", "㉡", "㉢", "㉣"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_offline_parser_reconstructs_legacy_two_by_two_choice_grid():
+    structured = build_structured_page(
+        [
+            {"text": "1.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "빈칸에 들어갈 것은?", "bbox": (52, 40, 240, 54), "confidence": 0.98},
+            {"text": "moving", "bbox": (80, 100, 140, 114), "confidence": 0.98},
+            {"text": "to", "bbox": (150, 100, 168, 114), "confidence": 0.98},
+            {"text": "meeting", "bbox": (300, 100, 370, 114), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 140, 68, 154), "confidence": 0.70},
+            {"text": "running", "bbox": (80, 140, 145, 154), "confidence": 0.98},
+            {"text": "into", "bbox": (155, 140, 190, 154), "confidence": 0.98},
+            {"text": "㉦", "bbox": (270, 140, 288, 154), "confidence": 0.70},
+            {"text": "having", "bbox": (300, 140, 355, 154), "confidence": 0.98},
+            {"text": "to", "bbox": (365, 140, 383, 154), "confidence": 0.98},
+        ],
+        page_number=68, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["moving to", "meeting", "running into", "having to"]
+    assert "legacy_choice_grid_recovery" in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_offline_parser_reconstructs_legacy_inline_four_choice_row():
+    structured = build_structured_page(
+        [
+            {"text": "4.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "빈칸에 들어갈 것은?", "bbox": (52, 40, 240, 54), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 100, 68, 114), "confidence": 0.70},
+            {"text": "speed", "bbox": (80, 100, 125, 114), "confidence": 0.98},
+            {"text": "position", "bbox": (205, 100, 270, 114), "confidence": 0.98},
+            {"text": "㉦", "bbox": (290, 100, 308, 114), "confidence": 0.70},
+            {"text": "course", "bbox": (320, 100, 370, 114), "confidence": 0.98},
+            {"text": "㉦", "bbox": (400, 100, 418, 114), "confidence": 0.70},
+            {"text": "bearing", "bbox": (425, 100, 485, 114), "confidence": 0.98},
+        ],
+        page_number=68, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["speed", "position", "course", "bearing"]
+    assert "legacy_choice_grid_recovery" in question.diagnostics
+
+
+def test_offline_parser_reconstructs_inline_choices_from_arbitrary_damaged_rings():
+    structured = build_structured_page(
+        [
+            {"text": "13.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "빈칸에 들어갈 것은?", "bbox": (52, 40, 240, 54), "confidence": 0.98},
+            {"text": "0", "bbox": (50, 100, 68, 114), "confidence": 0.70},
+            {"text": "Adrift", "bbox": (80, 100, 125, 114), "confidence": 0.98},
+            {"text": "㉣", "bbox": (170, 100, 188, 114), "confidence": 0.70},
+            {"text": "Disabled", "bbox": (198, 100, 268, 114), "confidence": 0.98},
+            {"text": "㉭", "bbox": (280, 100, 298, 114), "confidence": 0.70},
+            {"text": "Underway", "bbox": (308, 100, 390, 114), "confidence": 0.98},
+            {"text": "@", "bbox": (405, 100, 423, 114), "confidence": 0.70},
+            {"text": "Beach", "bbox": (432, 100, 485, 114), "confidence": 0.98},
+        ],
+        page_number=67, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["Adrift", "Disabled", "Underway", "Beach"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_offline_parser_reconstructs_parenthesized_damaged_inline_choices():
+    structured = build_structured_page(
+        [
+            {"text": "14.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "Choose the best one for the blank?", "bbox": (52, 40, 300, 54), "confidence": 0.98},
+            {"text": "(월", "bbox": (50, 100, 68, 114), "confidence": 0.70},
+            {"text": "rotary pump", "bbox": (78, 100, 150, 114), "confidence": 0.98},
+            {"text": "(기", "bbox": (170, 100, 188, 114), "confidence": 0.70},
+            {"text": "vane pump", "bbox": (198, 100, 265, 114), "confidence": 0.98},
+            {"text": "(3)", "bbox": (285, 100, 303, 114), "confidence": 0.70},
+            {"text": "screw pump", "bbox": (313, 100, 390, 114), "confidence": 0.98},
+            {"text": "(4)", "bbox": (410, 100, 428, 114), "confidence": 0.70},
+            {"text": "gear pump", "bbox": (438, 100, 500, 114), "confidence": 0.98},
+        ],
+        page_number=87, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["rotary pump", "vane pump", "screw pump", "gear pump"]
+
+
+def test_offline_parser_infers_missing_outer_markers_in_compact_inline_row():
+    structured = build_structured_page(
+        [
+            {"text": "15.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "빈칸에 들어갈 것은?", "bbox": (52, 40, 240, 54), "confidence": 0.98},
+            {"text": "Tanks", "bbox": (50, 100, 95, 114), "confidence": 0.98},
+            {"text": "@Compartments", "bbox": (115, 100, 225, 114), "confidence": 0.70},
+            {"text": "OBulkheads", "bbox": (250, 100, 340, 114), "confidence": 0.70},
+            {"text": "Rails", "bbox": (380, 100, 425, 114), "confidence": 0.98},
+        ],
+        page_number=67, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["Tanks", "Compartments", "Bulkheads", "Rails"]
+
+
+def test_offline_parser_drops_number_fused_to_prior_visual_choice_row():
+    words = [
+        {"text": "8.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+        {"text": "Choose the best one?", "bbox": (532, 40, 720, 54), "confidence": 0.98},
+        {"text": "①", "bbox": (525, 100, 543, 114), "confidence": 0.98},
+        {"text": "sounding", "bbox": (553, 100, 625, 114), "confidence": 0.98},
+        {"text": "②", "bbox": (725, 100, 743, 114), "confidence": 0.98},
+        {"text": "cross bearing", "bbox": (753, 100, 850, 114), "confidence": 0.98},
+        {"text": "9.㉭", "bbox": (500, 130, 543, 144), "confidence": 0.60},
+        {"text": "③", "bbox": (525, 130, 543, 144), "confidence": 0.98},
+        {"text": "danger angle", "bbox": (553, 130, 650, 144), "confidence": 0.98},
+        {"text": "④", "bbox": (725, 130, 743, 144), "confidence": 0.98},
+        {"text": "transit", "bbox": (753, 130, 810, 144), "confidence": 0.98},
+        {"text": "다음 박스의 질문은?", "bbox": (528, 180, 720, 194), "confidence": 0.98},
+    ]
+    for number, x in enumerate((525, 625, 725, 825), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (x, 220, x + 18, 234), "confidence": 0.98},
+            {"text": f"선지{number}", "bbox": (x + 28, 220, x + 75, 234), "confidence": 0.98},
+        ))
+    structured = build_structured_page(
+        words, page_number=66, width=1000, height=1000, source="ocr",
+    )
+
+    questions = OfflineExamParser().parse_pages([structured])
+
+    assert [question.number for question in questions] == [8, 9]
+    assert questions[0].choices == ["sounding", "cross bearing", "danger angle", "transit"]
+    assert questions[1].stem == "다음 박스의 질문은?"
+
+
+def test_offline_parser_compacts_spaced_digits_in_question_number():
+    words = [
+        {"text": "10.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+        {"text": "앞 문제는?", "bbox": (532, 40, 650, 54), "confidence": 0.98},
+    ]
+    for number, x in enumerate((525, 625, 725, 825), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (x, 80, x + 18, 94), "confidence": 0.98},
+            {"text": f"앞선지{number}", "bbox": (x + 28, 80, x + 75, 94), "confidence": 0.98},
+        ))
+    words.extend((
+        {"text": "1", "bbox": (500, 130, 508, 144), "confidence": 0.70},
+        {"text": "1", "bbox": (510, 130, 518, 144), "confidence": 0.70},
+        {"text": ".", "bbox": (521, 130, 525, 144), "confidence": 0.70},
+        {"text": "다음 문제는?", "bbox": (535, 130, 680, 144), "confidence": 0.98},
+    ))
+    for number, x in enumerate((525, 625, 725, 825), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (x, 170, x + 18, 184), "confidence": 0.98},
+            {"text": f"뒤선지{number}", "bbox": (x + 28, 170, x + 75, 184), "confidence": 0.98},
+        ))
+    structured = build_structured_page(
+        words, page_number=3, width=1000, height=1000, source="ocr",
+    )
+
+    questions = OfflineExamParser().parse_pages([structured])
+
+    assert [question.number for question in questions] == [10, 11]
+    assert questions[1].choices == ["뒤선지1", "뒤선지2", "뒤선지3", "뒤선지4"]
+
+
+def test_offline_parser_reconstructs_legacy_vertical_choice_rows():
+    structured = build_structured_page(
+        [
+            {"text": "7.", "bbox": (500, 40, 522, 54), "confidence": 0.98},
+            {"text": "시정이 적절한 것은?", "bbox": (532, 40, 720, 54), "confidence": 0.98},
+            {"text": "(l)", "bbox": (505, 100, 523, 114), "confidence": 0.70},
+            {"text": "fog 300m", "bbox": (530, 100, 620, 114), "confidence": 0.98},
+            {"text": "falling snow 550m", "bbox": (530, 140, 690, 154), "confidence": 0.98},
+            {"text": "㉦", "bbox": (505, 180, 523, 194), "confidence": 0.70},
+            {"text": "rain 700m", "bbox": (530, 180, 620, 194), "confidence": 0.98},
+            {"text": "㉦", "bbox": (505, 220, 523, 234), "confidence": 0.70},
+            {"text": "mist 1000m", "bbox": (530, 220, 630, 234), "confidence": 0.98},
+        ],
+        page_number=68, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "fog 300m", "falling snow 550m", "rain 700m", "mist 1000m",
+    ]
+    assert "legacy_choice_grid_recovery" in question.diagnostics
+
+
+def test_offline_parser_recovers_vertical_rows_with_first_two_markers_missing():
+    structured = build_structured_page(
+        [
+            {"text": "10.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "정의에 맞는 것은?", "bbox": (52, 40, 220, 54), "confidence": 0.98},
+            {"text": "first choice", "bbox": (80, 100, 200, 114), "confidence": 0.98},
+            {"text": "second choice", "bbox": (80, 140, 210, 154), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 180, 68, 194), "confidence": 0.70},
+            {"text": "third choice", "bbox": (80, 180, 200, 194), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 220, 68, 234), "confidence": 0.70},
+            {"text": "fourth choice", "bbox": (80, 220, 210, 234), "confidence": 0.98},
+        ],
+        page_number=69, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "first choice", "second choice", "third choice", "fourth choice",
+    ]
+
+
+def test_offline_parser_restores_bulleted_question_number_between_number_gap():
+    words = [
+        {"text": "10.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "앞 문제는?", "bbox": (52, 40, 150, 54), "confidence": 0.98},
+    ]
+    for number, y in enumerate((70, 90, 110, 130), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (50, y, 68, y + 12), "confidence": 0.98},
+            {"text": f"앞선지{number}", "bbox": (80, y, 150, y + 12), "confidence": 0.98},
+        ))
+    words.extend((
+        {"text": "•", "bbox": (30, 170, 35, 184), "confidence": 0.70},
+        {"text": "다음은 새 문제이다?", "bbox": (45, 170, 220, 184), "confidence": 0.98},
+    ))
+    for number, y in enumerate((200, 220, 240, 260), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (50, y, 68, y + 12), "confidence": 0.98},
+            {"text": f"새선지{number}", "bbox": (80, y, 150, y + 12), "confidence": 0.98},
+        ))
+    words.extend((
+        {"text": "12.", "bbox": (20, 300, 42, 314), "confidence": 0.98},
+        {"text": "뒤 문제는?", "bbox": (52, 300, 150, 314), "confidence": 0.98},
+    ))
+    for number, y in enumerate((330, 350, 370, 390), start=1):
+        words.extend((
+            {"text": ("①", "②", "③", "④")[number - 1],
+             "bbox": (50, y, 68, y + 12), "confidence": 0.98},
+            {"text": f"뒤선지{number}", "bbox": (80, y, 150, y + 12), "confidence": 0.98},
+        ))
+    structured = build_structured_page(
+        words, page_number=69, width=1000, height=1000, source="ocr",
+    )
+
+    questions = OfflineExamParser().parse_pages([structured])
+
+    assert [question.number for question in questions] == [10, 11, 12]
+    assert questions[1].stem == "다음은 새 문제이다?"
+
+
+def test_offline_parser_recovers_compact_grid_after_garbled_terminator():
+    structured = build_structured_page(
+        [
+            {"text": "11.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "다음은 빈칸 문제이다", "bbox": (52, 40, 240, 54), "confidence": 0.98},
+            {"text": "판독 불가 종결부", "bbox": (50, 70, 190, 84), "confidence": 0.50},
+            {"text": "Instruction", "bbox": (80, 110, 170, 124), "confidence": 0.98},
+            {"text": "Command", "bbox": (300, 110, 370, 124), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 150, 68, 164), "confidence": 0.70},
+            {"text": "Education", "bbox": (80, 150, 160, 164), "confidence": 0.98},
+            {"text": "㉦", "bbox": (270, 150, 288, 164), "confidence": 0.70},
+            {"text": "Follow", "bbox": (300, 150, 360, 164), "confidence": 0.98},
+        ],
+        page_number=69, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == ["Instruction", "Command", "Education", "Follow"]
+
+
+def test_offline_parser_recovers_wrapped_legacy_vertical_choices():
+    structured = build_structured_page(
+        [
+            {"text": "19.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+            {"text": "옳지 않은 것은?", "bbox": (52, 40, 200, 54), "confidence": 0.98},
+            {"text": "(0", "bbox": (50, 100, 68, 114), "confidence": 0.70},
+            {"text": "first choice", "bbox": (80, 100, 200, 114), "confidence": 0.98},
+            {"text": "first continuation", "bbox": (80, 125, 240, 139), "confidence": 0.98},
+            {"text": "코)", "bbox": (75, 160, 95, 174), "confidence": 0.55},
+            {"text": "second choice", "bbox": (105, 160, 230, 174), "confidence": 0.98},
+            {"text": "㉦", "bbox": (50, 200, 68, 214), "confidence": 0.70},
+            {"text": "third choice", "bbox": (80, 200, 200, 214), "confidence": 0.98},
+            {"text": "third continuation", "bbox": (80, 225, 240, 239), "confidence": 0.98},
+            {"text": "4)", "bbox": (50, 260, 68, 274), "confidence": 0.70},
+            {"text": "fourth choice", "bbox": (80, 260, 210, 274), "confidence": 0.98},
+        ],
+        page_number=70, width=1000, height=1000, source="ocr",
+    )
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+
+    assert question.choices == [
+        "first choice first continuation",
+        "second choice",
+        "third choice third continuation",
+        "fourth choice",
+    ]
+    assert "legacy_choice_grid_recovery" in question.diagnostics
+
+
+def test_raster_ocr_restores_four_row_abc_choice_table(monkeypatch):
+    question = LayoutLine(
+        (LayoutWord("15. 교신 내용은?", (0.50, 0.10, 0.75, 0.114), 0.98, 1),),
+        (0.50, 0.10, 0.75, 0.114), 69, 1,
+    )
+    lines = [question]
+    for text, y, x in (
+        ("A : listen, B : ETD, C : Advice", 0.20, 0.528),
+        ("A : call, B : ETA, C : Advice", 0.23, 0.528),
+        ("㉦ read, B : ETD, C : Advice", 0.26, 0.505),
+        ("B : ETA, C : Advice", 0.29, 0.660),
+    ):
+        word = LayoutWord(text, (x, y, 0.88, y + 0.014), 0.75, 1)
+        lines.append(LayoutLine((word,), word.bbox, 69, 1))
+    page = StructuredPage(
+        69, 1.0, 1.0, "scanned_image", tuple(lines), ((0, 0, 1, 1),),
+    )
+    recovered_texts = iter((
+        "A : listen, B : ETD, C : Advice",
+        "A : call, B : ETA, C : Advice",
+        "A : read, B : ETD, C : Advice",
+        "A : read, B : ETA, C : Advice",
+    ))
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: next(recovered_texts)),
+    )
+
+    restored = PDFExtractor._recover_legacy_abc_choice_rows(
+        page, Image.new("L", (1000, 1000), "white"),
+    )
+    parsed = OfflineExamParser().parse_pages([restored])[0]
+
+    assert parsed.choices == [
+        "A : listen, B : ETD, C : Advice",
+        "A : call, B : ETA, C : Advice",
+        "A : read, B : ETD, C : Advice",
+        "A : read, B : ETA, C : Advice",
+    ]
+
+
+def test_raster_ocr_restores_missing_proposition_combination_row(monkeypatch):
+    lines = [
+        LayoutLine(
+            (LayoutWord("19. 옳은 것을 모두 고른 것은?", (0.50, 0.10, 0.82, 0.114), 0.98, 1),),
+            (0.50, 0.10, 0.82, 0.114), 9, 1,
+        ),
+    ]
+    for label, y in zip(("㉠", "㉡", "㉢", "㉣"), (0.16, 0.20, 0.24, 0.28)):
+        word = LayoutWord(f"{label} proposition text", (0.54, y, 0.90, y + 0.014), 0.95, 1)
+        lines.append(LayoutLine((word,), word.bbox, 9, 1))
+    for text, y in (
+        ("年 ㉠, ㉡", 0.40),
+        ("㉡, ㉣", 0.48),
+        ("㉦ ㉠, ㉢", 0.52),
+    ):
+        word = LayoutWord(text, (0.535, y, 0.64, y + 0.014), 0.70, 1)
+        lines.append(LayoutLine((word,), word.bbox, 9, 1))
+    page = StructuredPage(
+        9, 1.0, 1.0, "scanned_image", tuple(lines), ((0, 0, 1, 1),),
+    )
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: "기 1- ㉢, ㉣"),
+    )
+
+    restored = PDFExtractor._recover_missing_proposition_combination_row(
+        page, Image.new("L", (1000, 1000), 255),
+    )
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["㉠, ㉡", "㉢, ㉣", "㉡, ㉣", "㉠, ㉢"]
+
+
+def test_raster_templates_restore_legacy_proposition_sequence_grid():
+    image = Image.new("L", (1000, 1000), "white")
+    draw = ImageDraw.Draw(image)
+
+    def glyph(identity, x, y):
+        left, top = round(x * 1000), round(y * 1000)
+        right, bottom = left + 14, top + 12
+        if identity == 0:  # ㄱ
+            draw.line((left, top, right, top, right, bottom), fill="black", width=2)
+        elif identity == 1:  # ㄷ
+            draw.rectangle((left, top, right, bottom), outline="black", width=2)
+        elif identity == 2:  # ㄴ
+            draw.line((left, top, left, bottom, right, bottom), fill="black", width=2)
+        else:  # ㄹ
+            draw.line(
+                (left, top, right, top, right, top + 4, left, top + 4,
+                 left, top + 8, right, top + 8, right, bottom, left, bottom),
+                fill="black", width=2,
+            )
+
+    legend_specs = (
+        ("기.", 0, 0.52, 0.20),
+        ("1二.", 1, 0.72, 0.20),
+        ("1-.", 2, 0.52, 0.23),
+        ("근.", 3, 0.72, 0.23),
+    )
+    for _text, identity, x, y in legend_specs:
+        glyph(identity, x, y)
+    sequences = (
+        (0, 2, 1, 3),
+        (1, 0, 3, 2),
+        (2, 3, 1, 0),
+        (0, 3, 1, 2),
+    )
+    for sequence, (cell_x, y) in zip(
+        sequences, ((0.49, 0.27), (0.70, 0.27), (0.49, 0.30), (0.70, 0.30))
+    ):
+        draw.ellipse(
+            (round((cell_x + 0.01) * 1000), round(y * 1000),
+             round((cell_x + 0.028) * 1000), round((y + 0.014) * 1000)),
+            outline="black", width=2,
+        )
+        for offset, identity in enumerate(sequence):
+            x = cell_x + 0.055 + offset * 0.038
+            glyph(identity, x, y + 0.001)
+            if offset < 3:
+                hyphen_x = round((x + 0.022) * 1000)
+                hyphen_y = round((y + 0.007) * 1000)
+                draw.line((hyphen_x, hyphen_y, hyphen_x + 9, hyphen_y), fill="black", width=2)
+
+    lines = [
+        LayoutLine(
+            (LayoutWord("6. 배열된 것은?", (0.50, 0.10, 0.72, 0.114), 0.98, 1),),
+            (0.50, 0.10, 0.72, 0.114), 68, 1,
+        ),
+        LayoutLine(
+            (
+                LayoutWord("기.", (0.52, 0.20, 0.536, 0.214), 0.70, 1),
+                LayoutWord("first", (0.545, 0.20, 0.62, 0.214), 0.98, 1),
+                LayoutWord("1二.", (0.72, 0.20, 0.738, 0.214), 0.70, 1),
+                LayoutWord("third", (0.745, 0.20, 0.82, 0.214), 0.98, 1),
+            ),
+            (0.52, 0.20, 0.82, 0.214), 68, 1,
+        ),
+        LayoutLine(
+            (
+                LayoutWord("1-.", (0.52, 0.23, 0.538, 0.244), 0.70, 1),
+                LayoutWord("second", (0.545, 0.23, 0.63, 0.244), 0.98, 1),
+                LayoutWord("근.", (0.72, 0.23, 0.738, 0.244), 0.70, 1),
+                LayoutWord("fourth", (0.745, 0.23, 0.83, 0.244), 0.98, 1),
+            ),
+            (0.52, 0.23, 0.83, 0.244), 68, 1,
+        ),
+        LayoutLine(
+            (LayoutWord("㉦ 1- 근 드", (0.505, 0.30, 0.84, 0.314), 0.50, 1),),
+            (0.505, 0.30, 0.84, 0.314), 68, 1,
+        ),
+        LayoutLine(
+            (LayoutWord("7. 다음 문제", (0.50, 0.35, 0.68, 0.364), 0.98, 1),),
+            (0.50, 0.35, 0.68, 0.364), 68, 1,
+        ),
+    ]
+    page = StructuredPage(
+        68, 1.0, 1.0, "scanned_image", tuple(lines), ((0, 0, 1, 1),),
+    )
+
+    restored = PDFExtractor._recover_legacy_proposition_sequence_grid(page, image)
+
+    assert [
+        line.text for line in restored.lines
+        if any(word.visual_choice_marker for word in line.words)
+    ] == [
+        "① ㄱ - ㄴ - ㄷ - ㄹ",
+        "② ㄷ - ㄱ - ㄹ - ㄴ",
+        "③ ㄴ - ㄹ - ㄷ - ㄱ",
+        "④ ㄱ - ㄹ - ㄷ - ㄴ",
+    ]
+
+
+def test_two_by_two_selector_allows_small_weak_ring_column_drift():
+    structured = build_structured_page(
+        [
+            {"text": "Meet", "bbox": (75, 100, 120, 114), "confidence": 0.98},
+            {"text": "her", "bbox": (130, 100, 158, 114), "confidence": 0.98},
+            {"text": "Nothing", "bbox": (256, 100, 324, 114), "confidence": 0.98},
+            {"text": "Midships", "bbox": (75, 150, 153, 164), "confidence": 0.98},
+            {"text": "㉦", "bbox": (234, 150, 252, 164), "confidence": 0.70},
+            {"text": "Steady", "bbox": (256, 150, 315, 164), "confidence": 0.98},
+        ],
+        page_number=18, width=1000, height=1000, source="ocr",
+    )
+    anchors = [
+        (0, 0.074, 0, False, None),
+        (0, 0.231, 2, False, None),
+        (1, 0.048, 0, False, None),
+        (1, 0.234, 1, True, None),
+    ]
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(
+        structured.lines, anchors,
+    )
+
+    assert selected == anchors
 
 
 def test_outer_marker_gutter_wins_over_adjacent_inner_ring_markers():
