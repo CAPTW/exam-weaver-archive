@@ -31,14 +31,15 @@ _VISUAL_HANGING_NUMBER = re.compile(r"^\s*\d{1,3}\s+")
 _VISUAL_NUMBERED_CHOICE = re.compile(r"^\s*\d{1,3}\s*[.)]\s*[①-⑤㉠-㉭@]")
 _VISUAL_EMBEDDED_QUESTION_START = re.compile(r".*?\d{1,3}\s*[.)]\s*다음")
 _VISUAL_LEADING_NUMBER = re.compile(r"^\s*(\d{1,3})")
-_VISUAL_DAMAGED_MARKERS = {"㉦": 1, "㉨": 2, "㉭": 3}
+_VISUAL_DAMAGED_MARKERS = {"㉦": 1, "㉨": 2, "㉩": 2, "㉭": 3}
 _VISUAL_EXPLICIT_MARKERS = {"①": 1, "②": 2, "③": 3, "④": 4}
 _VISUAL_CHOICE_SYMBOLS = ("①", "②", "③", "④")
 _VISUAL_PROPOSITION_MARKERS = set("㉠㉡㉢㉣㉤㉥")
 _VISUAL_QUESTION_TERMINATOR = re.compile(
-    r"(?:[?？]|고려하지\s*아니한다[.)])\s*$"
+    r"(?:[?？]|고려하지\s*아니한다[.)]|"
+    r"(?:것\s*은|것인가|무엇인가|있는가|거\s*은)\s*\d?)\s*$"
 )
-_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉭年]\)?\s*")
+_VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-5@①-⑤㉦㉨㉩㉭年]\)?\s*")
 _TARGETED_OCR_STATE_LOCK = threading.Lock()
 _TARGETED_OCR_ACTIVE_TOKEN: object | None = None
 _TARGETED_OCR_CIRCUIT_OPEN = False
@@ -2080,7 +2081,8 @@ class PDFExtractor:
                 ]
                 if anchor[3] and anchor[2] < len(lines[index].words):
                     fused_text = str(lines[index].words[anchor[2]].text).strip()
-                    if _VISUAL_DAMAGED_PREFIX.sub("", fused_text, count=1).strip():
+                    damaged_prefix = _VISUAL_DAMAGED_PREFIX.match(fused_text)
+                    if damaged_prefix and damaged_prefix.end() < len(fused_text):
                         content.append(lines[index].words[anchor[2]])
                 if not content:
                     empty_cells.append((index, marker_x, cell_end_x))
@@ -2218,6 +2220,7 @@ class PDFExtractor:
 
         crop_variants = (
             (0.015, 0.055, 0.006, 0.006),
+            (0.015, 0.055, 0.007, 0.006),
             (0.015, 0.045, 0.005, 0.007),
             (0.010, 0.045, 0.003, 0.005),
         )
@@ -2783,10 +2786,57 @@ class PDFExtractor:
             if not anchor[3]:
                 return False
             token = str(lines[anchor[0]].words[anchor[2]].text).strip()
-            return bool(token) and token[:1] in (
-                set(_VISUAL_EXPLICIT_MARKERS)
-                | set(_VISUAL_DAMAGED_MARKERS)
-                | {"@", "O", "1", "2", "3", "4", "5"}
+            return bool(token) and (
+                token[:1] in (
+                    set(_VISUAL_EXPLICIT_MARKERS)
+                    | set(_VISUAL_DAMAGED_MARKERS)
+                    | {"@", "O"}
+                )
+                or token in {"1", "2", "3", "4", "5"}
+            )
+
+        def fused_choice_content(anchor, offset, word):
+            if not anchor[3] or offset != anchor[2]:
+                return False
+            token = str(word.text).strip()
+            match = _VISUAL_DAMAGED_PREFIX.match(token)
+            return bool(match and match.end() < len(token))
+
+        def proposition_like_anchor(anchor):
+            if anchor[2] >= len(lines[anchor[0]].words):
+                return False
+            token = str(lines[anchor[0]].words[anchor[2]].text).strip()
+            return bool(token) and token[:1] in _VISUAL_PROPOSITION_MARKERS
+
+        def inferred_ring_with_separate_content(anchor):
+            if anchor[3] or anchor[2] >= len(lines[anchor[0]].words):
+                return False
+            word_x = float(lines[anchor[0]].words[anchor[2]].bbox[0])
+            return word_x >= anchor[1] + 0.020
+
+        def strong_grid(grid, *, allow_inferred_rings=False):
+            span = grid[1][1] - grid[0][1]
+            supported = [
+                trusted_anchor(anchor)
+                or (
+                    allow_inferred_rings
+                    and inferred_ring_with_separate_content(anchor)
+                )
+                for anchor in grid
+            ]
+            return (
+                span >= 0.125
+                and (
+                    sum(supported) >= 3
+                    or (
+                        span >= 0.180
+                        and all(
+                            supported[offset]
+                            or proposition_like_anchor(anchor)
+                            for offset, anchor in enumerate(grid)
+                        )
+                    )
+                )
             )
 
         for line_anchors in by_line.values():
@@ -2811,13 +2861,7 @@ class PDFExtractor:
                                 and float(word.bbox[0]) < cell_end
                             )
                             or (
-                                anchor[3]
-                                and offset == anchor[2]
-                                and bool(
-                                    _VISUAL_DAMAGED_PREFIX.sub(
-                                        "", str(word.text).strip(), count=1
-                                    ).strip()
-                                )
+                                fused_choice_content(anchor, offset, word)
                             )
                         )
                         for offset, word in enumerate(lines[line_index].words)
@@ -2852,41 +2896,39 @@ class PDFExtractor:
                                 and float(word.bbox[0]) < right_x
                             )
                             or (
-                                anchor[3]
-                                and offset == anchor[2]
-                                and bool(
-                                    _VISUAL_DAMAGED_PREFIX.sub(
-                                        "", str(word.text).strip(), count=1
-                                    ).strip()
-                                )
+                                fused_choice_content(anchor, offset, word)
                             )
                         )
                         for offset, word in enumerate(lines[line_index].words)
                     )
 
-                return [
-                    pair
-                    for pair in itertools.combinations(sources, 2)
-                    if pair[1][1] - pair[0][1] >= 0.080
-                    and has_content(
-                        pair[0], pair[0][1] + 0.020,
-                        pair[1][1] - 0.010,
-                    )
-                    and has_content(
-                        pair[1], pair[1][1] + 0.020,
-                        float(lines[line_index].bbox[2]) + 0.005,
-                    )
-                ]
+                pairs = []
+                for pair in itertools.combinations(sources, 2):
+                    if pair[1][1] - pair[0][1] < 0.080:
+                        continue
+                    content_count = sum((
+                        has_content(
+                            pair[0], pair[0][1] + 0.020,
+                            pair[1][1] - 0.010,
+                        ),
+                        has_content(
+                            pair[1], pair[1][1] + 0.020,
+                            float(lines[line_index].bbox[2]) + 0.005,
+                        ),
+                    ))
+                    if content_count:
+                        pairs.append((pair, content_count))
+                return pairs
 
             left_pairs = cell_pairs(left_index)
             right_pairs = cell_pairs(right_index)
             matching_pairs = []
-            for left in left_pairs:
-                for right in right_pairs:
+            for left, left_content_count in left_pairs:
+                for right, right_content_count in right_pairs:
                     if max(
                         abs(left[position][1] - right[position][1])
                         for position in range(2)
-                    ) <= 0.025:
+                    ) <= 0.025 and left_content_count + right_content_count >= 3:
                         total_span = (
                             left[1][1] - left[0][1]
                             + right[1][1] - right[0][1]
@@ -2955,13 +2997,7 @@ class PDFExtractor:
             )
             strong_grids = [
                 grid for grid in grid_patterns
-                if (
-                    grid[1][1] - grid[0][1] >= 0.125
-                    and (
-                        sum(trusted_anchor(anchor) for anchor in grid) >= 3
-                        or grid[1][1] - grid[0][1] >= 0.180
-                    )
-                )
+                if strong_grid(grid)
             ]
             compact_grid = min(
                 strong_grids,
@@ -2984,7 +3020,10 @@ class PDFExtractor:
             else:
                 patterns.append(chosen_vertical)
         else:
-            patterns.extend(grid_patterns)
+            patterns.extend(
+                grid for grid in grid_patterns
+                if strong_grid(grid, allow_inferred_rings=True)
+            )
 
         if not patterns:
             return None

@@ -915,11 +915,21 @@ def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypat
         for value, x in zip(row, (145, 285, 405)):
             if value:
                 words.append({"text": value, "bbox": (x, y, x + 40, y + 14), "confidence": 0.98})
-    targets = iter(("정류", "정박"))
+    calls = 0
+
+    def recover_cell(crop):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "정류"
+        # Some native OCR rows are bounded by the adjacent numeric cells.
+        # The Hangul glyph starts one pixel above the old crop variants.
+        return "정박" if crop.height >= 27 else None
+
     monkeypatch.setattr(
         PDFExtractor,
         "_targeted_choice_crop_text",
-        staticmethod(lambda _crop: next(targets)),
+        staticmethod(recover_cell),
     )
     structured = build_structured_page(
         words, page_number=2, width=1000, height=1000,
@@ -1175,6 +1185,173 @@ def test_two_by_two_choice_grid_allows_small_column_stagger():
     selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
 
     assert [anchor[0] for anchor in selected] == [0, 0, 1, 1]
+
+
+def test_numeric_words_do_not_form_a_false_grid_over_vertical_choices():
+    lines = tuple(
+        LayoutLine(
+            tuple(
+                [
+                    LayoutWord(marker, (0.05, y, 0.07, y + 0.015), 0.98, 0),
+                    LayoutWord(text, (0.08, y, 0.22, y + 0.015), 0.98, 0),
+                ]
+                + (
+                    [
+                        LayoutWord(
+                            f"{number}회", (0.27, y, 0.31, y + 0.015), 0.98, 0
+                        ),
+                        LayoutWord("단음", (0.33, y, 0.40, y + 0.015), 0.98, 0),
+                    ]
+                    if number <= 2 else []
+                )
+            ),
+            (0.05, y, 0.40 if number <= 2 else 0.22, y + 0.015), 1, 0,
+        )
+        for number, marker, text, y in zip(
+            (1, 2, 3, 4),
+            ("①", "②", "③", "④"),
+            ("첫째선택지", "둘째선택지", "셋째선택지", "넷째선택지"),
+            (0.10, 0.13, 0.20, 0.27),
+        )
+    )
+    anchors = (
+        (0, 0.05, 0, True),
+        (0, 0.27, 2, True),
+        (1, 0.05, 0, True),
+        (1, 0.27, 2, True),
+        (2, 0.05, 0, True),
+        (3, 0.05, 0, True),
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert [anchor[0] for anchor in selected] == [0, 1, 2, 3]
+
+
+def test_inferred_numeric_words_are_not_fused_choice_content():
+    lines = tuple(
+        LayoutLine(
+            (
+                LayoutWord(left, (0.05, y, 0.09, y + 0.015), 0.98, 0),
+                LayoutWord(right, (0.20, y, 0.24, y + 0.015), 0.98, 0),
+            ),
+            (0.05, y, 0.24, y + 0.015), 1, 0,
+        )
+        for left, right, y in (("2회", "1회", 0.10), ("3회", "4회", 0.14))
+    )
+    anchors = (
+        (0, 0.05, 0, False, None),
+        (0, 0.20, 1, False, None),
+        (1, 0.05, 0, False, None),
+        (1, 0.20, 1, False, None),
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert selected is None
+
+
+def test_two_false_numeric_columns_do_not_replace_three_damaged_vertical_choices():
+    lines = tuple(
+        LayoutLine(
+            tuple(
+                [
+                    LayoutWord(marker, (0.05, y, 0.07, y + 0.015), 0.80, 0),
+                    LayoutWord(text, (0.08, y, 0.22, y + 0.015), 0.98, 0),
+                ]
+                + (
+                    [
+                        LayoutWord(
+                            f"{number}회", (0.27, y, 0.31, y + 0.015), 0.98, 0
+                        ),
+                        LayoutWord("단음", (0.33, y, 0.40, y + 0.015), 0.98, 0),
+                    ]
+                    if number <= 2 else []
+                )
+            ),
+            (0.05, y, 0.40 if number <= 2 else 0.22, y + 0.015), 1, 0,
+        )
+        for number, marker, text, y in zip(
+            (1, 2, 3),
+            ("㉦", "㉨", "㉭"),
+            ("첫째선택지", "둘째선택지", "셋째선택지"),
+            (0.10, 0.14, 0.18),
+        )
+    )
+    anchors = (
+        (0, 0.05, 0, True, None),
+        (0, 0.27, 2, False, None),
+        (1, 0.05, 0, True, None),
+        (1, 0.27, 2, False, None),
+        (2, 0.05, 0, True, None),
+    )
+
+    selected = PDFExtractor._select_complete_visual_choice_layout(lines, anchors)
+
+    assert selected is None
+
+
+def test_old_circled_hangul_damage_is_restored_in_single_choice_row():
+    words = [
+        {"text": "1.", "bbox": (20, 40, 42, 54), "confidence": 0.98},
+        {"text": "가장 옳지 않은 것은?", "bbox": (52, 40, 280, 54), "confidence": 0.98},
+        {"text": "인천", "bbox": (80, 100, 140, 114), "confidence": 0.98},
+        {"text": "㉩부산", "bbox": (180, 100, 250, 114), "confidence": 0.80},
+        {"text": "㉭", "bbox": (300, 100, 318, 114), "confidence": 0.80},
+        {"text": "동해", "bbox": (330, 100, 390, 114), "confidence": 0.98},
+        {"text": "@", "bbox": (420, 100, 438, 114), "confidence": 0.80},
+        {"text": "포항", "bbox": (450, 100, 510, 114), "confidence": 0.98},
+    ]
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for x in (50, 180, 300, 420):
+        draw.ellipse((x, 100, x + 18, 114), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == ["인천", "부산", "동해", "포항"]
+
+
+def test_garbled_question_terminator_allows_one_empty_two_by_two_grid_cell(monkeypatch):
+    words = [
+        {"text": "13.", "bbox": (20, 40, 50, 54), "confidence": 0.98},
+        {"text": "다음 설명이다", "bbox": (60, 40, 220, 54), "confidence": 0.98},
+        {"text": "법규를 위반하는 행위의 방지", "bbox": (50, 80, 350, 94), "confidence": 0.98},
+        {"text": "직무권한을 행사할 수 있는가9", "bbox": (50, 110, 350, 124), "confidence": 0.70},
+        {"text": "2", "bbox": (300, 200, 318, 214), "confidence": 0.80},
+        {"text": "둘째선택지", "bbox": (330, 200, 520, 214), "confidence": 0.98},
+        {"text": "㉦", "bbox": (50, 240, 68, 254), "confidence": 0.80},
+        {"text": "셋째선택지", "bbox": (80, 240, 250, 254), "confidence": 0.98},
+        {"text": "㉦", "bbox": (300, 240, 318, 254), "confidence": 0.80},
+        {"text": "넷째선택지", "bbox": (330, 240, 520, 254), "confidence": 0.98},
+    ]
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_choice_crop_text",
+        staticmethod(lambda _crop: "첫째선택지"),
+    )
+    structured = build_structured_page(
+        words, page_number=2, width=1000, height=1000,
+        source="ocr", images=((0, 0, 1000, 1000),),
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    for y in (80, 110, 200, 240):
+        draw.ellipse((50, y, 68, y + 14), outline=0, width=2)
+    for y in (200, 240):
+        draw.ellipse((300, y, 318, y + 14), outline=0, width=2)
+
+    restored = PDFExtractor()._restore_visual_choice_markers(structured, image)
+    question = OfflineExamParser().parse_pages([restored])[0]
+
+    assert question.choices == [
+        "첫째선택지", "둘째선택지", "셋째선택지", "넷째선택지"
+    ]
 
 
 def test_visual_marker_evidence_allows_a_choice_continuation_at_bottom_margin():
