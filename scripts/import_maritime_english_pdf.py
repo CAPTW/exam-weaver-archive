@@ -54,6 +54,10 @@ ANSWER_FILENAMES = {
     "recent_2024_h2_2025_h1": "[기출정답]해사영어(24년 하반기-25년 상반기).pdf",
     "archive_2024_2013": "[기출정답]해사영어(24년-13년).pdf",
 }
+# The official G029 table explicitly prints "정답 없음" for question 5.
+# Keeping the location explicit prevents an unrelated low-confidence OCR cell
+# from being silently treated as an official unavailable answer.
+OFFICIAL_UNAVAILABLE_ANSWERS = {29: frozenset({5})}
 
 
 @dataclass
@@ -381,6 +385,20 @@ def build_questions(
         answers = answer_map.get(group_index)
         if not answers or len(answers) != 20:
             raise RuntimeError(f"Missing 20-answer key for group G{group_index:03d}")
+        unavailable_answers = {
+            number
+            for number, answer in enumerate(answers, start=1)
+            if int(answer) == 0
+        }
+        expected_unavailable = set(
+            OFFICIAL_UNAVAILABLE_ANSWERS.get(group_index, ())
+        )
+        if unavailable_answers != expected_unavailable:
+            raise RuntimeError(
+                f"Unexpected unavailable answers for group G{group_index:03d}: "
+                f"expected={sorted(expected_unavailable)} "
+                f"actual={sorted(unavailable_answers)}"
+            )
 
         label = group_label(group, group_index)
         year = int(group.get("year") or 0)
@@ -397,6 +415,7 @@ def build_questions(
             answers=answers,
             rejected_count=rejected_count,
             choice_counts={number: len(item.choices) for number, item in common_questions.items()},
+            unavailable_answer_numbers=expected_unavailable,
         )
 
         for question_number in range(1, 21):
@@ -441,6 +460,7 @@ def build_questions(
                 text=question_text,
                 choices=choices,
                 correct_answer=correct_answer,
+                answer_available=correct_answer != 0,
                 has_image=False,
                 source_page=page_number,
                 subject_name=SUBJECT_NAME,

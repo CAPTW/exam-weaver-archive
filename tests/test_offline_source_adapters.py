@@ -273,6 +273,34 @@ def test_persistence_gate_rejects_zero_answer_question():
         require_persistable_offline_questions([SimpleNamespace(question=question)])
 
 
+def test_complete_set_gate_accepts_explicit_official_unavailable_answer():
+    from src.parser.offline_sources import require_complete_offline_set
+
+    require_complete_offline_set(
+        {1: object(), 2: object()},
+        expected_numbers=[1, 2],
+        answers=[3, 0],
+        rejected_count=0,
+        choice_counts={1: 4, 2: 4},
+        unavailable_answer_numbers={2},
+    )
+
+
+def test_persistence_gate_accepts_explicit_official_unavailable_answer():
+    from src.parser.offline_sources import require_persistable_offline_questions
+    from src.parser.question import Choice, Question
+
+    question = Question(
+        number=5,
+        text="본문",
+        choices=[Choice(number, str(number), str(number)) for number in range(1, 5)],
+        correct_answer=0,
+        answer_available=False,
+    )
+
+    require_persistable_offline_questions([SimpleNamespace(question=question)])
+
+
 def test_complete_and_persistence_gates_accept_explicit_all_choices_answer():
     from src.parser.offline_sources import (
         require_complete_offline_set,
@@ -295,6 +323,58 @@ def test_complete_and_persistence_gates_accept_explicit_all_choices_answer():
     )
 
     require_persistable_offline_questions([SimpleNamespace(question=question)])
+
+
+def test_maritime_english_builder_preserves_official_unavailable_answer(
+    monkeypatch, tmp_path
+):
+    import scripts.import_maritime_english_pdf as provider
+    from src.parser.offline_exam import ParsedOfflineQuestion
+
+    groups = [
+        {
+            "year": 2025 - (index // 2),
+            "period": "fixture",
+            "category": "fixture",
+            "pdf_id": f"fixture-{index:03d}",
+            "filename": f"fixture-{index:03d}.pdf",
+            "pages": [{"page": index, "source_path": f"fixture-{index:03d}.pdf"}],
+        }
+        for index in range(1, 31)
+    ]
+    answer_map = {index: [1] * 20 for index in range(1, 31)}
+    answer_map[29][4] = 0
+    questions = {
+        number: ParsedOfflineQuestion(
+            number,
+            f"문제 {number}",
+            [f"선지 {choice}" for choice in range(1, 5)],
+            1,
+            0.99,
+            (),
+        )
+        for number in range(1, 21)
+    }
+
+    monkeypatch.setattr(provider, "build_groups", lambda records: groups)
+    monkeypatch.setattr(provider, "build_answer_map", lambda input_dir: answer_map)
+    monkeypatch.setattr(provider, "read_analysis_rows", lambda output_dir: {})
+    monkeypatch.setattr(provider, "group_label", lambda group, index: f"G{index:03d}")
+    monkeypatch.setattr(
+        provider,
+        "select_group_questions",
+        lambda group, parse_source, cache: (questions, 0),
+    )
+
+    parsed, summary = provider.build_questions([{}], tmp_path, tmp_path)
+
+    target = next(
+        item for item in parsed if item.group_index == 29 and item.question.number == 5
+    )
+    assert target.question.correct_answer == 0
+    assert target.question.answer_available is False
+    assert "answer_missing_in_source" in target.parser_tags
+    assert summary["answer_missing_in_source"] == 1
 
 
 @pytest.mark.parametrize(

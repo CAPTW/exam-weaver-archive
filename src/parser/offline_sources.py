@@ -152,10 +152,12 @@ def require_complete_offline_set(
     answers: Sequence[int],
     rejected_count: int,
     choice_counts: Mapping[int, int],
+    unavailable_answer_numbers: Iterable[int] = (),
 ) -> None:
     """Block a complete exam set before any partial or invalid data can persist."""
 
     expected = [int(number) for number in expected_numbers]
+    unavailable = {int(number) for number in unavailable_answer_numbers}
     present = set(int(number) for number in questions)
     missing = [number for number in expected if number not in present]
     extra = sorted(present - set(expected))
@@ -173,9 +175,13 @@ def require_complete_offline_set(
     else:
         for number, answer in zip(expected, answers):
             choice_count = int(choice_counts.get(number, 0) or 0)
-            if not isinstance(answer, int) or not (
-                answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
-            ):
+            if number in unavailable:
+                valid = answer == 0
+            else:
+                valid = isinstance(answer, int) and (
+                    answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
+                )
+            if not valid:
                 invalid_answers.append((number, answer))
     if invalid_answers:
         raise OfflineSetValidationError(f"invalid_answers: {invalid_answers}")
@@ -189,10 +195,15 @@ def require_persistable_offline_questions(items: Iterable[object]) -> None:
         question = getattr(item, "question", item)
         number = int(getattr(question, "number", 0) or 0)
         answer = getattr(question, "correct_answer", None)
+        answer_available = bool(getattr(question, "answer_available", True))
         choice_count = len(getattr(question, "choices", ()) or ())
-        if not isinstance(answer, int) or not (
-            answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
-        ):
+        if answer_available:
+            valid = isinstance(answer, int) and (
+                answer == ALL_CHOICES_CORRECT or 1 <= answer <= choice_count
+            )
+        else:
+            valid = answer == 0
+        if not valid:
             invalid.append((number, answer))
     if invalid:
         raise OfflineSetValidationError(f"invalid_answers: {invalid}")
