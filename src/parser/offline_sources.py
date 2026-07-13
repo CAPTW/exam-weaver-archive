@@ -214,6 +214,9 @@ def select_group_questions(
     parse_source: Callable[[Path, Mapping[str, object] | None], OfflineParseResult],
     cache: MutableMapping[str, OfflineParseResult],
     metadata: Mapping[str, object] | None = None,
+    candidate_transform: Callable[
+        [ParsedOfflineQuestion, Path], ParsedOfflineQuestion
+    ] | None = None,
 ) -> tuple[dict[int, ParsedOfflineQuestion], int]:
     """Select shared-parser questions whose source pages belong to one exam group."""
 
@@ -257,6 +260,8 @@ def select_group_questions(
             candidates = OfflineExamParser().parse_pages(list(scoped_pages))
             scoped_questions: list[ParsedOfflineQuestion] = []
             for candidate in candidates:
+                if candidate_transform is not None:
+                    candidate = candidate_transform(candidate, Path(source_path))
                 quality = validate_offline_question(candidate)
                 if quality.importable:
                     scoped_questions.append(candidate)

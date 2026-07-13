@@ -60,6 +60,57 @@ def _page_with_question(choice_count: int = 4) -> StructuredPage:
     return StructuredPage(1, 1, 1, "scanned", tuple(lines), ())
 
 
+def test_engineering_registered_source_repairs_are_explicit_and_importable():
+    from scripts.import_police_engineering_pdf import repair_registered_source_candidate
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_quality import validate_offline_question
+
+    damaged = ParsedOfflineQuestion(
+        18,
+        "필터 도면기호는?",
+        [],
+        24,
+        1.0,
+        ("invalid_choice_count",),
+    )
+    repaired = repair_registered_source_candidate(
+        damaged,
+        Path("[기출문제]경찰직 기관술(학)(24-13년).pdf"),
+    )
+
+    assert len(repaired.choices) == 4
+    assert "source_choice_repair" in repaired.diagnostics
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_engineering_truncated_source_is_marked_unavailable_without_hallucination():
+    from scripts.import_police_engineering_pdf import repair_registered_source_candidate
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_quality import validate_offline_question
+
+    truncated = ParsedOfflineQuestion(
+        11,
+        "변압기의 1차 및 2차 전압",
+        [],
+        64,
+        1.0,
+        ("invalid_choice_count",),
+    )
+    repaired = repair_registered_source_candidate(
+        truncated,
+        Path("[기출문제]경찰직 기관술(학)(24-13년).pdf"),
+    )
+
+    assert repaired.choices == [
+        "원본 PDF에서 잘린 선지 1",
+        "원본 PDF에서 잘린 선지 2",
+        "원본 PDF에서 잘린 선지 3",
+        "원본 PDF에서 잘린 선지 4",
+    ]
+    assert "source_unavailable_choices" in repaired.diagnostics
+    assert validate_offline_question(repaired).importable is True
+
+
 def test_classifies_exact_corpus_as_12_questions_15_answers_and_3_notices():
     from src.parser.offline_sources import DocumentRole, classify_offline_document
 

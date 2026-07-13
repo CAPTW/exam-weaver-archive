@@ -11,7 +11,7 @@ import re
 import shutil
 import sqlite3
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +76,71 @@ NO_SOURCE_ANSWER_KEYS = set(_keys("[기출문제]경찰직 기관술(학)(24-13�
 
 MANUAL_ARCHIVE_2020_1 = [3, 3, 4, 2, 4, 4, 2, 3, 3, 4, 4, 4, 1, 3, 2, 3, 1, 3, 3, 2]
 MANUAL_ARCHIVE_2017_2 = [2, 4, 1, 2, 3, 3, 1, 4, 3, 2, 4, 2, 1, 3, 4, 1, 2, 4, 3, 4]
+
+
+SOURCE_CHOICE_REPAIRS: dict[tuple[str, int, int], tuple[str, ...]] = {
+    ("[기출문제]경찰직 기관술(학)(24-13년).pdf", 24, 18): (
+        "마름모 내부 하단 수평선 필터 기호",
+        "마름모 내부 수직 점선 필터 기호",
+        "마름모 내부 상·하단 수평선 필터 기호",
+        "마름모 내부 수직선과 대향 삼각형 필터 기호",
+    ),
+    ("[기출문제]경찰직 기관술(학)(24-13년).pdf", 33, 2): (
+        "㉠ - 브러시",
+        "㉡ - 계자",
+        "㉢ - 전기자",
+        "㉣ - 브러시",
+    ),
+    ("[기출문제]경찰직 기관술(학)(24-13년).pdf", 65, 18): (
+        "10",
+        "20",
+        "10",
+        "5",
+    ),
+    ("[기출문제]경찰직 기관술(학)(24-13년).pdf", 66, 8): (
+        "A-E-B-C-F-G-D",
+        "A-B-E-C-G-F-D",
+        "A-E-C-F-B-D-G",
+        "A-B-C-F-G-D-E",
+    ),
+}
+
+SOURCE_UNAVAILABLE_CHOICES: dict[tuple[str, int, int], tuple[str, ...]] = {
+    ("[기출문제]경찰직 기관술(학)(24-13년).pdf", 64, 11): tuple(
+        f"원본 PDF에서 잘린 선지 {number}" for number in range(1, 5)
+    ),
+}
+
+
+def repair_registered_source_candidate(candidate, source_path: Path):
+    """Apply audited repairs only where the registered source is irrecoverable."""
+
+    key = (source_path.name, candidate.source_page, candidate.number)
+    choices = SOURCE_CHOICE_REPAIRS.get(key)
+    diagnostic = "source_choice_repair"
+    if choices is None:
+        choices = SOURCE_UNAVAILABLE_CHOICES.get(key)
+        diagnostic = "source_unavailable_choices"
+    if choices is None:
+        return candidate
+    diagnostics = tuple(
+        value
+        for value in candidate.diagnostics
+        if value not in {
+            "duplicate_choice_marker",
+            "invalid_choice_count",
+            "invalid_choice_sequence",
+        }
+    )
+    if len(set(choices)) != len(choices):
+        diagnostics += ("source_duplicate_choices",)
+    if all(re.match(r"^[㉠-㉭](?:\s|$)", choice) for choice in choices):
+        diagnostics += ("explicit_proposition_choices",)
+    return replace(
+        candidate,
+        choices=list(choices),
+        diagnostics=tuple(dict.fromkeys((*diagnostics, diagnostic))),
+    )
 
 
 @dataclass
@@ -454,15 +519,27 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
         source_paths = {page.get("source_path", "") for page in group["pages"] if page.get("source_path")}
         source_path = sorted(source_paths)[0] if source_paths else ""
         common_questions, rejected_count = select_group_questions(
-            group, parse_subject_question_pdf, source_cache
+            group,
+            parse_subject_question_pdf,
+            source_cache,
+            candidate_transform=repair_registered_source_candidate,
         )
         choice_review += rejected_count
+        unavailable_answer_numbers = {
+            number
+            for number, item in common_questions.items()
+            if "source_unavailable_choices" in item.diagnostics
+        }
+        effective_answers = list(answers)
+        for number in unavailable_answer_numbers:
+            effective_answers[number - 1] = 0
         require_complete_offline_set(
             common_questions,
             expected_numbers=range(1, expected_count + 1),
-            answers=answers,
+            answers=effective_answers,
             rejected_count=rejected_count,
             choice_counts={number: len(item.choices) for number, item in common_questions.items()},
+            unavailable_answer_numbers=unavailable_answer_numbers,
         )
 
         for question_number in range(1, expected_count + 1):
@@ -495,10 +572,14 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
             topic_tags.extend((row.get("concept_tags") or "").split(";"))
             topic_tags = [tag for tag in dict.fromkeys(tag for tag in topic_tags if tag and tag != "unknown")]
 
-            correct_answer = int(answers[question_number - 1])
+            correct_answer = int(effective_answers[question_number - 1])
             if correct_answer == 0:
                 answer_review += 1
-                parser_tags.append("answer_requires_manual_review")
+                parser_tags.append(
+                    "answer_missing_in_source"
+                    if question_number in unavailable_answer_numbers
+                    else "answer_requires_manual_review"
+                )
 
             choices = [Choice(number=index, symbol=f"{index}", text=text) for index, text in enumerate(choice_texts, start=1)]
 
@@ -507,6 +588,7 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
                 text=question_text,
                 choices=choices,
                 correct_answer=correct_answer,
+                answer_available=correct_answer != 0,
                 has_image=False,
                 source_page=page_number,
                 subject_name=SUBJECT_NAME,

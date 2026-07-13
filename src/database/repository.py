@@ -479,13 +479,19 @@ class ExamRepository:
                 try:
                     year = getattr(q, 'year', None) or metadata.year
                     session = getattr(q, 'session', None) or metadata.session
-                    tags = build_tags(
+                    generated_tags = build_tags(
                         question_text=q.text,
                         choices=getattr(q, 'choices', None),
                         subject_name=subject_name,
                         exam_type=exam_type,
                         has_image=bool(getattr(q, 'has_image', False))
                     )
+                    tags = ",".join(dict.fromkeys(
+                        tag.strip()
+                        for value in (getattr(q, 'tags', ''), generated_tags)
+                        for tag in str(value or '').split(',')
+                        if tag.strip()
+                    ))
                     cursor.execute("""
                         INSERT INTO questions (
                             exam_subject_id, year, session, question_number, 

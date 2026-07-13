@@ -39,7 +39,8 @@ _VISUAL_CHOICE_SYMBOLS = ("①", "②", "③", "④")
 _VISUAL_PROPOSITION_MARKERS = set("㉠㉡㉢㉣㉤㉥")
 _VISUAL_QUESTION_TERMINATOR = re.compile(
     r"(?:[?？]|고려하지\s*아니한다[.)]|"
-    r"(?:것\s*은|것인가|무엇인가|있는가|거\s*은)\s*\d?)\s*$"
+    r"(?:것\s*은|것인가|무엇인가|있는가|거\s*은)\s*\d?"
+    r"|고르시오[.]?)\s*$"
 )
 _VISUAL_DAMAGED_PREFIX = re.compile(r"^\(?[0O1-59@①-⑤㉦㉨㉩㉭年]\)?\s*")
 _MUPDF_RENDER_LOCK = threading.RLock()
@@ -219,6 +220,7 @@ class PDFExtractor:
         if height <= 0:
             height = max((float(word[3]) for word in words), default=1.0)
         images = self._structured_image_bboxes(page, width, height)
+        divider_x = self._native_vector_column_divider(page, width, height)
         return build_structured_page(
             words,
             page_number=page_number,
@@ -226,7 +228,41 @@ class PDFExtractor:
             height=height,
             source='native',
             images=images,
+            divider_x=divider_x,
         )
+
+    @staticmethod
+    def _native_vector_column_divider(page, width: float, height: float) -> float | None:
+        """Return a page-height center rule when the PDF exposes one as vector art."""
+
+        try:
+            drawings = page.get_drawings() or []
+        except Exception:
+            return None
+        candidates: list[tuple[float, float]] = []
+        for drawing in drawings:
+            rect = drawing.get('rect') if isinstance(drawing, dict) else None
+            if rect is None:
+                continue
+            try:
+                x0 = float(rect.x0)
+                x1 = float(rect.x1)
+                y0 = float(rect.y0)
+                y1 = float(rect.y1)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            rule_height = abs(y1 - y0)
+            rule_width = abs(x1 - x0)
+            center_x = (x0 + x1) / 2
+            if (
+                width * 0.44 <= center_x <= width * 0.56
+                and rule_height >= height * 0.65
+                and rule_width <= width * 0.01
+            ):
+                candidates.append((rule_height, center_x))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item[0])[1]
 
     @staticmethod
     def _structured_image_bboxes(page, width: float, height: float) -> List[tuple]:
@@ -1058,7 +1094,230 @@ class PDFExtractor:
         page = self._recover_legacy_abc_choice_rows(page, gray)
         page = self._recover_indented_duplicate_grid_cell(page, gray)
         page = self._recover_missing_legacy_two_by_two_cell(page, gray)
+        for _attempt in range(4):
+            recovered_page = self._recover_empty_marked_grid_cell(page, gray)
+            if recovered_page is page:
+                break
+            page = recovered_page
+        for _attempt in range(4):
+            recovered_page = self._recover_sparse_raster_choice_region(page, gray)
+            if recovered_page is page:
+                break
+            page = recovered_page
         return self._mark_raster_underlined_choice_words(page, gray)
+
+    @classmethod
+    def _recover_empty_marked_grid_cell(cls, page, gray):
+        """Fill one OCR-empty cell after a ①-④ raster grid was restored."""
+
+        lines = list(page.lines)
+        by_column: dict[int, list[int]] = {}
+        for index, line in enumerate(lines):
+            by_column.setdefault(line.column, []).append(index)
+        for indexes in by_column.values():
+            indexes.sort(key=lambda index: float(lines[index].bbox[1]))
+            for upper_index, lower_index in zip(indexes, indexes[1:]):
+                selected = []
+                numbers = []
+                for index in (upper_index, lower_index):
+                    for word_index, word in enumerate(lines[index].words):
+                        text = str(word.text).strip()
+                        if (
+                            getattr(word, "visual_choice_marker", False)
+                            and text[:1] in _VISUAL_EXPLICIT_MARKERS
+                        ):
+                            number = _VISUAL_EXPLICIT_MARKERS[text[:1]]
+                            numbers.append(number)
+                            selected.append((
+                                index,
+                                float(word.bbox[0]),
+                                word_index,
+                                True,
+                                number,
+                            ))
+                if numbers != [1, 2, 3, 4]:
+                    continue
+                recovered = cls._recover_empty_visual_grid_cell(
+                    gray, lines, selected, trust_selected=True
+                )
+                if recovered is None:
+                    continue
+                index, value, marker_x, cell_end_x = recovered
+                lines[index] = cls._line_with_recovered_choice_text(
+                    lines[index], value, marker_x, cell_end_x
+                )
+                return replace(page, lines=tuple(lines))
+        return page
+
+    @classmethod
+    def _recover_sparse_raster_choice_region(cls, page, gray):
+        """Re-OCR a narrow answer band when page OCR retained fewer than four choices."""
+
+        lines = list(page.lines)
+        changed = False
+        try:
+            from .offline_exam import OfflineExamParser
+            from .offline_quality import validate_offline_question
+
+            healthy_numbers = {
+                question.number
+                for question in OfflineExamParser().parse_pages([page])
+                if validate_offline_question(question).importable
+            }
+        except Exception:
+            healthy_numbers = set()
+        for column in sorted({line.column for line in lines}):
+            indexes = sorted(
+                (index for index, line in enumerate(lines) if line.column == column),
+                key=lambda index: float(lines[index].bbox[1]),
+            )
+            starts = [
+                position
+                for position, index in enumerate(indexes)
+                if _VISUAL_QUESTION_START.match(lines[index].text)
+            ]
+            for offset, start in enumerate(starts):
+                end = starts[offset + 1] if offset + 1 < len(starts) else len(indexes)
+                region_indexes = indexes[start:end]
+                if len(region_indexes) < 2:
+                    continue
+                leading_number = _VISUAL_LEADING_NUMBER.match(
+                    lines[region_indexes[0]].text
+                )
+                if (
+                    leading_number is not None
+                    and int(leading_number.group(1)) in healthy_numbers
+                ):
+                    continue
+                region = [lines[index] for index in region_indexes]
+                # This expensive fallback is intentionally Korean-only.  Applying
+                # it to damaged maritime-English rows can turn partial English OCR
+                # into plausible but unrelated Korean choices and drop the source
+                # question at the quality gate.
+                if len(re.findall(r"[가-힣]", " ".join(line.text for line in region))) < 4:
+                    continue
+                existing_numbers = [
+                    _VISUAL_EXPLICIT_MARKERS[text[:1]]
+                    for line in region[1:]
+                    for word in line.words
+                    if (text := str(word.text).strip())[:1] in _VISUAL_EXPLICIT_MARKERS
+                ]
+                if existing_numbers == [1, 2, 3, 4]:
+                    continue
+                terminator = next(
+                    (
+                        position
+                        for position, line in enumerate(region)
+                        if re.search(r"[?？]", line.text)
+                        or _VISUAL_QUESTION_TERMINATOR.search(line.text)
+                    ),
+                    None,
+                )
+                if terminator is None:
+                    continue
+                tail_indexes = region_indexes[terminator + 1:]
+                if not tail_indexes:
+                    continue
+                marker_indexes = []
+                for index in tail_indexes:
+                    markerish = any(
+                        getattr(word, "visual_choice_marker", False)
+                        or str(word.text).strip()[:1]
+                        in (set(_VISUAL_EXPLICIT_MARKERS) | set(_VISUAL_DAMAGED_MARKERS) | {"年"})
+                        or re.fullmatch(r"\(?[0-4OQ]\)?[.)]?", str(word.text).strip())
+                        for word in lines[index].words
+                    )
+                    if markerish:
+                        marker_indexes.append(index)
+
+                next_y = (
+                    float(lines[indexes[starts[offset + 1]]].bbox[1])
+                    if offset + 1 < len(starts)
+                    else 0.940
+                )
+                if marker_indexes:
+                    crop_y0 = max(
+                        float(region[terminator].bbox[3]),
+                        min(float(lines[index].bbox[1]) for index in marker_indexes) - 0.025,
+                    )
+                    crop_y1 = min(
+                        next_y - 0.004,
+                        max(
+                            (
+                                float(lines[index].bbox[1])
+                                + float(lines[index].bbox[3])
+                            )
+                            / 2
+                            + 0.012
+                            for index in marker_indexes
+                        ),
+                        0.936,
+                    )
+                else:
+                    last = lines[tail_indexes[-1]]
+                    gap = next_y - float(last.bbox[3])
+                    if not 0.010 <= gap <= 0.120:
+                        continue
+                    crop_y0 = max(
+                        float(region[terminator].bbox[3]),
+                        float(last.bbox[3]) - 0.004,
+                    )
+                    crop_y1 = next_y - 0.004
+                if not 0.018 <= crop_y1 - crop_y0 <= 0.140:
+                    continue
+
+                column_left = min(float(line.bbox[0]) for line in region)
+                column_right = max(float(line.bbox[2]) for line in region)
+                crop_x0 = max(0.0, column_left - 0.020)
+                crop_x1 = min(1.0, column_right + 0.025)
+                width, height = gray.size
+                crop = gray.crop((
+                    int(crop_x0 * width),
+                    int(crop_y0 * height),
+                    int(crop_x1 * width),
+                    int(crop_y1 * height),
+                ))
+                choices = cls._targeted_korean_choice_values(crop)
+                if choices is None:
+                    continue
+
+                removable = {
+                    index
+                    for index in tail_indexes
+                    if float(lines[index].bbox[1]) >= crop_y0 - 0.004
+                }
+                insert_at = min(removable, default=region_indexes[-1] + 1)
+                kept = [line for index, line in enumerate(lines) if index not in removable]
+                insert_at -= sum(index < insert_at for index in removable)
+                marker_x = crop_x0 + 0.010
+                row_height = min(0.016, max(0.010, (crop_y1 - crop_y0) / 5))
+                recovered_lines = []
+                for choice_number, choice in enumerate(choices, start=1):
+                    y = crop_y0 + choice_number * min(0.002, row_height / 6)
+                    marker = LayoutWord(
+                        _VISUAL_CHOICE_SYMBOLS[choice_number - 1],
+                        (marker_x, y, marker_x + 0.018, y + row_height),
+                        0.90,
+                        column,
+                        True,
+                    )
+                    content = LayoutWord(
+                        choice,
+                        (marker_x + 0.024, y, crop_x1, y + row_height),
+                        0.85,
+                        column,
+                    )
+                    recovered_lines.append(LayoutLine(
+                        (marker, content),
+                        (marker_x, y, crop_x1, y + row_height),
+                        page.number,
+                        column,
+                    ))
+                kept[insert_at:insert_at] = recovered_lines
+                lines = kept
+                changed = True
+                break
+        return replace(page, lines=tuple(lines)) if changed else page
 
     @classmethod
     def _recover_missing_legacy_two_by_two_cell(cls, page, gray):
@@ -2946,7 +3205,9 @@ class PDFExtractor:
         return replace(page, lines=tuple(kept))
 
     @classmethod
-    def _recover_empty_visual_grid_cell(cls, gray, lines, selected):
+    def _recover_empty_visual_grid_cell(
+        cls, gray, lines, selected, *, trust_selected: bool = False
+    ):
         by_line = {}
         for anchor in selected:
             by_line.setdefault(anchor[0], []).append(anchor)
@@ -2987,16 +3248,40 @@ class PDFExtractor:
             )
             for delta in (-0.004, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, 0.004)
         )
-        if score[0] < 23 or score[1] < 140:
+        if not trust_selected and (score[0] < 23 or score[1] < 140):
             return None
         width, height = gray.size
+        centers = sorted(
+            (
+                (float(lines[line_index].bbox[1]) + float(lines[line_index].bbox[3])) / 2,
+                line_index,
+            )
+            for line_index in by_line
+        )
+        center_position = next(
+            position for position, (_center, line_index) in enumerate(centers)
+            if line_index == index
+        )
+        center_y = centers[center_position][0]
+        crop_top = float(lines[index].bbox[1]) - 0.006
+        crop_bottom = float(lines[index].bbox[3]) + 0.006
+        if center_position:
+            crop_top = max(crop_top, (centers[center_position - 1][0] + center_y) / 2)
+        if center_position + 1 < len(centers):
+            crop_bottom = min(
+                crop_bottom,
+                (center_y + centers[center_position + 1][0]) / 2,
+            )
         crop = gray.crop((
             max(0, int((projected_x - 0.015) * width)),
-            max(0, int((float(lines[index].bbox[1]) - 0.010) * height)),
+            max(0, int(crop_top * height)),
             min(width, int((cell_end_x + 0.005) * width)),
-            min(height, int((float(lines[index].bbox[3]) + 0.010) * height)),
+            min(height, int(crop_bottom * height)),
         ))
-        recovered_text = cls._targeted_choice_crop_text(crop)
+        recovered_text = (
+            cls._targeted_korean_cell_text(crop)
+            or cls._targeted_choice_crop_text(crop)
+        )
         if not recovered_text:
             return None
         return index, recovered_text, projected_x, cell_end_x
@@ -3279,6 +3564,189 @@ class PDFExtractor:
         if count < 2:
             return None
         return next(value for value, candidate_key in zip(values, keys) if candidate_key == key)
+
+    @staticmethod
+    def _parse_targeted_choice_values(value: str) -> list[str] | None:
+        """Split OCR text only when four visible option markers delimit it."""
+
+        line_marker = re.compile(
+            r"^\s*(?:[①②③④㉦㉨㉭@]|0[0-9OQ]{0,2}|"
+            r"[@(（]?[0-9OQ]{1,2}[)）.]?)\s+",
+            re.IGNORECASE,
+        )
+        line_values = []
+        for line in value.splitlines():
+            match = line_marker.match(line)
+            if match is None:
+                continue
+            choice = re.sub(r"\s+", " ", line[match.end():]).strip(" .;|")
+            if choice:
+                line_values.append(choice)
+        if len(line_values) >= 4:
+            for start in range(len(line_values) - 3):
+                choices = line_values[start:start + 4]
+                if len(set(choices)) == 4:
+                    return choices
+
+        marker = re.compile(
+            r"[①②③④@]|(?<![0-9A-Za-z가-힣])(?:0[0-9OQ]{0,2}|"
+            r"0[0-9OQ]{0,2}[.)]?|\([0-4OQ]{1,2}\)?|[0-4OQ9][.)])(?=\s|$)",
+            re.IGNORECASE,
+        )
+        matches = list(marker.finditer(value))
+        candidates: list[list[str]] = []
+        for start in range(max(1, len(matches) - 3)):
+            window = matches[start:start + 4]
+            if len(window) != 4:
+                continue
+            choices = []
+            for offset, match in enumerate(window):
+                end = window[offset + 1].start() if offset + 1 < 4 else len(value)
+                choice = re.sub(r"\s+", " ", value[match.end():end]).strip(" \t\r\n.;|")
+                choices.append(choice)
+            if all(choices) and len(set(choices)) == 4:
+                candidates.append(choices)
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda choices: (
+                sum(bool(re.search(r"[0-9A-Za-z가-힣ㄱ-ㅎ㉠-㉭]", choice)) for choice in choices),
+                -max(len(choice) for choice in choices),
+                sum(len(choice) for choice in choices),
+            ),
+        )
+
+    @classmethod
+    def _targeted_korean_choice_values(cls, crop) -> list[str] | None:
+        """Use bundled Korean OCR data to recover a complete marked answer band."""
+
+        executable = shutil.which("tesseract")
+        if executable is None:
+            fallback = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            executable = str(fallback) if fallback.exists() else None
+        tessdata = Path(__file__).resolve().parent / "tessdata"
+        languages = [
+            language
+            for language, required in (
+                ("kor+eng", ("kor.traineddata", "eng.traineddata")),
+                ("kor", ("kor.traineddata",)),
+            )
+            if all((tessdata / name).exists() for name in required)
+        ]
+        if executable is None or not languages:
+            return None
+        try:
+            from PIL import Image, ImageEnhance, ImageOps
+
+            scale = 1.5
+            enlarged = crop.convert("L").resize(
+                (max(1, int(crop.width * scale)), max(1, int(crop.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+            contrasted = ImageOps.autocontrast(enlarged)
+            variants = (ImageEnhance.Sharpness(contrasted).enhance(2.0),)
+            for language in languages:
+                for psm in (6, 11):
+                    for variant in variants:
+                        buffer = io.BytesIO()
+                        variant.convert("RGB").save(buffer, format="PNG")
+                        completed = subprocess.run(
+                            [
+                                executable,
+                                "stdin",
+                                "stdout",
+                                "--tessdata-dir",
+                                str(tessdata),
+                                "-l",
+                                language,
+                                "--psm",
+                                str(psm),
+                            ],
+                            input=buffer.getvalue(),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL,
+                            timeout=20,
+                            check=False,
+                            creationflags=(
+                                subprocess.CREATE_NO_WINDOW
+                                if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW")
+                                else 0
+                            ),
+                        )
+                        value = completed.stdout.decode("utf-8", errors="ignore").strip()
+                        parsed = cls._parse_targeted_choice_values(value)
+                        if parsed is not None:
+                            return parsed
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def _targeted_korean_cell_text(cls, crop) -> str | None:
+        """Recover one small Korean/English answer cell with bundled models."""
+
+        executable = shutil.which("tesseract")
+        if executable is None:
+            fallback = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            executable = str(fallback) if fallback.exists() else None
+        tessdata = Path(__file__).resolve().parent / "tessdata"
+        if (
+            executable is None
+            or not (tessdata / "kor.traineddata").exists()
+            or not (tessdata / "eng.traineddata").exists()
+        ):
+            return None
+        try:
+            from PIL import Image, ImageEnhance, ImageOps
+
+            enlarged = crop.convert("L").resize(
+                (max(1, crop.width * 6), max(1, crop.height * 6)),
+                Image.Resampling.LANCZOS,
+            )
+            image = ImageEnhance.Sharpness(ImageOps.autocontrast(enlarged)).enhance(2.0)
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="PNG")
+            values = []
+            for psm in (7, 6, 11):
+                completed = subprocess.run(
+                    [
+                        executable,
+                        "stdin",
+                        "stdout",
+                        "--tessdata-dir",
+                        str(tessdata),
+                        "-l",
+                        "kor+eng",
+                        "--psm",
+                        str(psm),
+                    ],
+                    input=buffer.getvalue(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=20,
+                    check=False,
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW
+                        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW")
+                        else 0
+                    ),
+                )
+                value = completed.stdout.decode("utf-8", errors="ignore").strip()
+                value = re.sub(
+                    r"^\s*(?:[①-④㉦㉨㉭]|[@(（]?[0-9OQ]{1,2}[)）.]?)\s*",
+                    "",
+                    value,
+                    count=1,
+                    flags=re.IGNORECASE,
+                ).strip(" .;|\r\n")
+                if value and len(re.findall(r"[0-9A-Za-z가-힣ㄱ-ㅎ㉠-㉭]", value)) >= 2:
+                    values.append(value)
+            if not values:
+                return None
+            return min(values, key=lambda value: (value.count("\n"), -len(value)))
+        except Exception:
+            return None
 
     @staticmethod
     def _line_with_recovered_choice_text(
@@ -4116,10 +4584,20 @@ class PDFExtractor:
                 current = [x]
         groups.append(current)
 
-        # Exam pages can contain boxed right-column questions; choose the first
-        # long central divider so those box borders do not become the split.
-        first_group = groups[0]
-        divider_split = float(sum(first_group) / len(first_group))
+        # Use the first true center-divider stroke.  Some scanned forms have a
+        # second, longer stroke on the right side of the gutter; splitting on
+        # that stroke attaches right-column question numbers to the left row.
+        # The 44% lower bound still excludes tables wholly inside the left
+        # column, which was the legacy false-positive this selection replaced.
+        central_groups = [
+            group for group in groups
+            if width * 0.44 <= sum(group) / len(group) <= width * 0.56
+        ]
+        if central_groups:
+            divider_group = min(central_groups, key=lambda group: sum(group) / len(group))
+        else:
+            divider_group = groups[0]
+        divider_split = float(sum(divider_group) / len(divider_group))
         if gutter_split is not None and divider_split > width * 0.52:
             return gutter_split
         return divider_split

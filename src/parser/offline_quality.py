@@ -16,8 +16,8 @@ _PLACEHOLDER = re.compile(
 )
 _CONTAMINATION = re.compile(
     r"(?:\b\d{1,3}(?:\s+/\s*|\s*/\s+)\d{1,3}\b"
-    r"|(?:^|\s)\d{1,3}\s*[.)]\s*[A-Za-z가-힣<]"
-    r"|@|해양경찰\s*채용시험|\b(?:19|20)\d{2}년\s*도.{0,40}(?:시험|경찰|해양)"
+    r"|(?:^|\s)\d{1,3}\s*[.)]\s*(?=(?:다음|아래|[「<]))"
+    r"|(?:^|\s)@(?=\s|$)|해양경찰\s*채용시험|\b(?:19|20)\d{2}년\s*도.{0,40}(?:시험|경찰|해양)"
     r"|^\s*(?:\([0O1-5]\)|[0O])\s+"
     r"|무단\s*(?:복제|전재)|정답\s*[:：]?)",
     re.IGNORECASE,
@@ -37,6 +37,9 @@ _NON_BLOCKING_DIAGNOSTICS = {
     "damaged_choice_recovery",
     "explicit_proposition_choices",
     "legacy_choice_grid_recovery",
+    "source_duplicate_choices",
+    "source_choice_repair",
+    "source_unavailable_choices",
     "table_choice_recovery",
     "underlined_choice_recovery",
 }
@@ -67,7 +70,10 @@ def validate_offline_question(
         reasons.append("empty_choice")
     if any(_PLACEHOLDER.search(choice) for choice in choices):
         reasons.append("placeholder_choice")
-    if len(set(_normalized(choice) for choice in choices)) != len(choices):
+    if (
+        len(set(_normalized(choice) for choice in choices)) != len(choices)
+        and "source_duplicate_choices" not in question.diagnostics
+    ):
         reasons.append("duplicate_choice")
     if (
         _looks_like_promoted_propositions(choices)

@@ -13,6 +13,7 @@ from .layout import LayoutLine, LayoutWord, StructuredPage
 _QUESTION_START = re.compile(
     r"^\s*(\d{1,3})\s*(?:[.)•]|\s+(?=(?:다음|[「\[]|r[가-힣])))\s*(.*)$"
 )
+_RELAXED_QUESTION_START = re.compile(r"^\s*\d{1,3}\s+\S.{8,}$")
 _QUESTION_LEAD = re.compile(r"^\s*(?:[•ㆍ·]\s*)?(?:다음|아래|[「\[]|r(?=[가-힣\[]))")
 _EMBEDDED_QUESTION_START = re.compile(r".*?(\d{1,3})\s*[.)]\s*(다음.*)$")
 _CHOICE_MARKERS = {"①": 1, "②": 2, "③": 3, "④": 4, "⑤": 5}
@@ -21,7 +22,7 @@ _DAMAGED_VERTICAL_MARKERS = {"㉦": 1, "㉨": 2, "㉭": 3}
 _DAMAGED_VERTICAL_PATTERN = re.compile(r"^([㉦㉨㉭])\s*")
 _DAMAGED_MARKER = re.compile(r"^[①-⑤㉠-㉭]\s*")
 _LEGACY_CHOICE_PREFIX = re.compile(
-    r"^(?:(?:\([^\s)]{1,2}\)?|[0-4lIO]\))|[①-⑤㉠-㉭@]"
+    r"^(?:(?:\([^\s)]{1,2}\)?|[0-4lIO]\))|[①-⑤㉠-㉭@](?![,，])"
     r"|O(?=[A-Z])|[0-4](?=\s|$)|年(?=\s|$))\s*",
 )
 _DOCUMENT_NOISE = re.compile(
@@ -41,7 +42,11 @@ _HEADER_TEXT = re.compile(
     r"(?:해양경찰.*(?:채용)?시험|수험번호\s*[:：]?|과목명\s*[:：]?|문제지\s*[A-Z가-힣0-9]*형"
     r"|(?:19|20)\d{2}\s*년\s*도.{0,40}(?:해양경찰|해\s*양?\s*[영경])"
     r"|(?:19|20)\d{2}\s*년\s*도.{0,40}해.{0,8}경찰"
-    r"|공\s*무?\s*원.{0,24}채\s*용\s*시\s*험\s*문\s*제\s*지"
+    r"|(?:19|20)\d{2}\s*년\s*도\s*제\s*\d+\s*(?:회|차)(?:\s*해)?\s*$"
+    r"|(?:19|20)\S{0,3}년\s*도.{0,100}(?:경찰|공\s*무\s*원|채\s*용).{0,40}(?:시험|문\s*제\s*지)"
+    r"|(?:공\s*)?무\s*원.{0,80}채\s*용\s*시\s*험\s*문\s*제\s*지"
+    r"|과\s*목\s+항\s*해\s*(?:술|학)\b"
+    r"|^\s*항\s*해\s*(?:술|학)\b"
     r"|[12]\s*[09]\s*\d\s*\d\s*년.{0,20}(?:자\s*경|경\s*공\s*원))",
     re.IGNORECASE,
 )
@@ -248,8 +253,10 @@ class OfflineExamParser:
         y0 = record.bbox[1]
         if _DOCUMENT_NOISE.search(record.text):
             return "noise"
+        if y0 <= 0.12 and _HEADER_TEXT.search(record.text):
+            return "noise"
         if y0 <= 0.07:
-            if _QUESTION_START.match(record.text):
+            if _QUESTION_START.match(record.text) or _RELAXED_QUESTION_START.match(record.text):
                 return "body"
             if (
                 normalized in repeated
@@ -305,6 +312,27 @@ class OfflineExamParser:
                 record = replace(
                     record,
                     text=f"{expected_number}. {embedded.group(2)}",
+                    bbox=(gutter, record.bbox[1], record.bbox[2], record.bbox[3]),
+                )
+                start = _QUESTION_START.match(record.text)
+
+            relaxed_number = re.match(r"^\s*(\d{1,3})\s+(.{12,})$", record.text)
+            if (
+                start is None
+                and relaxed_number is not None
+                and current_number is not None
+                and int(relaxed_number.group(1)) == expected_number
+                and gutter is not None
+                and float(record.bbox[0]) <= gutter + 0.020
+                and choice_numbers == {1, 2, 3, 4}
+                and re.search(
+                    r"(?:다음|아래|설명|것은|대한|중|가장|어느|해상|선박|항해)",
+                    relaxed_number.group(2),
+                )
+            ):
+                record = replace(
+                    record,
+                    text=f"{expected_number}. {relaxed_number.group(2)}",
                     bbox=(gutter, record.bbox[1], record.bbox[2], record.bbox[3]),
                 )
                 start = _QUESTION_START.match(record.text)
@@ -598,9 +626,17 @@ class OfflineExamParser:
             and len(explicit_records_for_precedence) <= 2
         )
         underlined_recovery = self._recover_underlined_choice_phrases(region)
-        numeric_table_recovery = self._recover_labeled_numeric_table(region[1:])
+        numeric_table_recovery = (
+            self._recover_labeled_numeric_table(region[1:])
+            or self._recover_two_column_numeric_table(region[1:])
+            or self._recover_two_by_two_numeric_grid(region[1:])
+        )
         proposition_table_recovery = self._recover_proposition_header_choice_table(
             region[1:]
+        )
+        comparison_table_recovery = (
+            self._recover_failure_cause_action_table(region[1:])
+            or self._recover_sparse_comparison_table(region)
         )
         two_field_recovery = None
 
@@ -613,7 +649,8 @@ class OfflineExamParser:
             legacy_recovery = None
         else:
             two_field_recovery = (
-                self._recover_two_coordinate_field_rows(region[1:])
+                comparison_table_recovery
+                or self._recover_two_coordinate_field_rows(region[1:])
                 or self._recover_two_field_proposition_rows(region[1:])
             )
             labeled_numeric_recovery = two_field_recovery or numeric_table_recovery
@@ -743,6 +780,7 @@ class OfflineExamParser:
             if visual_choice_start is None or index >= visual_choice_start
             if self._explicit_choice_pieces(record.text)
         ]
+        explicit_marker_indexes = {index for index, _pieces in explicit_records}
         explicit_numbers = [
             number for _index, pieces in explicit_records for number, _text in pieces
         ]
@@ -762,7 +800,14 @@ class OfflineExamParser:
                     float(right.bbox[0]) - float(left.bbox[2])
                     for left, right in zip(header_words, header_words[1:])
                 ]
+                binary_truth_table = all(
+                    len(record.words) == 3
+                    and all(str(word.text).strip() in {"0", "1"} for word in record.words)
+                    for record in (region[index] for index in prelude)
+                )
                 if (
+                    not binary_truth_table
+                    and
                     len(header_words) >= 3
                     and float(header_words[-1].bbox[2]) - float(header_words[0].bbox[0]) >= 0.20
                     and sum(gap >= 0.06 for gap in gaps) >= 2
@@ -889,6 +934,8 @@ class OfflineExamParser:
                 for choice_number, choice in enumerate(choices, start=1)
             ]
         choices = [self._repair_choice_ocr_spacing(choice) for choice in choices]
+        if explicit_sequence_valid and len(set(choices)) != len(choices):
+            diagnostics.append("source_duplicate_choices")
         if len(choices) not in (4, 5):
             diagnostics.append("invalid_choice_count")
         region_pages = {record.page for record in region}
@@ -912,22 +959,40 @@ class OfflineExamParser:
         )
         if has_visual_choice_sequence and explicit_sequence_valid:
             recovered_margin_indexes.update(explicit_choice_indexes)
-        def followed_by_explicit_choices(index: int, record: _LineRecord) -> bool:
+        choice_evidence_indexes = recovered_margin_indexes | explicit_choice_indexes
+
+        def followed_by_choice_evidence(index: int, record: _LineRecord) -> bool:
             return any(
                 choice_index > index
                 and region[choice_index].page == record.page
                 and region[choice_index].column == record.column
                 and 0
                 < float(region[choice_index].bbox[1]) - float(record.bbox[1])
-                <= 0.050
-                for choice_index in explicit_choice_indexes
+                <= 0.060
+                for choice_index in choice_evidence_indexes
             )
+
+        closed_final_choice_indexes: set[int] = set()
+        if explicit_sequence_valid and explicit_marker_indexes:
+            final_marker_index = max(explicit_marker_indexes)
+            final_continuations = sorted(
+                index
+                for index in explicit_choice_indexes
+                if index > final_marker_index
+            )
+            if (
+                final_continuations
+                and re.search(r"[.!?。]\s*$", region[final_continuations[-1]].text)
+            ):
+                closed_final_choice_indexes.update(final_continuations)
 
         if any(
             record.ambiguous_bottom_margin
-            and not followed_by_explicit_choices(index, record)
+            and not followed_by_choice_evidence(index, record)
             for index, record in enumerate(region)
             if index not in recovered_margin_indexes
+            and index not in explicit_marker_indexes
+            and index not in closed_final_choice_indexes
         ):
             diagnostics.append("ambiguous_bottom_margin")
         if any(
@@ -1273,6 +1338,168 @@ class OfflineExamParser:
                 for row_values in values
             ]
             return set(range(start, start + 4)), choices
+        return None
+
+    def _recover_two_column_numeric_table(
+        self, records: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        """Recover four answer rows below a two-field ``(가)/(나)`` header."""
+
+        numeric = re.compile(r"^\d+(?:\.\d+)?(?:[°도])?$|^\d{2,4}0$")
+        for header_index, header in enumerate(records[:-4]):
+            header_tokens = [
+                re.sub(r"\s+", "", str(word.text))
+                for word in sorted(header.words, key=lambda item: item.bbox[0])
+            ]
+            if header_tokens != ["(가)", "(나)"]:
+                continue
+            rows = records[header_index + 1:header_index + 5]
+            if len(rows) != 4 or len({(row.page, row.column) for row in rows}) != 1:
+                continue
+            if any(
+                not 0.012 <= float(right.bbox[1]) - float(left.bbox[1]) <= 0.060
+                for left, right in zip(rows, rows[1:])
+            ):
+                continue
+            choices = []
+            x_columns: list[list[float]] = [[], []]
+            valid = True
+            for row in rows:
+                values = [
+                    word for word in sorted(row.words, key=lambda item: item.bbox[0])
+                    if numeric.fullmatch(str(word.text).strip())
+                ]
+                if len(values) != 2:
+                    valid = False
+                    break
+                texts = [str(word.text).strip() for word in values]
+                if "간격" in " ".join(record.text for record in records[:header_index]):
+                    texts = [
+                        text[:-1] + "°"
+                        if re.fullmatch(r"\d{2,4}0", text)
+                        else text
+                        for text in texts
+                    ]
+                choices.append(" ".join(texts))
+                for column, word in enumerate(values):
+                    x_columns[column].append(float(word.bbox[0]))
+            if not valid or any(max(column) - min(column) > 0.035 for column in x_columns):
+                continue
+            if min(right - left for left, right in zip(x_columns[0], x_columns[1])) < 0.08:
+                continue
+            if len(set(choices)) == 4:
+                return set(range(header_index, header_index + 5)), choices
+        return None
+
+    def _recover_two_by_two_numeric_grid(
+        self, records: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        """Recover a compact 2x2 numeric choice grid with damaged outer rings."""
+
+        numeric = re.compile(r"^\d+(?:\.\d+)?(?:%|/0)?$")
+        for start in range(len(records) - 1):
+            rows = records[start:start + 2]
+            if len({(row.page, row.column) for row in rows}) != 1:
+                continue
+            if not 0.012 <= float(rows[1].bbox[1]) - float(rows[0].bbox[1]) <= 0.055:
+                continue
+            values: list[list[tuple[str, float]]] = []
+            marker_evidence = False
+            for row_index, row in enumerate(rows):
+                row_values = []
+                for word_index, word in enumerate(sorted(row.words, key=lambda item: item.bbox[0])):
+                    text = str(word.text).strip()
+                    stripped = _LEGACY_CHOICE_PREFIX.sub("", text, count=1).strip()
+                    if stripped == text:
+                        stripped = re.sub(r"^[年㉦㉨㉭@](?=\d)", "", text, count=1)
+                    if stripped != text:
+                        marker_evidence = True
+                    candidate = stripped or text
+                    if numeric.fullmatch(candidate):
+                        row_values.append((candidate, float(word.bbox[0])))
+                values.append(row_values)
+            if not marker_evidence or any(len(row) != 2 for row in values):
+                continue
+            if any(row[1][1] - row[0][1] < 0.14 for row in values):
+                continue
+            if any(abs(values[0][column][1] - values[1][column][1]) > 0.045 for column in range(2)):
+                continue
+            choices = [value for row in values for value, _x in row]
+            if len(set(choices)) == 4:
+                return {start, start + 1}, choices
+        return None
+
+    def _recover_failure_cause_action_table(
+        self, records: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        """Recover four options from a ``현상/원인/대책`` comparison table."""
+
+        for header_index, header in enumerate(records):
+            if not (
+                re.search(r"현\s*상", header.text)
+                and re.search(r"원\s*인", header.text)
+                and re.search(r"대\s*책", header.text)
+            ):
+                continue
+            header_words = sorted(header.words, key=lambda word: word.bbox[0])
+            if len(header_words) < 6:
+                continue
+            anchors = [
+                sum(float(word.bbox[0]) for word in header_words[offset:offset + 2]) / 2
+                for offset in (0, 2, 4)
+            ]
+            payload_indexes = list(range(header_index + 1, len(records)))
+            if len(payload_indexes) < 4:
+                continue
+            payload = [records[index] for index in payload_indexes]
+            gaps = [
+                float(right.bbox[1]) - float(left.bbox[1])
+                for left, right in zip(payload, payload[1:])
+            ]
+            if len(gaps) < 3:
+                continue
+            split_offsets = sorted(
+                sorted(range(len(gaps)), key=lambda index: gaps[index], reverse=True)[:3]
+            )
+            if any(gaps[index] < 0.018 for index in split_offsets):
+                continue
+            boundaries = [0, *(index + 1 for index in split_offsets), len(payload)]
+            row_groups = [
+                payload[left:right]
+                for left, right in zip(boundaries, boundaries[1:])
+            ]
+            if len(row_groups) != 4 or any(not group for group in row_groups):
+                continue
+            boundaries_x = [(anchors[0] + anchors[1]) / 2, (anchors[1] + anchors[2]) / 2]
+            choices = []
+            for group in row_groups:
+                cells: list[list[tuple[int, LayoutWord]]] = [[], [], []]
+                for record_order, record in enumerate(group):
+                    for word in record.words:
+                        text = str(word.text).strip()
+                        if (
+                            not text
+                            or getattr(word, "visual_choice_marker", False)
+                            or _DAMAGED_MARKER.fullmatch(text)
+                        ):
+                            continue
+                        x = float(word.bbox[0])
+                        column = 0 if x < boundaries_x[0] else 1 if x < boundaries_x[1] else 2
+                        cells[column].append((record_order, word))
+                if any(not cell for cell in cells):
+                    break
+                choices.append(" ".join(
+                    " ".join(
+                        str(word.text).strip()
+                        for _record_order, word in sorted(
+                            cell,
+                            key=lambda item: (item[0], item[1].bbox[0]),
+                        )
+                    )
+                    for cell in cells
+                ))
+            if len(choices) == 4 and len(set(choices)) == 4:
+                return set(range(header_index, payload_indexes[-1] + 1)), choices
         return None
 
     def _recover_two_field_proposition_rows(
@@ -1682,6 +1909,19 @@ class OfflineExamParser:
                 continue
 
             payload = [records[index] for index in payload_indexes]
+            header_x = [float(word.bbox[0]) for word in header_words]
+            if column_count == 2:
+                projected_third = header_x[1] + (header_x[1] - header_x[0])
+                third_column_records = sum(
+                    any(
+                        abs(float(word.bbox[0]) - projected_third) <= 0.040
+                        for word in record.words
+                    )
+                    for record in payload
+                )
+                if third_column_records >= 4:
+                    column_count = 3
+                    header_x.append(projected_third)
             if len(payload) == 4:
                 boundaries = list(range(5))
             else:
@@ -1708,7 +1948,6 @@ class OfflineExamParser:
             if len(rows) != 4 or any(not row for row in rows):
                 continue
 
-            header_x = [float(word.bbox[0]) for word in header_words]
             choices = []
             valid = True
             for row in rows:
@@ -1749,6 +1988,80 @@ class OfflineExamParser:
                 return set(range(header_index, payload_indexes[-1] + 1)), choices
         return None
 
+    def _recover_sparse_comparison_table(
+        self, region: Sequence[_LineRecord]
+    ) -> tuple[set[int], list[str]] | None:
+        """Recover four comparison rows when thin raster cells vanish in OCR."""
+
+        if len(region) < 8 or "비교" not in " ".join(record.text for record in region[:2]):
+            return None
+        header_index = next(
+            (
+                index
+                for index, record in enumerate(region[1:], start=1)
+                if re.search(r"구\s*분", record.text)
+                and len(record.words) >= 3
+            ),
+            None,
+        )
+        if header_index is None:
+            return None
+        payload_indexes = list(range(header_index + 1, len(region)))
+        marker_indexes = [
+            index
+            for index in payload_indexes
+            if region[index].words
+            and str(region[index].words[0].text).strip()[:1]
+            in _DAMAGED_VERTICAL_MARKERS
+        ]
+        if len(marker_indexes) != 2:
+            return None
+        first_marker, second_marker = marker_indexes
+        before_markers = [index for index in payload_indexes if index < first_marker]
+        if len(before_markers) < 3:
+            return None
+        second_y = float(region[second_marker].bbox[1])
+        fourth_start_y = second_y - 0.012
+        third_indexes = [
+            index
+            for index in payload_indexes
+            if first_marker <= index and float(region[index].bbox[1]) < fourth_start_y
+        ]
+        fourth_indexes = [
+            index
+            for index in payload_indexes
+            if float(region[index].bbox[1]) >= fourth_start_y
+        ]
+        row_indexes = (
+            [before_markers[0]],
+            before_markers[1:],
+            third_indexes,
+            fourth_indexes,
+        )
+        if any(not indexes for indexes in row_indexes):
+            return None
+
+        choices = []
+        for indexes in row_indexes:
+            parts = []
+            for index in sorted(
+                indexes,
+                key=lambda item: (
+                    float(region[item].bbox[1]), float(region[item].bbox[0])
+                ),
+            ):
+                text = region[index].text.strip()
+                text = _LEGACY_CHOICE_PREFIX.sub("", text, count=1).strip()
+                if text:
+                    parts.append(text)
+            choice = re.sub(r"\s+", " ", " ".join(parts)).strip()
+            if not choice:
+                return None
+            choices.append(choice)
+        if len(set(choices)) != 4:
+            return None
+        return {index - 1 for index in payload_indexes}, choices
+
     def _recover_transposed_percentage_table(
         self, records: Sequence[_LineRecord]
     ) -> tuple[set[int], list[str]] | None:
@@ -1787,7 +2100,14 @@ class OfflineExamParser:
 
     def _explicit_choice_pieces(self, text: str) -> list[tuple[int, str]]:
         matches = list(_CHOICE_PATTERN.finditer(text))
-        if not matches or text[: matches[0].start()].strip():
+        prefix = text[: matches[0].start()].strip() if matches else ""
+        if (
+            not matches
+            or (
+                prefix
+                and re.fullmatch(r"\([0-9OIl]{1,2}\)", prefix) is None
+            )
+        ):
             return []
         pieces: list[tuple[int, str]] = []
         for index, match in enumerate(matches):
@@ -1961,6 +2281,10 @@ class OfflineExamParser:
             )
             for text in prompt_prefixes
         )
+        has_prompt_boundary = has_prompt_boundary or any(
+            re.search(r"(?:것|것은|은)\s*2\s*$", text)
+            for text in prompt_prefixes
+        )
         complete_marked_tail = False
         if len(working_region) >= 5:
             tail_tokens = [
@@ -2062,7 +2386,37 @@ class OfflineExamParser:
                 ]
                 if not rows[0].words:
                     continue
-                if marker_positions != [0, 2, 3] and marker_positions != [2, 3]:
+                if (
+                    marker_positions == [1, 3]
+                    and (
+                        start <= 0
+                        or re.search(r"[?？]\s*$", working_region[start - 1].text)
+                        is None
+                    )
+                ):
+                    continue
+                first_token = str(rows[0].words[0].text).strip()
+                first_marker_number = (
+                    _CHOICE_MARKERS.get(first_token[:1])
+                    or _DAMAGED_VERTICAL_MARKERS.get(first_token[:1])
+                    or (
+                        int(match.group())
+                        if (match := re.search(r"[1-5]", first_token))
+                        else None
+                    )
+                )
+                if first_marker_number == 2 and start > 1:
+                    preceding = working_region[start - 1]
+                    if (
+                        preceding.words
+                        and float(rows[0].words[0].bbox[0]) + 0.015
+                        <= float(preceding.words[0].bbox[0])
+                        <= float(rows[0].words[0].bbox[0]) + 0.060
+                    ):
+                        # The first marker was dropped and the third choice wraps.
+                        # Let the wrapped-vertical recovery retain that continuation.
+                        continue
+                if marker_positions not in ([0, 2, 3], [1, 3], [2, 3]):
                     if 0 not in marker_positions:
                         continue
                 if 0 not in marker_positions:
@@ -2070,11 +2424,14 @@ class OfflineExamParser:
                         float(rows[offset].words[0].bbox[0])
                         for offset in marker_positions
                     )
-                    if marker_positions != [2, 3] or any(
+                    inferred_offsets = (
+                        (0, 2) if marker_positions == [1, 3] else (0, 1)
+                    )
+                    if marker_positions not in ([1, 3], [2, 3]) or any(
                         not marker_x + 0.015
                         <= float(rows[offset].words[0].bbox[0])
                         <= marker_x + 0.045
-                        for offset in (0, 1)
+                        for offset in inferred_offsets
                     ):
                         continue
                 marker_xs = [
@@ -2181,7 +2538,24 @@ class OfflineExamParser:
 
         marker_x = min(float(region[index].words[0].bbox[0]) for index in marked)
         starts = set(marked)
-        if len(marked) in (2, 3):
+        if len(marked) == 3:
+            first_token = str(region[marked[0]].words[0].text).strip()
+            first_is_second = (
+                first_token[:1] == "②"
+                or _DAMAGED_VERTICAL_MARKERS.get(first_token[:1]) == 2
+                or re.fullmatch(r"\(?2\)?", first_token) is not None
+            )
+            candidate_index = marked[0] - 1
+            if (
+                first_is_second
+                and candidate_index > prompt_end
+                and region[candidate_index].words
+                and marker_x + 0.015
+                <= float(region[candidate_index].words[0].bbox[0])
+                <= marker_x + 0.060
+            ):
+                starts.add(candidate_index)
+        if len(starts) < 4 and len(marked) in (2, 3):
             inferred: list[int] = []
             for index in range(marked[0] + 1, marked[-1]):
                 record = region[index]
@@ -2193,7 +2567,7 @@ class OfflineExamParser:
                 if not re.search(r"[.!?。]\s*$", region[index - 1].text):
                     continue
                 inferred.append(index)
-            if len(inferred) != 4 - len(marked):
+            if len(inferred) != 4 - len(starts):
                 return None
             starts.update(inferred)
         ordered_starts = sorted(starts)

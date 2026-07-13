@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ('src\\database\\schema.sql', 'src\\database'),
     ('src\\database\\seed.sql', 'src\\database'),
+    ('src\\parser\\tessdata\\*.traineddata', 'src\\parser\\tessdata'),
 ]
 binaries = []
 hiddenimports = []

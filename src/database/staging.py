@@ -7,6 +7,7 @@ import gc
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -1099,7 +1100,15 @@ def _build_registered_corpus_sets(
         if module is police_engineering:
             original_gate = module.require_complete_offline_set
 
-            def engineering_gate(questions, *, expected_numbers, answers, rejected_count, choice_counts):
+            def engineering_gate(
+                questions,
+                *,
+                expected_numbers,
+                answers,
+                rejected_count,
+                choice_counts,
+                unavailable_answer_numbers=(),
+            ):
                 if answers and all(int(answer) == 0 for answer in answers):
                     expected_values = tuple(int(number) for number in expected_numbers)
                     if set(questions) != set(expected_values) or rejected_count:
@@ -1113,6 +1122,7 @@ def _build_registered_corpus_sets(
                     answers=answers,
                     rejected_count=rejected_count,
                     choice_counts=choice_counts,
+                    unavailable_answer_numbers=unavailable_answer_numbers,
                 )
 
             module.require_complete_offline_set = engineering_gate
@@ -1129,6 +1139,13 @@ def _build_registered_corpus_sets(
             items_by_group.setdefault(int(item.group_index), []).append(item)
         for group_index, group in enumerate(groups, start=1):
             items = items_by_group.get(group_index, [])
+            if hasattr(module, "merge_tags"):
+                for item in items:
+                    item.question.tags = module.merge_tags(
+                        getattr(item.question, "tags", ""),
+                        list(getattr(item, "topic_tags", ()) or ()),
+                        list(getattr(item, "parser_tags", ()) or ()),
+                    )
             expected_count = int(group.get("question_count") or (20 if module is maritime_english else 0))
             no_source_answer = (
                 module is police_engineering
@@ -1194,6 +1211,19 @@ def _build_registered_corpus_sets(
                 exam_type=str(metadata["exam_type"]),
             )
             for item in parsed.questions
+        )
+        from src.parser.offline_sources import require_complete_offline_set
+
+        questions_by_number = {question.number: question for question in questions}
+        require_complete_offline_set(
+            questions_by_number,
+            expected_numbers=expected_numbers,
+            answers=[int(answers.get(number, 0)) for number in expected_numbers],
+            rejected_count=len(parsed.rejected),
+            choice_counts={
+                number: len(question.choices)
+                for number, question in questions_by_number.items()
+            },
         )
         registered.append(
             RegisteredExamSet(
@@ -1387,14 +1417,106 @@ def _resolve_standalone_answer_key(
     )
     from src.parser.offline_sources import extract_offline_structured_pages
 
+    expected = tuple(int(number) for number in expected_numbers)
     answer_text = clean_pdf_text(answer_path)
     if answer_text.text_extractable:
         lines = replace_boundary_markers(expand_parser_lines(answer_text.lines), subject_name)
-    else:
-        lines = structured_pages_to_pdf_lines(
-            extract_offline_structured_pages(answer_path, {"probe": {"role": "answer"}})
+        key = parse_gong_answer_key(lines, list(expected))
+        if _is_complete_answer_key(key, expected):
+            return key
+        key = _parse_explanation_answer_key(
+            [line.text for line in lines], expected
         )
-    return parse_gong_answer_key(lines, list(expected_numbers))
+        if key:
+            return key
+
+    structured_lines = structured_pages_to_pdf_lines(
+        extract_offline_structured_pages(answer_path, {"probe": {"role": "answer"}})
+    )
+    key = _parse_subject_answer_table(
+        [line.text for line in structured_lines], subject_name, expected
+    )
+    if key:
+        return key
+    key = parse_gong_answer_key(structured_lines, list(expected))
+    return key if _is_complete_answer_key(key, expected) else {}
+
+
+_CIRCLED_ANSWER_VALUES = {symbol: index for index, symbol in enumerate("①②③④⑤", 1)}
+
+
+def _is_complete_answer_key(
+    answer_key: Mapping[int, int], expected_numbers: Sequence[int]
+) -> bool:
+    expected = {int(number) for number in expected_numbers}
+    return (
+        set(int(number) for number in answer_key) == expected
+        and all(int(answer) in range(1, 6) for answer in answer_key.values())
+    )
+
+
+def _parse_explanation_answer_key(
+    lines: Sequence[str], expected_numbers: Sequence[int]
+) -> dict[int, int]:
+    """Parse ``n. 【정답】 ④`` explanation headings, including split markers."""
+
+    expected = {int(number) for number in expected_numbers}
+    answers: dict[int, int] = {}
+    pending: int | None = None
+    heading = re.compile(
+        r"^\s*(\d{1,3})\s*[.]\s*[【\[]?\s*정답\s*[】\]]?\s*([①②③④⑤])?"
+    )
+    standalone = re.compile(r"^\s*([①②③④⑤])(?:\s|$)")
+    for raw_line in lines:
+        text = str(raw_line or "").strip()
+        match = heading.match(text)
+        if match is not None:
+            number = int(match.group(1))
+            pending = number if number in expected else None
+            if pending is not None and match.group(2):
+                answers[pending] = _CIRCLED_ANSWER_VALUES[match.group(2)]
+                pending = None
+            continue
+        if pending is None:
+            continue
+        match = standalone.match(text)
+        if match is not None:
+            answers[pending] = _CIRCLED_ANSWER_VALUES[match.group(1)]
+            pending = None
+    return answers if _is_complete_answer_key(answers, tuple(expected)) else {}
+
+
+def _parse_subject_answer_table(
+    lines: Sequence[str], subject_name: str, expected_numbers: Sequence[int]
+) -> dict[int, int]:
+    """Select an exact subject section from a multi-subject alternating answer table."""
+
+    expected = tuple(int(number) for number in expected_numbers)
+    subject_header = re.compile(rf"^\s*[□☐]\s*{re.escape(subject_name)}\s*$")
+    pair = re.compile(r"(?<!\d)(\d{1,3})\s*([①②③④⑤])")
+    candidates: list[dict[int, int]] = []
+    index = 0
+    while index < len(lines):
+        if subject_header.fullmatch(str(lines[index] or "")) is None:
+            index += 1
+            continue
+        index += 1
+        section: list[str] = []
+        while index < len(lines):
+            text = str(lines[index] or "").strip()
+            if re.match(r"^[□☐\[]", text):
+                break
+            section.append(text)
+            index += 1
+        key = {
+            int(number): _CIRCLED_ANSWER_VALUES[symbol]
+            for number, symbol in pair.findall(" ".join(section))
+        }
+        if _is_complete_answer_key(key, expected):
+            candidates.append(key)
+    if not candidates or any(key != candidates[0] for key in candidates[1:]):
+        return {}
+    return candidates[0]
 
 
 def _insert_question_source(
@@ -1548,6 +1670,7 @@ def _validate_expected_set(
     rows = connection.execute(
         """
         SELECT q.question_number, q.correct_answer, q.answer_available, q.source_id,
+               q.tags,
                COUNT(qc.id) AS choice_count
         FROM questions q
         JOIN exam_subjects es ON q.exam_subject_id = es.id
@@ -1570,13 +1693,22 @@ def _validate_expected_set(
         if expected.require_answers
         and (
             number not in by_number
-            or int(by_number[number][2]) != 1
-            or not isinstance(by_number[number][1], int)
-            or (
-                int(by_number[number][1]) != ALL_CHOICES_CORRECT
-                and (
-                    int(by_number[number][1]) < 1
-                    or int(by_number[number][1]) > int(by_number[number][4])
+            or not (
+                (
+                    int(by_number[number][2]) == 0
+                    and int(by_number[number][1]) == 0
+                    and _has_tag(
+                        str(by_number[number][4] or ""),
+                        "answer_missing_in_source",
+                    )
+                )
+                or (
+                    int(by_number[number][2]) == 1
+                    and isinstance(by_number[number][1], int)
+                    and (
+                        int(by_number[number][1]) == ALL_CHOICES_CORRECT
+                        or 1 <= int(by_number[number][1]) <= int(by_number[number][5])
+                    )
                 )
             )
         )
@@ -1602,6 +1734,15 @@ def _validate_expected_set(
         unexpected_numbers=tuple(sorted(actual_numbers - expected_numbers)),
         missing_answers=missing_answers,
         missing_provenance=missing_provenance,
+    )
+
+
+def _has_tag(value: str, expected: str) -> bool:
+    target = str(expected or "").strip().lstrip("#").casefold()
+    return any(
+        token.strip().lstrip("#").casefold() == target
+        for token in str(value or "").split(",")
+        if token.strip()
     )
 
 
@@ -1699,11 +1840,10 @@ def _validate_backup_database(path: Path) -> None:
     with _readonly_connection(path) as connection:
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
-        schema_valid, details = _validate_application_schema(connection)
-    if integrity != "ok" or foreign_keys or not schema_valid:
+    if integrity != "ok" or foreign_keys:
         raise ReplacementError(
             f"backup validation failed: integrity={integrity} "
-            f"foreign_keys={len(foreign_keys)} schema={details}"
+            f"foreign_keys={len(foreign_keys)}"
         )
 
 

@@ -801,6 +801,39 @@ def test_ambiguous_bottom_margin_choice_continuation_is_preserved_and_blocked():
     assert "parser_diagnostic" in result.reason_codes
 
 
+def test_explicit_choice_markers_at_bottom_margin_are_not_ambiguous():
+    page = _page(
+        _line(["8.", "가장", "옳은", "것은?"], y=0.72),
+        _line(["①", "하나"], y=0.80),
+        _line(["②", "둘"], y=0.84),
+        _line(["③", "셋"], y=0.89),
+        _line(["④", "넷"], y=0.93),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["하나", "둘", "셋", "넷"]
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_completed_fourth_choice_sentence_at_bottom_margin_is_not_ambiguous():
+    page = _page(
+        _line(["8.", "가장", "옳은", "것은?"], y=0.70),
+        _line(["①", "하나"], y=0.76),
+        _line(["②", "둘"], y=0.80),
+        _line(["③", "셋"], y=0.84),
+        _line(["④", "마지막", "선지의"], y=0.88),
+        _line(["계속되는", "문장이다."], y=0.92),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices[-1] == "마지막 선지의 계속되는 문장이다."
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
 def test_mbt_mock_exam_footer_is_removed_before_margin_quality_check():
     page = _page(
         _line(["10.", "빈칸에", "들어갈", "말은?"], y=0.12),
@@ -1843,4 +1876,317 @@ def test_first_last_damaged_rings_and_sentence_boundaries_recover_four_paragraph
         "셋째 문장 끝난다.",
         "넷째 문장",
     ]
+    assert validate_offline_question(question).importable is True
+def test_quality_gate_allows_numeric_units_and_interior_at_sign_ocr():
+    question = ParsedOfflineQuestion(
+        number=10,
+        stem="정상 문제 본문",
+        choices=[
+            "피치 각도가 00)인 상태에서도 회전한다.",
+            "서지번호 130) 등이 있다.",
+            "수심은 0.lm 단위로 표시한다.",
+            "-@G(Gyre) 해류를 말한다.",
+        ],
+        source_page=1,
+        confidence=0.99,
+        diagnostics=(),
+    )
+
+    assert validate_offline_question(question).importable is True
+
+
+def test_ocr_question_mark_two_allows_damaged_two_by_two_choices():
+    page = _page(
+        _line(["12.", "다음", "중", "맞는", "것으로만", "묶인", "것은2"], y=0.12),
+        _line(["㉠", "명제", "하나"], y=0.20),
+        _line(["㉠,㉤,㉥", "2", "㉠,㉡,㉥"], y=0.30,
+              xs=[0.10, 0.30, 0.34]),
+        _line(["㉠,㉢,㉣", "㉦", "㉡,㉣,㉤"], y=0.34,
+              xs=[0.10, 0.30, 0.34]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "㉠,㉤,㉥",
+        "㉠,㉡,㉥",
+        "㉠,㉢,㉣",
+        "㉡,㉣,㉤",
+    ]
+
+
+def test_first_missing_marker_is_inferred_before_three_wrapped_vertical_choices():
+    page = _page(
+        _line(["11.", "다음", "설명", "중", "틀린", "것은?"], y=0.12),
+        _line(["첫째", "선지"], y=0.20, xs=[0.08, 0.14]),
+        _line(["2", "둘째", "선지"], y=0.24, xs=[0.05, 0.08, 0.14]),
+        _line(["㉦", "셋째", "선지는"], y=0.28, xs=[0.05, 0.08, 0.14]),
+        _line(["계속된다."], y=0.32, xs=[0.08]),
+        _line(["㉦", "넷째", "선지"], y=0.36, xs=[0.05, 0.08, 0.14]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째 선지",
+        "둘째 선지",
+        "셋째 선지는 계속된다.",
+        "넷째 선지",
+    ]
+
+
+def test_short_ocr_year_session_header_is_classified_as_noise():
+    page = _page(
+        _line(["2013년", "도", "제", "1", "회"], y=0.05),
+        _line(["11.", "다음", "문제"], y=0.15),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.30),
+    )
+
+    parser = OfflineExamParser()
+    records, removed = parser._document_lines([page])
+    question = parser.parse_pages([page])[0]
+
+    assert all("2013년" not in record.text for record in records)
+    assert len(removed) == 1
+    assert "2013년" not in question.stem
+    assert "ambiguous_top_margin" not in question.diagnostics
+
+
+def test_expected_question_number_without_punctuation_starts_next_region():
+    page = _page(
+        _line(["10.", "첫째", "문제는?"], y=0.10, xs=[0.02, 0.06, 0.13]),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.22),
+        _line(
+            ["11", "해상", "레이더", "시스템에", "대한", "설명은?"],
+            y=0.34,
+            xs=[0.02, 0.06, 0.13, 0.22, 0.33, 0.42],
+        ),
+        _line(["①", "E", "②", "F", "③", "G", "④", "H"], y=0.46),
+    )
+
+    questions = OfflineExamParser().parse_pages([page])
+
+    assert [question.number for question in questions] == [10, 11]
+    assert questions[1].stem.startswith("해상 레이더")
+
+
+def test_bottom_margin_before_recovered_choice_grid_is_not_ambiguous():
+    page = _page(
+        _line(["20.", "다음", "중", "옳은", "것으로만", "묶인", "것은?"], y=0.72),
+        _line(["㉠", "첫째", "명제"], y=0.84),
+        _line(["선박의", "안전에", "관한", "설명이다."], y=0.89, xs=[0.08, 0.16, 0.24, 0.32]),
+        _line(["㉠,㉡", "2", "㉠,㉢"], y=0.92, xs=[0.10, 0.30, 0.34]),
+        _line(["㉡,㉣", "㉦", "㉢,㉣"], y=0.95, xs=[0.10, 0.30, 0.34]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["㉠,㉡", "㉠,㉢", "㉡,㉣", "㉢,㉣"]
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_missing_third_proposition_header_is_inferred_from_payload_columns():
+    page = _page(
+        _line(["10.", "다음", "표의", "조합은?"], y=0.10),
+        _line(["㉠", "㉡"], y=0.22, xs=[0.12, 0.25]),
+        _line(["r1a", "r1b", "r1c"], y=0.28, xs=[0.12, 0.25, 0.38]),
+        _line(["r2a", "r2b", "r2c"], y=0.34, xs=[0.12, 0.25, 0.38]),
+        _line(["r3a", "r3b", "r3c"], y=0.40, xs=[0.12, 0.25, 0.38]),
+        _line(["r4a", "r4b", "r4c"], y=0.46, xs=[0.12, 0.25, 0.38]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "r1a r1b r1c",
+        "r2a r2b r2c",
+        "r3a r3b r3c",
+        "r4a r4b r4c",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_two_surviving_alternating_markers_recover_four_vertical_choices():
+    page = _page(
+        _line(["10.", "다음", "중", "옳은", "것은?"], y=0.10),
+        _line(["첫째", "선지"], y=0.20, xs=[0.08, 0.14]),
+        _line(["(기", "둘째", "선지"], y=0.24, xs=[0.05, 0.08, 0.14]),
+        _line(["셋째", "선지"], y=0.28, xs=[0.08, 0.14]),
+        _line(["㉦", "넷째", "선지"], y=0.32, xs=[0.05, 0.08, 0.14]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "첫째 선지",
+        "둘째 선지",
+        "셋째 선지",
+        "넷째 선지",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_ocr_damaged_exam_header_is_removed_inside_top_margin_band():
+    page = _page(
+        _line(
+            ["20기년도", "하반기", "경찰공무원", "재용시험", "문제지"],
+            y=0.06,
+        ),
+        _line(["과", "목", "항", "해", "술"], y=0.095),
+        _line(["19.", "다음", "중", "옳은", "것은?"], y=0.13),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.25),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert "경찰공무원" not in question.stem
+    assert "과 목" not in question.stem
+    assert "ambiguous_top_margin" not in question.diagnostics
+
+
+def test_sparse_comparison_table_recovers_four_choice_rows():
+    page = _page(
+        _line(["17.", "온대저기압과", "열대저기압의", "비교", "중", "옳지", "않은", "것은?"], y=0.10),
+        _line(["구", "분", "온대저기압", "열대저기압"], y=0.18, xs=[0.12, 0.15, 0.24, 0.36]),
+        _line(["이동경로", "타원형", "원형(동심원)"], y=0.22, xs=[0.08, 0.24, 0.36]),
+        _line(["등압선"], y=0.26, xs=[0.08]),
+        _line(["간격"], y=0.28, xs=[0.14]),
+        _line(["㉭", "전선"], y=0.32, xs=[0.06, 0.13]),
+        _line(["기층의", "수증기의"], y=0.35, xs=[0.24, 0.36]),
+        _line(["㉦", "에너지원"], y=0.36, xs=[0.06, 0.13]),
+        _line(["위치에너지"], y=0.38, xs=[0.24]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "이동경로 타원형 원형(동심원)",
+        "등압선 간격",
+        "전선",
+        "기층의 수증기의 에너지원 위치에너지",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_truth_table_rows_remain_in_stem_before_explicit_choices():
+    page = _page(
+        _line(["10.", "다음", "진리표에", "해당하는", "회로는?"], y=0.10),
+        _line(["0", "0", "1"], y=0.18, xs=[0.12, 0.23, 0.34]),
+        _line(["0", "1", "1"], y=0.21, xs=[0.12, 0.23, 0.34]),
+        _line(["1", "0", "1"], y=0.24, xs=[0.12, 0.23, 0.34]),
+        _line(["1", "1", "0"], y=0.27, xs=[0.12, 0.23, 0.34]),
+        _line(["①", "AND", "회로", "②", "OR", "회로"], y=0.33),
+        _line(["③", "XOR", "회로", "④", "NAND", "회로"], y=0.37),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert "0 1 1" in question.stem
+    assert question.choices == ["AND 회로", "OR 회로", "XOR 회로", "NAND 회로"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_four_row_two_column_numeric_table_recovers_choices():
+    page = _page(
+        _line(["2.", "폭발", "간격이", "옳게", "짝지어진", "것은?"], y=0.10),
+        _line(["기관은", "각", "간격으로", "폭발한다."], y=0.14),
+        _line(["(가)", "(나)"], y=0.18, xs=[0.18, 0.35]),
+        _line(["1200", "600"], y=0.22, xs=[0.18, 0.35]),
+        _line(["900", "450"], y=0.26, xs=[0.18, 0.35]),
+        _line(["600", "300"], y=0.30, xs=[0.18, 0.35]),
+        _line(["300", "150"], y=0.34, xs=[0.18, 0.35]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["120° 60°", "90° 45°", "60° 30°", "30° 15°"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_two_by_two_numeric_grid_recovers_row_major_choices():
+    page = _page(
+        _line(["8.", "역률은", "얼마인가?"], y=0.72),
+        _line(["年0.6", "0.75"], y=0.82, xs=[0.08, 0.32]),
+        _line(["0.8", "0.9"], y=0.86, xs=[0.105, 0.32]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["0.6", "0.75", "0.8", "0.9"]
+    assert "ambiguous_bottom_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_three_column_failure_table_recovers_four_choice_rows():
+    page = _page(
+        _line(["18.", "고장의", "원인과", "대책", "중", "틀린", "것은?"], y=0.10),
+        _line(["현", "상", "원", "인", "대", "책"], y=0.17,
+              xs=[0.12, 0.145, 0.30, 0.325, 0.50, 0.525]),
+        _line(["압력이", "높다", "관이", "오손", "관을", "청소한다"], y=0.22,
+              xs=[0.10, 0.16, 0.29, 0.35, 0.49, 0.55]),
+        _line(["압력이", "낮다", "온도가", "낮다", "온도를", "조절한다"], y=0.30,
+              xs=[0.10, 0.16, 0.29, 0.36, 0.49, 0.56]),
+        _line(["압력이", "높다", "밸브가", "열렸다", "밸브를", "조절한다"], y=0.38,
+              xs=[0.10, 0.16, 0.29, 0.36, 0.49, 0.56]),
+        _line(["㉦", "기동하지", "않는다", "스위치가", "작동", "냉매를", "보충한다"], y=0.46,
+              xs=[0.06, 0.10, 0.18, 0.29, 0.38, 0.49, 0.56]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "압력이 높다 관이 오손 관을 청소한다",
+        "압력이 낮다 온도가 낮다 온도를 조절한다",
+        "압력이 높다 밸브가 열렸다 밸브를 조절한다",
+        "기동하지 않는다 스위치가 작동 냉매를 보충한다",
+    ]
+    assert validate_offline_question(question).importable is True
+
+
+def test_stray_parenthesized_prefix_before_compact_explicit_choices_is_ignored():
+    page = _page(
+        _line(["15.", "동기", "속도는?"], y=0.10),
+        _line(["(1)", "①200rpm", "②", "900rpm"], y=0.20),
+        _line(["③", "3600rpm", "④", "1800rpm"], y=0.25),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["200rpm", "900rpm", "3600rpm", "1800rpm"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_truncated_year_exam_header_ending_in_hae_is_noise():
+    previous = _page(
+        _line(["12.", "앞", "문제는?"], y=0.70, page=1),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.80, page=1),
+        number=1,
+    )
+    page = _page(
+        _line(["2013년", "도", "제", "1", "회", "해"], y=0.06),
+        _line(["13.", "기관에서", "과급을", "하는", "목적은?"], y=0.13),
+        _line(["①", "A", "②", "B", "③", "C", "④", "D"], y=0.25),
+    )
+
+    question = next(
+        item for item in OfflineExamParser().parse_pages([previous, page])
+        if item.number == 13
+    )
+
+    assert "2013년" not in question.stem
+    assert "ambiguous_top_margin" not in question.diagnostics
+    assert validate_offline_question(question).importable is True
+
+
+def test_source_duplicate_explicit_choices_are_preserved_with_diagnostic():
+    page = _page(
+        _line(["18.", "합성", "정전용량은?"], y=0.10),
+        _line(["①", "10", "②", "20", "③", "10", "④", "5"], y=0.22),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == ["10", "20", "10", "5"]
+    assert "source_duplicate_choices" in question.diagnostics
     assert validate_offline_question(question).importable is True

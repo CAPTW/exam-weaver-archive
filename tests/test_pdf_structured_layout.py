@@ -21,10 +21,14 @@ def _word(x0, y0, x1, text, *, height=12):
 
 
 class _Page:
-    def __init__(self, words, *, width=1000, height=1000, full_page_image=False):
+    def __init__(
+        self, words, *, width=1000, height=1000, full_page_image=False,
+        drawings=(),
+    ):
         self.rect = SimpleNamespace(width=width, height=height)
         self._words = words
         self._full_page_image = full_page_image
+        self._drawings = list(drawings)
 
     def get_text(self, kind):
         assert kind == "words"
@@ -36,6 +40,9 @@ class _Page:
     def get_image_rects(self, xref):
         assert xref == 7
         return [SimpleNamespace(x0=0, y0=0, x1=self.rect.width, y1=self.rect.height)]
+
+    def get_drawings(self):
+        return self._drawings
 
 
 def test_page_rasterization_suppresses_and_restores_mupdf_diagnostics():
@@ -509,6 +516,34 @@ def test_extract_structured_page_orders_each_detected_column_top_to_bottom():
         1,
         1,
     ]
+
+
+def test_native_center_rule_overrides_misleading_text_gap_for_column_order():
+    words = [
+        _word(40, 100, 450, "6. 왼쪽 질문"),
+        _word(80, 140, 450, "① 왼쪽 선지"),
+        _word(535, 100, 660, "9. 오른쪽"),
+        _word(675, 100, 950, "질문 본문"),
+        _word(535, 140, 650, "① 오른쪽"),
+        _word(665, 140, 950, "선지 본문"),
+    ]
+    page = _Page(
+        words,
+        drawings=[{
+            "rect": SimpleNamespace(x0=500, y0=60, x1=500, y1=960),
+            "items": [("l", SimpleNamespace(x=500, y=60), SimpleNamespace(x=500, y=960))],
+        }],
+    )
+
+    structured = PDFExtractor().extract_structured_page(page, 2)
+
+    assert [line.text for line in structured.lines] == [
+        "6. 왼쪽 질문",
+        "① 왼쪽 선지",
+        "9. 오른쪽 질문 본문",
+        "① 오른쪽 선지 본문",
+    ]
+    assert [line.column for line in structured.lines] == [0, 0, 1, 1]
 
 
 def test_column_detection_is_recalculated_for_a_following_full_width_page():
@@ -2858,3 +2893,90 @@ def test_two_by_two_outer_choice_rings_ignore_inner_proposition_rings():
     question = OfflineExamParser().parse_pages([restored])[0]
 
     assert question.choices == [f"㉠ 값{number}" for number in range(1, 5)]
+def test_column_split_prefers_long_center_divider_over_left_table_border():
+    image = Image.new("L", (1800, 2500), 255)
+    draw = ImageDraw.Draw(image)
+    draw.line((580, 500, 580, 1450), fill=0, width=3)
+    draw.line((840, 180, 840, 2300), fill=0, width=3)
+
+    split = PDFExtractor._detect_vertical_column_split(image)
+
+    assert split is not None
+    assert abs(split - 840) <= 3
+
+
+def test_column_split_keeps_right_gutter_question_numbers_in_right_column():
+    image = Image.new("L", (1800, 2500), 255)
+    draw = ImageDraw.Draw(image)
+    draw.line((832, 300, 832, 1500), fill=0, width=2)
+    draw.line((916, 180, 916, 2300), fill=0, width=2)
+
+    split = PDFExtractor._detect_vertical_column_split(image)
+
+    assert split is not None
+    assert abs(split - 832) <= 3
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "① ㄱ,ㄴ ② ㄴ ③ ㄴ,ㄷ ④ ㄷ,ㄹ",
+            ["ㄱ,ㄴ", "ㄴ", "ㄴ,ㄷ", "ㄷ,ㄹ"],
+        ),
+        (
+            "0) ㄱ, ㄴ\n(2) ㄱ, ㄷ, ㄹ\n(3) ㄱ, ㄹ\n4) ㄴ, ㄹ",
+            ["ㄱ, ㄴ", "ㄱ, ㄷ, ㄹ", "ㄱ, ㄹ", "ㄴ, ㄹ"],
+        ),
+        (
+            "040 ㄱ,ㄴ 0 ㄴ,ㄷ 9) ㄴ,ㄹ @ ㄷ,ㄹ",
+            ["ㄱ,ㄴ", "ㄴ,ㄷ", "ㄴ,ㄹ", "ㄷ,ㄹ"],
+        ),
+        (
+            "00 ㄱ, ㄴ\n(00 ㄱ, ㄷ, ㄹ\n(3) ㄱ, ㄹ\n4) ㄴ, ㄹ",
+            ["ㄱ, ㄴ", "ㄱ, ㄷ, ㄹ", "ㄱ, ㄹ", "ㄴ, ㄹ"],
+        ),
+    ],
+)
+def test_targeted_korean_ocr_choice_sequence_parser(raw, expected):
+    assert PDFExtractor._parse_targeted_choice_values(raw) == expected
+
+
+def test_sparse_korean_raster_recovery_does_not_rewrite_english_questions(monkeypatch):
+    lines = [
+        LayoutLine(
+            (LayoutWord("6. What is the proper command?", (0.05, 0.10, 0.40, 0.114), 0.98, 0),),
+            (0.05, 0.10, 0.40, 0.114),
+            1,
+            0,
+        ),
+    ]
+    for number, y in enumerate((0.16, 0.20, 0.24), start=1):
+        word = LayoutWord(
+            f"㉦ English choice {number}",
+            (0.07, y, 0.36, y + 0.014),
+            0.90,
+            0,
+        )
+        lines.append(LayoutLine((word,), word.bbox, 1, 0))
+    page = StructuredPage(
+        1,
+        1.0,
+        1.0,
+        "scanned_image",
+        tuple(lines),
+        ((0, 0, 1, 1),),
+    )
+    calls = []
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_targeted_korean_choice_values",
+        classmethod(lambda cls, _crop: calls.append(True) or ["a", "b", "c", "d"]),
+    )
+
+    restored = PDFExtractor._recover_sparse_raster_choice_region(
+        page, Image.new("L", (1000, 1000), 255),
+    )
+
+    assert restored is page
+    assert calls == []

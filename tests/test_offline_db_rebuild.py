@@ -472,6 +472,32 @@ def test_replacement_creates_backup_atomic_receipt_hashes_and_readable_mount(tmp
     ]
 
 
+def test_replacement_preserves_integrity_valid_legacy_mounted_database(tmp_path):
+    mounted = tmp_path / "legacy-mounted.db"
+    connection = sqlite3.connect(mounted)
+    try:
+        connection.execute("CREATE TABLE legacy_state (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO legacy_state VALUES ('이전 사용자 데이터')")
+        connection.commit()
+    finally:
+        connection.close()
+    staging_db = tmp_path / "staging.db"
+    _database(staging_db, [_question(1)])
+
+    receipt = replace_mounted_database(
+        staging_db,
+        mounted,
+        tmp_path / "backups",
+        tmp_path / "receipt.json",
+        allow_synthetic_rebuild=True,
+    )
+
+    with sqlite3.connect(receipt.backup_path) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("SELECT value FROM legacy_state").fetchone()[0] == "이전 사용자 데이터"
+    assert ExamRepository(str(mounted)).search_questions(limit=1)[0]["question_text"] == "1번 문제"
+
+
 def test_atomic_replace_failure_leaves_mounted_unchanged_and_writes_no_receipt(tmp_path, monkeypatch):
     from src.database import staging
 
@@ -734,6 +760,39 @@ def test_answer_required_registered_set_builds_with_matching_provenance(tmp_path
     assert validation.sets[0].missing_answers == ()
 
 
+def test_answer_required_set_accepts_explicit_source_unavailable_question(tmp_path):
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    source = root / "truncated_문제.pdf"
+    answer = root / "truncated_정답.pdf"
+    source.write_bytes(b"question")
+    answer.write_bytes(b"answer")
+    question = _question(1)
+    question.correct_answer = 0
+    question.answer_available = False
+    question.tags = "#source_unavailable_choices,#answer_missing_in_source"
+
+    summary = build_staging_database(
+        root,
+        tmp_path / "staging.db",
+        tmp_path / "reports",
+        inventory_contract=InventoryContract(2, 1, 1, 0),
+        registered_set_provider=lambda *_args: (
+            RegisteredExamSet(
+                ExpectedExamSet("해경", "항해", 2024, 2, (1,)),
+                (question,),
+                source,
+                answer,
+            ),
+        ),
+    )
+
+    validation = validate_staging_database(summary.staging_db, summary.expected_sets)
+
+    assert validation.valid is True
+    assert validation.sets[0].missing_answers == ()
+
+
 def test_answer_required_registered_set_accepts_official_all_choices_answer(tmp_path):
     root = tmp_path / "pdfs"
     root.mkdir()
@@ -774,6 +833,58 @@ def test_native_2023_specs_are_explicit_distinct_official_associations():
     assert {(spec.year, spec.session) for spec in STANDALONE_SPECS} == {(2023, 2)}
     assert len({spec.answer_filename for spec in STANDALONE_SPECS}) == 2
     assert len({spec.official_key for spec in STANDALONE_SPECS}) == 2
+
+
+def test_standalone_explanation_answer_key_supports_split_answer_marker():
+    from src.database.staging import _parse_explanation_answer_key
+
+    lines = [
+        "1. 【정답】 ④",
+        "해설 문장",
+        "2. 【정답】",
+        "①",
+        "① 첫 번째 선지 해설",
+        "3. 【정답】 ②",
+    ]
+
+    assert _parse_explanation_answer_key(lines, (1, 2, 3)) == {
+        1: 4,
+        2: 1,
+        3: 2,
+    }
+
+
+def test_standalone_subject_table_selects_exact_subject_from_multi_subject_key():
+    from src.database.staging import _parse_subject_answer_table
+
+    lines = [
+        "□ 항해술",
+        "1 ③ 2 ① 3 ④",
+        "□ 항해",
+        "1 ① 2 ③ 3 ②",
+        "□ 선박기관",
+        "1 ④ 2 ④ 3 ④",
+    ]
+
+    assert _parse_subject_answer_table(lines, "항해", (1, 2, 3)) == {
+        1: 1,
+        2: 3,
+        3: 2,
+    }
+
+
+def test_standalone_subject_table_rejects_conflicting_duplicate_subject_sections():
+    from src.database.staging import _parse_subject_answer_table
+
+    lines = [
+        "□ 항해",
+        "1 ① 2 ③ 3 ②",
+        "[다른 직렬]",
+        "□ 항해",
+        "1 ① 2 ④ 3 ②",
+    ]
+
+    assert _parse_subject_answer_table(lines, "항해", (1, 2, 3)) == {}
 
 
 def test_real_provider_preflight_enumerates_registered_contract_without_ocr():
