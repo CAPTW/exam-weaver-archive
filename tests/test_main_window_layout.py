@@ -3,6 +3,14 @@ from pathlib import Path
 from src.gui import main as gui_main
 
 
+class _MicaWindowStub:
+    def __init__(self):
+        self.enabled = True
+
+    def setMicaEffectEnabled(self, enabled):
+        self.enabled = enabled
+
+
 def test_main_window_default_size_leaves_room_for_export_controls():
     assert gui_main.DEFAULT_WINDOW_SIZE[0] >= 1500
     assert gui_main.DEFAULT_WINDOW_SIZE[1] >= 860
@@ -46,3 +54,21 @@ def test_codex_toggle_navigation_is_declared():
     assert "codex_sidecar_container" in source
     assert "Codex 패널 펼치기" in source
     assert "기출문제 문제은행 관리자" in source
+
+
+def test_opaque_background_fallback_disables_mica():
+    window = _MicaWindowStub()
+
+    gui_main.apply_opaque_background_fallback(window)
+
+    assert window.enabled is False
+
+
+def test_main_window_applies_opaque_background_fallback_at_startup():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    constructor_start = source.index("class MainWindow(FluentWindow):")
+    init_window_start = source.index("    def init_window(self):", constructor_start)
+    constructor = source[constructor_start:init_window_start]
+
+    assert "apply_opaque_background_fallback(self)" in constructor

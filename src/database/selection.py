@@ -1,9 +1,33 @@
 """Question selection helpers shared by export and mock exam generation."""
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 import random
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+
+
+QUESTION_FINGERPRINT_KIND = 'question'
+GROUP_FINGERPRINT_KIND = 'group'
+MIN_FUZZY_PROMPT_LENGTH = 18
+MIN_PROMPT_SIMILARITY = 0.90
+MIN_CHOICE_SIMILARITY = 0.92
+MIN_COMBINED_SIMILARITY = 0.95
+MIN_DESCRIPTIVE_PROMPT_SIMILARITY = 0.97
+PROMPT_SIMILARITY_WEIGHT = 0.55
+CHOICE_SIMILARITY_WEIGHT = 0.45
+NEGATIVE_PROMPT_MARKERS = (
+    '옳지않',
+    '아닌',
+    '틀린',
+    '잘못된',
+    '부적절',
+    '하지않',
+    '없는것',
+    '제외한',
+    '제외되는',
+    '불가능',
+)
 
 
 def _canonical_text(value) -> str:
@@ -16,10 +40,152 @@ def _canonical_text(value) -> str:
     return text
 
 
+def _choice_fingerprint(question: Dict) -> Tuple[str, ...]:
+    normalized_choices = []
+    for choice in question.get('choices') or []:
+        if isinstance(choice, dict):
+            value = choice.get('choice_text') or choice.get('text')
+        else:
+            value = getattr(choice, 'choice_text', None) or getattr(choice, 'text', None)
+        normalized = _canonical_text(value)
+        if normalized:
+            normalized_choices.append(normalized)
+    return tuple(sorted(normalized_choices))
+
+
+def _prompt_semantic_anchors(value) -> Tuple[Tuple[str, ...], bool]:
+    text = str(value or '').lower()
+    number_text = re.sub(r'(?<=\d),(?=\d)', '', text)
+    numbers = tuple(re.findall(r'\d+(?:\.\d+)?', number_text))
+    compact = re.sub(r'\s+', '', text)
+    has_negative_polarity = any(marker in compact for marker in NEGATIVE_PROMPT_MARKERS)
+    has_negative_polarity = has_negative_polarity or bool(
+        re.search(r'\b(?:not|incorrect|wrong|except|least)\b', text)
+    )
+    return numbers, has_negative_polarity
+
+
 def question_content_key(question: Dict) -> Tuple:
-    """Build a stable key for detecting the same problem across records."""
+    """Build a normalized prompt-and-choice fingerprint for a problem."""
+    prompt = question.get('question_text') or question.get('text')
     return (
-        _canonical_text(question.get('question_text') or question.get('text')),
+        QUESTION_FINGERPRINT_KIND,
+        _canonical_text(prompt),
+        _choice_fingerprint(question),
+        _prompt_semantic_anchors(prompt),
+    )
+
+
+def _text_similarity(first: str, second: str, minimum: float = 0.0) -> float:
+    if not first or not second:
+        return 0.0
+    if first == second:
+        return 1.0
+    matcher = SequenceMatcher(None, first, second, autojunk=False)
+    if minimum:
+        if matcher.real_quick_ratio() < minimum:
+            return 0.0
+        if matcher.quick_ratio() < minimum:
+            return 0.0
+    return matcher.ratio()
+
+
+def _question_fingerprints_are_logical_duplicates(first: Tuple, second: Tuple) -> bool:
+    if len(first) != 4 or len(second) != 4:
+        return False
+
+    _first_kind, first_prompt, first_choices, first_anchors = first
+    _second_kind, second_prompt, second_choices, second_anchors = second
+    if first_anchors != second_anchors:
+        return False
+    if min(len(first_prompt), len(second_prompt)) < MIN_FUZZY_PROMPT_LENGTH:
+        return False
+
+    if first_choices or second_choices:
+        if (
+            not first_choices
+            or not second_choices
+            or len(first_choices) != len(second_choices)
+        ):
+            return False
+        if first_choices == second_choices:
+            choice_similarity = 1.0
+        else:
+            choice_similarity = _text_similarity(
+                '\x1f'.join(first_choices),
+                '\x1f'.join(second_choices),
+                minimum=MIN_CHOICE_SIMILARITY,
+            )
+            if choice_similarity < MIN_CHOICE_SIMILARITY:
+                return False
+        prompt_similarity = _text_similarity(
+            first_prompt,
+            second_prompt,
+            minimum=MIN_PROMPT_SIMILARITY,
+        )
+        combined_similarity = (
+            PROMPT_SIMILARITY_WEIGHT * prompt_similarity
+            + CHOICE_SIMILARITY_WEIGHT * choice_similarity
+        )
+        return (
+            prompt_similarity >= MIN_PROMPT_SIMILARITY
+            and choice_similarity >= MIN_CHOICE_SIMILARITY
+            and combined_similarity >= MIN_COMBINED_SIMILARITY
+        )
+
+    return _text_similarity(
+        first_prompt,
+        second_prompt,
+        minimum=MIN_DESCRIPTIVE_PROMPT_SIMILARITY,
+    ) >= MIN_DESCRIPTIVE_PROMPT_SIMILARITY
+
+
+def _group_fingerprints_are_logical_duplicates(first: Tuple, second: Tuple) -> bool:
+    if len(first) != 3 or len(second) != 3:
+        return False
+
+    _first_kind, first_shared_texts, first_children = first
+    _second_kind, second_shared_texts, second_children = second
+    if len(first_children) != len(second_children):
+        return False
+    if not all(
+        _content_keys_are_logical_duplicates(first_child, second_child)
+        for first_child, second_child in zip(first_children, second_children)
+    ):
+        return False
+
+    if first_shared_texts == second_shared_texts:
+        return True
+    if not first_shared_texts or not second_shared_texts:
+        return False
+
+    first_shared = '\x1f'.join(first_shared_texts)
+    second_shared = '\x1f'.join(second_shared_texts)
+    if min(len(first_shared), len(second_shared)) < MIN_FUZZY_PROMPT_LENGTH:
+        return False
+    return _text_similarity(
+        first_shared,
+        second_shared,
+        minimum=MIN_DESCRIPTIVE_PROMPT_SIMILARITY,
+    ) >= MIN_DESCRIPTIVE_PROMPT_SIMILARITY
+
+
+def _content_keys_are_logical_duplicates(first: Tuple, second: Tuple) -> bool:
+    if first == second:
+        return True
+    if not first or not second or first[0] != second[0]:
+        return False
+    if first[0] == QUESTION_FINGERPRINT_KIND:
+        return _question_fingerprints_are_logical_duplicates(first, second)
+    if first[0] == GROUP_FINGERPRINT_KIND:
+        return _group_fingerprints_are_logical_duplicates(first, second)
+    return False
+
+
+def _contains_logical_duplicate(key: Tuple, existing_keys: Iterable[Tuple]) -> bool:
+    return any(
+        _content_keys_are_logical_duplicates(key, existing_key)
+        for existing_key in existing_keys
     )
 
 
@@ -39,12 +205,12 @@ class SelectionUnit:
 def dedupe_questions_by_content(questions: Iterable[Dict]) -> List[Dict]:
     """Keep the first record for each logical problem."""
     deduped = []
-    seen = set()
+    seen = []
     for question in questions:
         key = question_content_key(question)
-        if key in seen:
+        if _contains_logical_duplicate(key, seen):
             continue
-        seen.add(key)
+        seen.append(key)
         deduped.append(question)
     return deduped
 
@@ -52,12 +218,12 @@ def dedupe_questions_by_content(questions: Iterable[Dict]) -> List[Dict]:
 def dedupe_group_aware_questions_by_content(questions: Iterable[Dict]) -> List[Dict]:
     """Keep first non-duplicate selection units while preserving group children."""
     deduped = []
-    seen = set()
+    seen = []
     for unit in build_selection_units(questions):
-        unit_keys = set(unit.content_keys)
-        if seen.intersection(unit_keys):
+        unit_keys = tuple(unit.content_keys)
+        if any(_contains_logical_duplicate(key, seen) for key in unit_keys):
             continue
-        seen.update(unit_keys)
+        seen.extend(unit_keys)
         deduped.extend(unit.questions)
     return deduped
 
@@ -132,7 +298,10 @@ def build_selection_units(
                 key_func=key_func,
             )
 
-        if excluded_keys and any(key in excluded_keys for key in unit.content_keys):
+        if excluded_keys and any(
+            _contains_logical_duplicate(key, excluded_keys)
+            for key in unit.content_keys
+        ):
             continue
         units.append(unit)
 
@@ -229,7 +398,7 @@ def _group_content_key(
             seen_shared_texts.add(shared_text)
             shared_texts.append(shared_text)
     return (
-        'group',
+        GROUP_FINGERPRINT_KIND,
         tuple(shared_texts),
         tuple(key_func(question) for question in questions),
     )

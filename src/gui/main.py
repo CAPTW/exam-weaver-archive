@@ -117,9 +117,15 @@ def _set_windows_app_user_model_id() -> bool:
         return False
 
 
+def apply_opaque_background_fallback(window) -> None:
+    """Use QFluentWidgets' opaque theme background instead of native Mica."""
+    window.setMicaEffectEnabled(False)
+
+
 class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
+        apply_opaque_background_fallback(self)
         self._disable_frameless_screen_refresh()
         self.init_window()
 

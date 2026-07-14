@@ -1,8 +1,12 @@
+from pathlib import Path
+
 from src.database.selection import (
     dedupe_questions_by_content,
     filter_random_eligible_questions,
+    question_content_key,
     select_group_aware_questions,
 )
+from src.database.repository import ExamRepository
 from src.database.validator import QuestionValidator
 from PIL import Image
 import pytest
@@ -44,6 +48,183 @@ def test_dedupe_questions_by_content_keeps_one_copy_of_same_problem():
     ]
 
     assert [q['id'] for q in dedupe_questions_by_content(questions)] == [1, 3]
+
+
+def test_question_content_key_uses_normalized_prompt_and_choice_fingerprint():
+    base = {
+        'question_text': '다음 중 옳은 것은?',
+        'choices': [
+            {'choice_number': 1, 'choice_text': '첫 번째 설명'},
+            {'choice_number': 2, 'choice_text': '두 번째 설명'},
+        ],
+    }
+    reordered = {
+        'question_text': ' 다음 중 옳은 것은? ',
+        'choices': list(reversed(base['choices'])),
+    }
+    different_choices = {
+        'question_text': '다음 중 옳은 것은?',
+        'choices': [
+            {'choice_number': 1, 'choice_text': '전혀 다른 설명'},
+            {'choice_number': 2, 'choice_text': '또 다른 설명'},
+        ],
+    }
+
+    assert question_content_key(base) == question_content_key(reordered)
+    assert question_content_key(base) != question_content_key(different_choices)
+
+
+def test_dedupe_questions_by_content_removes_high_confidence_wording_variant():
+    choices = [
+        {'choice_number': 1, 'choice_text': '폴리염화비닐(PVCs)'},
+        {'choice_number': 2, 'choice_text': '폴리염화비페닐(PCBs)'},
+        {'choice_number': 3, 'choice_text': '배기가스 세정장치의 잔류물'},
+        {
+            'choice_number': 4,
+            'choice_text': '할로겐 화합물질을 함유하고 있는 정제된 석유제품',
+        },
+    ]
+    questions = [
+        {
+            'id': 1374,
+            'question_text': (
+                'MARPOL 협약 및 개정규정상 IMO 형식승인증서를 발급받은 '
+                '선내 소각기에서 소각할 수 있는 물질은?'
+            ),
+            'choices': choices,
+        },
+        {
+            'id': 7622,
+            'question_text': (
+                'MARPOL 협약 및 개정규정의 부속서 Ⅵ에서 IMO 형식승인증서를 '
+                '발급받은 선내 소각기에서 소각할 수 있는 물질은?'
+            ),
+            'choices': choices,
+        },
+    ]
+
+    assert [q['id'] for q in dedupe_questions_by_content(questions)] == [1374]
+
+
+def test_dedupe_questions_by_content_keeps_similar_prompt_with_different_choices():
+    questions = [
+        {
+            'id': 1,
+            'question_text': '선박안전법령상 정기검사의 유효기간 연장 기준으로 옳은 것은?',
+            'choices': [
+                {'choice_number': 1, 'choice_text': '1개월'},
+                {'choice_number': 2, 'choice_text': '2개월'},
+                {'choice_number': 3, 'choice_text': '3개월'},
+                {'choice_number': 4, 'choice_text': '4개월'},
+            ],
+        },
+        {
+            'id': 2,
+            'question_text': '선박안전법령상 정기검사의 유효기간 연장 기준으로 옳지 않은 것은?',
+            'choices': [
+                {'choice_number': 1, 'choice_text': '검사 면제'},
+                {'choice_number': 2, 'choice_text': '검사 생략'},
+                {'choice_number': 3, 'choice_text': '검사 정지'},
+                {'choice_number': 4, 'choice_text': '검사 취소'},
+            ],
+        },
+    ]
+
+    assert [q['id'] for q in dedupe_questions_by_content(questions)] == [1, 2]
+
+
+def test_dedupe_questions_by_content_keeps_opposite_question_polarity():
+    choices = [
+        {'choice_number': 1, 'choice_text': '안전밸브를 점검한다.'},
+        {'choice_number': 2, 'choice_text': '압력계를 점검한다.'},
+        {'choice_number': 3, 'choice_text': '수면계를 점검한다.'},
+        {'choice_number': 4, 'choice_text': '연료밸브를 점검한다.'},
+    ]
+    questions = [
+        {
+            'id': 1,
+            'question_text': '보일러 운전 전 안전 점검사항에 관한 설명으로 옳은 것은?',
+            'choices': choices,
+        },
+        {
+            'id': 2,
+            'question_text': '보일러 운전 전 안전 점검사항에 관한 설명으로 옳지 않은 것은?',
+            'choices': choices,
+        },
+    ]
+
+    assert [q['id'] for q in dedupe_questions_by_content(questions)] == [1, 2]
+
+
+def test_dedupe_questions_by_content_keeps_different_numeric_conditions():
+    choices = [
+        {'choice_number': 1, 'choice_text': '10[C]'},
+        {'choice_number': 2, 'choice_text': '20[C]'},
+        {'choice_number': 3, 'choice_text': '30[C]'},
+        {'choice_number': 4, 'choice_text': '40[C]'},
+    ]
+    questions = [
+        {
+            'id': 1,
+            'question_text': '10[F]의 콘덴서에 100[V]를 가할 때 충전되는 전기량은?',
+            'choices': choices,
+        },
+        {
+            'id': 2,
+            'question_text': '20[F]의 콘덴서에 100[V]를 가할 때 충전되는 전기량은?',
+            'choices': choices,
+        },
+    ]
+
+    assert [q['id'] for q in dedupe_questions_by_content(questions)] == [1, 2]
+
+
+def test_fuzzy_content_key_excludes_wording_variant_from_later_subject_pool():
+    from src.database import selection
+
+    choices = [
+        {'choice_number': 1, 'choice_text': '폴리염화비닐(PVCs)'},
+        {'choice_number': 2, 'choice_text': '폴리염화비페닐(PCBs)'},
+        {'choice_number': 3, 'choice_text': '배기가스 세정장치의 잔류물'},
+        {'choice_number': 4, 'choice_text': '정제된 석유제품'},
+    ]
+    selected = [{
+        'id': 1,
+        'question_text': (
+            'MARPOL 협약 및 개정규정상 IMO 형식승인증서를 발급받은 '
+            '선내 소각기에서 소각할 수 있는 물질은?'
+        ),
+        'choices': choices,
+    }]
+    later_pool = [{
+        'id': 2,
+        'question_text': (
+            'MARPOL 협약 및 개정규정의 부속서 Ⅵ에서 IMO 형식승인증서를 '
+            '발급받은 선내 소각기에서 소각할 수 있는 물질은?'
+        ),
+        'choices': choices,
+    }]
+
+    selected_keys = selection.selection_content_keys(selected)
+
+    assert selection.count_group_aware_questions(
+        later_pool,
+        excluded_keys=selected_keys,
+    ) == 0
+
+
+@pytest.mark.parametrize('question_ids', [(1374, 7622), (7866, 469)])
+def test_actual_exam_database_wording_variants_are_deduped(question_ids):
+    db_path = Path(__file__).resolve().parents[1] / 'data' / 'exam_bank.db'
+    if not db_path.exists():
+        pytest.skip('Local application exam database is not available')
+
+    repository = ExamRepository(str(db_path))
+    questions = [repository.get_question(question_id) for question_id in question_ids]
+    if any(question is None for question in questions):
+        pytest.skip(f'Actual DB regression records are unavailable: {question_ids}')
+
+    assert [q['id'] for q in dedupe_questions_by_content(questions)] == [question_ids[0]]
 
 
 def test_group_aware_dedupe_keeps_duplicate_text_children_inside_same_group():
