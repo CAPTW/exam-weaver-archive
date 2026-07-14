@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QTextCharFormat, QTextCursor
+from PyQt5.QtGui import QImage, QTextCharFormat, QTextCursor
 from qfluentwidgets import (
     SubtitleLabel, LineEdit, TextEdit, BodyLabel, PushButton,
     ImageLabel, ComboBox, PrimaryPushButton
@@ -209,32 +209,45 @@ class QuestionEditor(QDialog):
         self.imageStatusLabel = BodyLabel("", self)
         self.imageStatusLabel.setWordWrap(True)
         self.btnImage = PushButton("이미지 추가" if self.create_mode else "이미지 변경", self)
-        self._apply_input_height(self.btnImage)
-        self.btnImage.setFixedWidth(140)
-        self.btnImage.clicked.connect(self._select_image)
         self.btnPasteImage = PushButton("붙여넣기", self)
-        self._apply_input_height(self.btnPasteImage)
-        self.btnPasteImage.setFixedWidth(120)
-        self.btnPasteImage.clicked.connect(self._paste_image)
+        self.btnCopyImage = PushButton("클립보드 복사", self)
         self.btnClearImage = PushButton("삭제", self)
+        for button, width in (
+            (self.btnImage, 120),
+            (self.btnPasteImage, 100),
+            (self.btnCopyImage, 130),
+            (self.btnClearImage, 80),
+        ):
+            self._apply_input_height(button)
+            button.setFixedWidth(width)
+
+        self.btnImage.clicked.connect(self._select_image)
+        self.btnPasteImage.clicked.connect(self._paste_image)
+        self.btnCopyImage.clicked.connect(self._copy_image_to_clipboard)
         self.btnClearImage.setToolTip("문제 이미지 경로 삭제")
-        self._apply_input_height(self.btnClearImage)
-        self.btnClearImage.setFixedWidth(80)
         self.btnClearImage.clicked.connect(self._clear_image)
+
+        self.imageButtonBar = QWidget(self)
+        self.imageButtonLayout = QHBoxLayout(self.imageButtonBar)
+        self.imageButtonLayout.setContentsMargins(0, 0, 0, 0)
+        self.imageButtonLayout.setSpacing(8)
+        self.imageButtonLayout.addWidget(self.btnImage)
+        self.imageButtonLayout.addWidget(self.btnPasteImage)
+        self.imageButtonLayout.addWidget(self.btnCopyImage)
+        self.imageButtonLayout.addWidget(self.btnClearImage)
 
         imageControls = QWidget(self)
         imageControlsLayout = QVBoxLayout(imageControls)
         imageControlsLayout.setContentsMargins(0, 0, 0, 0)
         imageControlsLayout.setSpacing(8)
         imageControlsLayout.addWidget(self.imageStatusLabel)
-        imageControlsLayout.addWidget(self.btnImage, 0, Qt.AlignmentFlag.AlignLeft)
-        imageControlsLayout.addWidget(self.btnPasteImage, 0, Qt.AlignmentFlag.AlignLeft)
-        imageControlsLayout.addWidget(self.btnClearImage, 0, Qt.AlignmentFlag.AlignLeft)
+        imageControlsLayout.addWidget(self.imageButtonBar)
         imageControlsLayout.addStretch(1)
 
         self.imageLayout.addWidget(self.imageLabel)
         self.imageLayout.addWidget(imageControls, 1)
-        self.imageWidget.setMaximumHeight(118)
+        self.imageWidget.setMinimumHeight(138)
+        self.imageWidget.setMaximumHeight(156)
         self.imageWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._set_image_preview(self.imagePath)
 
@@ -553,17 +566,19 @@ class QuestionEditor(QDialog):
             widget.setFixedHeight(height)
 
     def _set_image_preview(self, image_path):
-        if image_path and Path(image_path).exists():
+        can_copy = self._can_copy_image(image_path)
+        if can_copy:
             self.imageLabel.setVisible(True)
             self.imageLabel.setImage(image_path)
             self.imageLabel.setFixedSize(180, 110)
             self.imageStatusLabel.setText(self._format_image_status(image_path))
-            self.imageWidget.setMinimumHeight(110)
         else:
             self.imageLabel.setVisible(False)
             self.imageLabel.setFixedSize(0, 0)
-            self.imageStatusLabel.setText(self._format_image_status(None))
-            self.imageWidget.setMinimumHeight(46)
+            self.imageStatusLabel.setText(
+                self._format_image_status(None) if not image_path else "이미지를 읽을 수 없음"
+            )
+        self.btnCopyImage.setEnabled(can_copy)
 
     def _format_question_info(self):
         year = self.question_data.get('year')
@@ -888,9 +903,36 @@ class QuestionEditor(QDialog):
     def _clipboard_image_dir(self):
         return get_clipboard_image_dir()
 
+    def _clipboard(self):
+        return QApplication.clipboard()
+
     def _clipboard_image(self):
-        clipboard = QApplication.clipboard()
+        clipboard = self._clipboard()
         return clipboard.image() if clipboard else None
+
+    @staticmethod
+    def _can_copy_image(image_path):
+        if not image_path or not Path(image_path).is_file():
+            return False
+        return not QImage(str(image_path)).isNull()
+
+    def _copy_image_to_clipboard(self):
+        if not self._can_copy_image(self.imagePath):
+            self.imageStatusLabel.setText(
+                "이미지 없음" if not self.imagePath else "이미지를 읽을 수 없음"
+            )
+            self.btnCopyImage.setEnabled(False)
+            return False
+
+        clipboard = self._clipboard()
+        if clipboard is None:
+            self.imageStatusLabel.setText("클립보드를 사용할 수 없음")
+            self.btnCopyImage.setEnabled(False)
+            return False
+
+        clipboard.setImage(QImage(str(self.imagePath)))
+        self.imageStatusLabel.setText("클립보드에 복사됨")
+        return True
 
     def _save_clipboard_image(self, prefix):
         image = self._clipboard_image()

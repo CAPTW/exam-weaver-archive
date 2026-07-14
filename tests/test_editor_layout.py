@@ -18,6 +18,25 @@ from src.parser.question import Choice, Question
 APP = QApplication.instance() or QApplication([])
 
 
+def _question_editor_data(image_path=None):
+    return {
+        'year': 2024,
+        'session': 1,
+        'question_number': 1,
+        'subject_code': 'engine1',
+        'exam_code': '4급기관사',
+        'question_text': '이미지 제어를 확인할 문제',
+        'image_path': image_path,
+        'correct_answer': 1,
+        'choices': [
+            {'choice_number': 1, 'choice_text': 'A'},
+            {'choice_number': 2, 'choice_text': 'B'},
+            {'choice_number': 3, 'choice_text': 'C'},
+            {'choice_number': 4, 'choice_text': 'D'},
+        ],
+    }
+
+
 def test_question_editor_layout_uses_dialog_scroll_area_and_fixed_button_bar():
     source = inspect.getsource(QuestionEditor)
 
@@ -469,6 +488,86 @@ def test_question_editor_pastes_clipboard_images_to_question_and_choice(tmp_path
     assert Path(editor.choiceImagePaths[2]).exists()
     assert editor.imagePath.endswith('.png')
     assert editor.choiceImagePaths[2].endswith('.png')
+
+
+def test_question_editor_image_actions_are_separate_horizontal_buttons(tmp_path):
+    image_path = tmp_path / 'question.png'
+    image = QImage(8, 6, QImage.Format.Format_RGB32)
+    image.fill(0x336699)
+    assert image.save(str(image_path), 'PNG')
+    editor = QuestionEditor(
+        question_data=_question_editor_data(str(image_path)),
+        subject_options=[{'code': 'engine1', 'name_ko': '기관1'}],
+    )
+
+    editor.show()
+    APP.processEvents()
+
+    buttons = [
+        editor.btnImage,
+        editor.btnPasteImage,
+        editor.btnCopyImage,
+        editor.btnClearImage,
+    ]
+    assert editor.imageButtonLayout.count() == 4
+    assert [editor.imageButtonLayout.itemAt(i).widget() for i in range(4)] == buttons
+    assert [button.text() for button in buttons] == [
+        '이미지 변경', '붙여넣기', '클립보드 복사', '삭제'
+    ]
+    assert all(
+        not left.geometry().intersects(right.geometry())
+        for index, left in enumerate(buttons)
+        for right in buttons[index + 1:]
+    )
+    editor.close()
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_question_editor_copies_current_image_to_clipboard(tmp_path, monkeypatch):
+    image_path = tmp_path / 'question.png'
+    source = QImage(7, 5, QImage.Format.Format_RGB32)
+    source.fill(0x12AB34)
+    assert source.save(str(image_path), 'PNG')
+    editor = QuestionEditor(
+        question_data=_question_editor_data(str(image_path)),
+        subject_options=[{'code': 'engine1', 'name_ko': '기관1'}],
+    )
+
+    class Clipboard:
+        image = None
+
+        def setImage(self, image):
+            self.image = QImage(image)
+
+    clipboard = Clipboard()
+    monkeypatch.setattr(editor, '_clipboard', lambda: clipboard)
+
+    assert editor.btnCopyImage.isEnabled() is True
+    assert editor._copy_image_to_clipboard() is True
+    assert clipboard.image.size() == source.size()
+    assert clipboard.image.pixelColor(0, 0) == source.pixelColor(0, 0)
+    assert editor.imageStatusLabel.text() == '클립보드에 복사됨'
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_question_editor_disables_copy_for_missing_or_deleted_image(tmp_path):
+    missing_path = tmp_path / 'missing.png'
+    editor = QuestionEditor(
+        question_data=_question_editor_data(str(missing_path)),
+        subject_options=[{'code': 'engine1', 'name_ko': '기관1'}],
+    )
+
+    assert editor.btnCopyImage.isEnabled() is False
+    assert editor._copy_image_to_clipboard() is False
+
+    editor._clear_image()
+
+    assert editor.btnCopyImage.isEnabled() is False
+    assert editor.imageStatusLabel.text() == '이미지 없음'
+    editor.deleteLater()
+    APP.processEvents()
 
 
 def test_question_editor_can_clear_question_and_choice_images():
