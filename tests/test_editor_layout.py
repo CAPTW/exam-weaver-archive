@@ -231,6 +231,92 @@ def test_browser_interface_marks_grouped_rows_in_info_and_preview():
     assert interface._format_info(mounted_descriptive) == '사용자 DB · 서술형 2024-1 기관1 3번'
 
 
+def _save_two_editable_questions(repo):
+    questions = [
+        Question(
+            number=number,
+            text=text,
+            choices=[
+                Choice(number=1, symbol='㉮', text='A'),
+                Choice(number=2, symbol='㉯', text='B'),
+                Choice(number=3, symbol='㉴', text='C'),
+                Choice(number=4, symbol='㉵', text='D'),
+            ],
+            correct_answer=1,
+            subject_name='기관1',
+            year=2024,
+            session=1,
+            exam_type='3급기관사',
+        )
+        for number, text in ((1, '첫 번째 편집 문제'), (2, '두 번째 편집 문제'))
+    ]
+    metadata = type(
+        'Metadata', (),
+        {'year': 2024, 'session': 1, 'exam_type': '3급기관사'}
+    )()
+    repo.save_questions(questions, metadata)
+    return repo.get_questions_with_choices(exam_code='3급기관사', limit=None)
+
+
+def test_browser_opens_different_question_editors_and_reuses_same_question(
+    repo, monkeypatch
+):
+    questions = _save_two_editable_questions(repo)
+    widget = BrowserInterface(repo.db_path)
+    monkeypatch.setattr(QuestionEditor, 'exec', lambda _self: False)
+
+    first = widget.open_editor(questions[0]['id'])
+    second = widget.open_editor(questions[1]['id'])
+    same_first = widget.open_editor(questions[0]['id'])
+
+    assert first is same_first
+    assert first is not second
+    assert first.isModal() is False
+    assert second.isModal() is False
+    assert widget._open_editors == {
+        questions[0]['id']: first,
+        questions[1]['id']: second,
+    }
+
+    first.reject()
+    second.reject()
+    APP.processEvents()
+    assert widget._open_editors == {}
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_edit_dialog_saves_through_repository_captured_when_opened(
+    repo, monkeypatch
+):
+    question = _save_two_editable_questions(repo)[0]
+    widget = BrowserInterface(repo.db_path)
+    monkeypatch.setattr(QuestionEditor, 'exec', lambda _self: False)
+    dialog = widget.open_editor(question['id'])
+    dialog.questionText.setPlainText('열 때의 저장소에 저장된 수정문제')
+    refreshed = []
+    wrong_repository_calls = []
+
+    class WrongRepository:
+        def update_question(self, question_id, data):
+            wrong_repository_calls.append((question_id, data))
+            return True
+
+    widget.repo = WrongRepository()
+    monkeypatch.setattr(widget, 'load_data', lambda: refreshed.append(True))
+    monkeypatch.setattr(browser_module.InfoBar, 'success', lambda **_kwargs: None)
+
+    dialog.accept()
+    APP.processEvents()
+
+    assert wrong_repository_calls == []
+    assert repo.get_question(question['id'])['question_text'] == '열 때의 저장소에 저장된 수정문제'
+    assert refreshed == [True]
+    assert question['id'] not in widget._open_editors
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_question_editor_supports_create_mode_for_manual_questions(repo):
     editor = QuestionEditor(
         question_data=repo.get_manual_question_template(),

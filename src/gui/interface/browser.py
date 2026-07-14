@@ -25,6 +25,7 @@ class BrowserInterface(QWidget):
         self.validation_mode = False
         self.current_explanation_question_id = None
         self.explanation_sidecar_expanded = False
+        self._open_editors = {}
         self.setObjectName("BrowserInterface")
 
         self.rootLayout = QHBoxLayout(self)
@@ -347,9 +348,15 @@ class BrowserInterface(QWidget):
             )
 
     def open_editor(self, question_id):
-        q = self.repo.get_question(question_id)
+        existing = self._open_editors.get(question_id)
+        if existing is not None:
+            self._activate_editor(existing)
+            return existing
+
+        repository = self.repo
+        q = repository.get_question(question_id)
         if not q:
-            return
+            return None
 
         editor_question = dict(q)
         editor_question['exam_code'] = q.get('mounted_exam_code') or q.get('exam_code')
@@ -358,35 +365,62 @@ class BrowserInterface(QWidget):
         dialog = QuestionEditor(
             self.window(),
             editor_question,
-            subject_options=self.repo.get_subject_options(editor_question.get('exam_code'))
+            subject_options=repository.get_subject_options(editor_question.get('exam_code'))
         )
-        if dialog.exec():
-            new_data = dialog.get_data()
-            try:
-                updated = self.repo.update_question(question_id, new_data)
-            except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
-                self._show_write_error("수정", exc)
-                return
-            if updated:
-                InfoBar.success(
-                    title='수정 완료',
-                    content="문제가 성공적으로 수정되었습니다.",
-                    orient=Qt.Orientation.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=2000,
-                    parent=self
-                )
-                if self.validation_mode:
-                    self.load_validation_results()
-                else:
-                    self.load_data()
-            else:
-                InfoBar.error(
-                    title='오류',
-                    content="DB 업데이트 실패",
-                    parent=self
-                )
+        dialog.setModal(False)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._open_editors[question_id] = dialog
+        dialog.accepted.connect(
+            lambda qid=question_id, editor=dialog, repo=repository:
+            self._save_open_editor(qid, editor, repo)
+        )
+        dialog.finished.connect(
+            lambda _result, qid=question_id, editor=dialog:
+            self._release_editor(qid, editor)
+        )
+        dialog.show()
+        return dialog
+
+    def _activate_editor(self, dialog):
+        if dialog.isMinimized():
+            dialog.showNormal()
+        else:
+            dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _save_open_editor(self, question_id, dialog, repository):
+        new_data = dialog.get_data()
+        try:
+            updated = repository.update_question(question_id, new_data)
+        except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
+            self._show_write_error("수정", exc)
+            return
+        if not updated:
+            InfoBar.error(
+                title='오류',
+                content="DB 업데이트 실패",
+                parent=self
+            )
+            return
+
+        InfoBar.success(
+            title='수정 완료',
+            content="문제가 성공적으로 수정되었습니다.",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=2000,
+            parent=self
+        )
+        if self.validation_mode:
+            self.load_validation_results()
+        else:
+            self.load_data()
+
+    def _release_editor(self, question_id, dialog):
+        if self._open_editors.get(question_id) is dialog:
+            self._open_editors.pop(question_id, None)
 
     def add_manual_question(self):
         dialog = QuestionEditor(
