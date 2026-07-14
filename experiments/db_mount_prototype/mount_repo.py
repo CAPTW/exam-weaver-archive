@@ -134,11 +134,11 @@ def write_manifest(
 
 
 class MountedExamRepository:
-    """Read-only aggregate repository over one or more exam-bank SQLite files.
+    """Aggregate repository over one or more exam-bank SQLite files.
 
-    This is deliberately scoped as a prototype. It mirrors the read APIs used by
-    export/search flows, but it does not write mock exams or imported questions.
-    IDs exposed to callers are namespaced as ``mount_id::local_id``.
+    IDs exposed to callers are namespaced as ``mount_id::local_id``. Existing
+    rows are written back to their owning mount; manually authored rows are
+    routed to the configured user workspace mount.
     """
 
     def __init__(self, manifest_path: str | Path):
@@ -357,6 +357,66 @@ class MountedExamRepository:
             question = self._namespace_question(mount, dict(row))
             question["choices"] = self._choices_for_mount(mount, [int(local_id)]).get(int(local_id), [])
             return question
+
+    def get_manual_question_template(self) -> Dict[str, Any]:
+        mount = self._manual_write_mount()
+        template = self._write_repo(mount).get_manual_question_template()
+        return self._namespace_manual_template(mount, template)
+
+    def get_manual_descriptive_question_template(self) -> Dict[str, Any]:
+        mount = self._manual_write_mount()
+        template = self._write_repo(mount).get_manual_descriptive_question_template()
+        return self._namespace_manual_template(mount, template)
+
+    def get_manual_question_clone_template(self, question_id: Any) -> Optional[Dict[str, Any]]:
+        source_mount, local_id = self._clone_source_target(question_id)
+        template = self._write_repo(source_mount).get_manual_question_clone_template(local_id)
+        if template is None:
+            return None
+
+        target_mount = self._manual_write_mount()
+        target_defaults = self._write_repo(target_mount).get_manual_question_template()
+        for key in (
+            "year",
+            "session",
+            "question_number",
+            "exam_code",
+            "exam_name",
+            "subject_code",
+            "subject_name",
+        ):
+            template[key] = target_defaults[key]
+        return self._namespace_manual_template(target_mount, template)
+
+    def get_manual_subject_options(self) -> List[Dict[str, Any]]:
+        mount = self._manual_write_mount()
+        options = self._write_repo(mount).get_manual_subject_options()
+        return [
+            {
+                **option,
+                "code": namespaced_value(mount.id, option.get("code")),
+                "local_code": option.get("code"),
+                "mount_id": mount.id,
+                "mount_label": mount.label,
+                "domain": mount.domain,
+            }
+            for option in options
+        ]
+
+    def create_manual_question(self, data: Dict[str, Any]) -> Optional[str]:
+        mount = self._manual_write_mount()
+        normalized = dict(data)
+        for key in ("exam_code", "subject_code"):
+            value_mount_id, local_value = split_namespaced_value(normalized.get(key))
+            if value_mount_id and value_mount_id != mount.id:
+                raise ValueError(f"{key} belongs to another mount: {value_mount_id}")
+            if value_mount_id:
+                normalized[key] = local_value
+
+        local_id = self._write_repo(mount).create_manual_question(normalized)
+        if local_id is None:
+            return None
+        return namespaced_value(mount.id, local_id)
 
     def update_question(self, question_id: Any, data: Dict[str, Any]) -> bool:
         mount, local_id = self._write_target(question_id)
@@ -628,6 +688,49 @@ class MountedExamRepository:
             return self.mounts
         mount = self._mounts_by_id.get(mount_id)
         return [mount] if mount else []
+
+    def _manual_write_mount(self) -> MountedDatabase:
+        writable_mounts = [mount for mount in self.mounts if not mount.read_only]
+        for mount in writable_mounts:
+            if mount.id == "user_workspace":
+                return mount
+        for mount in writable_mounts:
+            if mount.domain.lower() == "user":
+                return mount
+        if len(writable_mounts) == 1:
+            return writable_mounts[0]
+        raise ValueError(
+            "수동 문제를 저장할 writable user_workspace Mount가 필요합니다."
+        )
+
+    def _clone_source_target(self, question_id: Any) -> Tuple[MountedDatabase, int]:
+        mount_id, local_id = split_namespaced_value(question_id)
+        if mount_id is None:
+            if len(self.mounts) != 1:
+                raise ValueError("raw question id is ambiguous when multiple mounts are enabled")
+            mount = self.mounts[0]
+        else:
+            mount = self._mounts_by_id.get(mount_id)
+            if mount is None:
+                raise ValueError(f"unknown or disabled mount: {mount_id}")
+        try:
+            return mount, int(local_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid local question id: {local_id}") from exc
+
+    @staticmethod
+    def _namespace_manual_template(
+        mount: MountedDatabase,
+        template: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        namespaced = dict(template)
+        for key in ("exam_code", "subject_code"):
+            _mount_id, local_value = split_namespaced_value(namespaced.get(key))
+            namespaced[key] = namespaced_value(mount.id, local_value)
+        namespaced["mount_id"] = mount.id
+        namespaced["mount_label"] = mount.label
+        namespaced["domain"] = mount.domain
+        return namespaced
 
     def _write_target(self, question_id: Any) -> Tuple[MountedDatabase, int]:
         mount_id, local_id = split_namespaced_value(question_id)

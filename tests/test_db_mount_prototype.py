@@ -13,7 +13,12 @@ from experiments.db_mount_prototype.mount_repo import (
     namespaced_value,
     write_manifest,
 )
-from src.database.repository import ExamRepository
+from src.database.repository import (
+    MANUAL_EXAM_CODE,
+    MANUAL_SUBJECT_CODE,
+    QUESTION_TYPE_DESCRIPTIVE,
+    ExamRepository,
+)
 from src.parser.question import Choice, Question
 from src.quiz.generator import MockExamGenerator
 
@@ -61,6 +66,99 @@ def _add_question(repo, exam_type, subject_name, question_text, *, session=1):
             exam_type=exam_type,
         )
     ], metadata)
+
+
+def _make_mounted_repository_with_user_workspace(tmp_path):
+    source_db = tmp_path / "maritime.db"
+    workspace_db = tmp_path / "user_workspace.db"
+    _make_db(source_db, "복제할 원본 문제")
+    workspace_repo = ExamRepository(str(workspace_db))
+    workspace_repo.init_database()
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(
+                id="maritime_all",
+                label="Maritime",
+                domain="maritime",
+                path=source_db,
+                read_only=False,
+            ),
+            MountedDatabase(
+                id="user_workspace",
+                label="사용자 작업 DB",
+                domain="user",
+                path=workspace_db,
+                read_only=False,
+            ),
+        ],
+    )
+    return MountedExamRepository(manifest), source_db, workspace_db
+
+
+def _manual_choices():
+    return [
+        {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': '정답'},
+        {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': '오답 1'},
+        {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': '오답 2'},
+        {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': '오답 3'},
+    ]
+
+
+def test_mounted_repository_creates_manual_question_in_user_workspace(tmp_path):
+    mounted, source_db, workspace_db = _make_mounted_repository_with_user_workspace(tmp_path)
+
+    template = mounted.get_manual_question_template()
+    template.update({
+        'question_text': '사용자가 직접 만든 객관식 문제',
+        'correct_answer': 1,
+        'choices': _manual_choices(),
+    })
+    question_id = mounted.create_manual_question(template)
+
+    assert template['exam_code'] == f'user_workspace::{MANUAL_EXAM_CODE}'
+    assert template['subject_code'] == f'user_workspace::{MANUAL_SUBJECT_CODE}'
+    assert mounted.get_manual_subject_options()[0]['code'] == f'user_workspace::{MANUAL_SUBJECT_CODE}'
+    assert question_id.startswith('user_workspace::')
+    assert ExamRepository(str(workspace_db)).get_question(int(question_id.split('::')[1]))[
+        'question_text'
+    ] == '사용자가 직접 만든 객관식 문제'
+    assert ExamRepository(str(source_db)).get_questions_with_choices(
+        exam_code=MANUAL_EXAM_CODE,
+        limit=None,
+    ) == []
+
+
+def test_mounted_repository_creates_descriptive_question_in_user_workspace(tmp_path):
+    mounted, _source_db, workspace_db = _make_mounted_repository_with_user_workspace(tmp_path)
+
+    template = mounted.get_manual_descriptive_question_template()
+    template.update({
+        'question_text': '복원성의 의미를 서술하시오.',
+        'model_answer': '기울어진 선박이 원위치로 돌아가려는 성질이다.',
+    })
+    question_id = mounted.create_manual_question(template)
+    stored = ExamRepository(str(workspace_db)).get_question(int(question_id.split('::')[1]))
+
+    assert question_id.startswith('user_workspace::')
+    assert stored['question_type'] == QUESTION_TYPE_DESCRIPTIVE
+    assert stored['model_answer'] == '기울어진 선박이 원위치로 돌아가려는 성질이다.'
+    assert stored['choices'] == []
+
+
+def test_mounted_repository_clones_foreign_mount_question_into_user_workspace(tmp_path):
+    mounted, _source_db, workspace_db = _make_mounted_repository_with_user_workspace(tmp_path)
+
+    template = mounted.get_manual_question_clone_template('maritime_all::1')
+    question_id = mounted.create_manual_question(template)
+    stored = ExamRepository(str(workspace_db)).get_question(int(question_id.split('::')[1]))
+
+    assert template['editor_title'] == '기존 문제 복제'
+    assert template['exam_code'] == f'user_workspace::{MANUAL_EXAM_CODE}'
+    assert template['subject_code'] == f'user_workspace::{MANUAL_SUBJECT_CODE}'
+    assert stored['question_text'] == '복제할 원본 문제'
+    assert [choice['choice_text'] for choice in stored['choices']] == ['가', '나', '사', '아']
 
 
 def test_mounted_repository_namespaces_filter_options_and_questions(tmp_path):

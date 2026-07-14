@@ -13,6 +13,7 @@ from experiments.db_mount_prototype.mount_repo import (
     write_manifest,
 )
 from src.database.repository import ExamRepository
+from src.gui.interface import browser as browser_module
 from src.gui.interface.browser import BrowserInterface
 from src.gui.main import build_question_repository
 from src.parser.question import Choice, Question
@@ -63,6 +64,63 @@ def _mounted_fixture(tmp_path):
     return MountedExamRepository(manifest), first_db, second_db
 
 
+def _mounted_fixture_with_user_workspace(tmp_path):
+    source_db = tmp_path / "source.db"
+    workspace_db = tmp_path / "workspace.db"
+    _make_db(source_db, "기출시험", "기출과목", "기출 문제")
+    ExamRepository(str(workspace_db)).init_database()
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(
+                id="source",
+                label="Source DB",
+                domain="source",
+                path=source_db,
+                read_only=False,
+            ),
+            MountedDatabase(
+                id="user_workspace",
+                label="사용자 작업 DB",
+                domain="user",
+                path=workspace_db,
+                read_only=False,
+            ),
+        ],
+    )
+    return MountedExamRepository(manifest), workspace_db
+
+
+class _AutoAcceptManualEditor:
+    def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+        self.question_data = dict(question_data)
+        self.subject_options = list(subject_options or [])
+        self.create_mode = create_mode
+
+    def exec(self):
+        return True
+
+    def get_data(self):
+        data = dict(self.question_data)
+        data['question_text'] = (
+            'Mounted 서술형 추가'
+            if data.get('question_type') == 'descriptive'
+            else 'Mounted 객관식 추가'
+        )
+        if data.get('question_type') == 'descriptive':
+            data['model_answer'] = 'Mounted 모범답안'
+        else:
+            data['correct_answer'] = 1
+            data['choices'] = [
+                {'choice_number': 1, 'choice_symbol': '㉮', 'choice_text': '정답'},
+                {'choice_number': 2, 'choice_symbol': '㉯', 'choice_text': '오답 1'},
+                {'choice_number': 3, 'choice_symbol': '㉴', 'choice_text': '오답 2'},
+                {'choice_number': 4, 'choice_symbol': '㉵', 'choice_text': '오답 3'},
+            ]
+        return data
+
+
 def test_browser_aggregates_mounted_rows_and_preserves_namespaced_ids(tmp_path):
     repository, _first_db, _second_db = _mounted_fixture(tmp_path)
 
@@ -98,6 +156,43 @@ def test_browser_saves_explanation_to_owning_mount(tmp_path):
     assert ExamRepository(str(second_db)).get_question(1)["explanation"] == "마운트 사용자 해설"
     assert ExamRepository(str(first_db)).get_question(1)["explanation"] is None
 
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_manual_add_uses_mounted_user_workspace(tmp_path, monkeypatch):
+    repository, workspace_db = _mounted_fixture_with_user_workspace(tmp_path)
+    monkeypatch.setattr(browser_module, 'QuestionEditor', _AutoAcceptManualEditor)
+    monkeypatch.setattr(browser_module.InfoBar, 'success', lambda **_kwargs: None)
+    widget = BrowserInterface(repository=repository)
+
+    widget.add_manual_question()
+
+    stored = ExamRepository(str(workspace_db)).get_questions_with_choices(
+        exam_code='personal_questions',
+        limit=None,
+    )
+    assert [question['question_text'] for question in stored] == ['Mounted 객관식 추가']
+    assert widget.examFilter.currentData() == 'user_workspace::personal_questions'
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_descriptive_add_uses_mounted_user_workspace(tmp_path, monkeypatch):
+    repository, workspace_db = _mounted_fixture_with_user_workspace(tmp_path)
+    monkeypatch.setattr(browser_module, 'QuestionEditor', _AutoAcceptManualEditor)
+    monkeypatch.setattr(browser_module.InfoBar, 'success', lambda **_kwargs: None)
+    widget = BrowserInterface(repository=repository)
+
+    widget.add_descriptive_question()
+
+    stored = ExamRepository(str(workspace_db)).get_questions_with_choices(
+        exam_code='personal_questions',
+        limit=None,
+    )
+    assert [question['question_text'] for question in stored] == ['Mounted 서술형 추가']
+    assert stored[0]['model_answer'] == 'Mounted 모범답안'
+    assert widget.examFilter.currentData() == 'user_workspace::personal_questions'
     widget.deleteLater()
     APP.processEvents()
 
