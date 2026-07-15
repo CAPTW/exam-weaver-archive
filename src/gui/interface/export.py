@@ -5,7 +5,8 @@ from datetime import date
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFileDialog, QComboBox, QHBoxLayout, QCheckBox, QSpinBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QButtonGroup, QRadioButton
 )
 from qfluentwidgets import SubtitleLabel, PrimaryPushButton, InfoBar, BodyLabel, PushButton, LineEdit
 
@@ -46,43 +47,45 @@ class ExportInterface(QWidget):
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
         self.vBoxLayout.setSpacing(10)
 
-        self.titleLabel = SubtitleLabel("Export Exam (DOCX)", self)
+        self.titleLabel = SubtitleLabel("시험지 출력 (DOCX)", self)
         self.vBoxLayout.addWidget(self.titleLabel)
 
         self.descLabel = BodyLabel(
-            "Select filters and export questions to a DOCX file.", self
+            "출제 조건과 과목별 문항 수를 선택해 하나의 DOCX 시험지를 만듭니다.", self
         )
         self.vBoxLayout.addWidget(self.descLabel)
+        self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
+        self.vBoxLayout.addWidget(self.repositoryStatusLabel)
 
         # Exam
-        self.examLabel = BodyLabel("Exam", self)
+        self.examLabel = BodyLabel("시험 종류", self)
         self.examFilter = QComboBox()
-        self.examFilter.setPlaceholderText("Select exam")
+        self.examFilter.setPlaceholderText("시험 종류 선택")
         self.examFilter.currentIndexChanged.connect(self.on_exam_changed)
         self.vBoxLayout.addWidget(self.examLabel)
         self.vBoxLayout.addWidget(self.examFilter)
 
         # Year range
-        self.yearRangeLabel = BodyLabel("Year range", self)
+        self.yearRangeLabel = BodyLabel("출제 연도 범위", self)
         self.yearRangeLayout = QHBoxLayout()
         self.yearFromFilter = QComboBox()
-        self.yearFromFilter.setPlaceholderText("From")
+        self.yearFromFilter.setPlaceholderText("시작 연도")
         self.yearToFilter = QComboBox()
-        self.yearToFilter.setPlaceholderText("To")
+        self.yearToFilter.setPlaceholderText("종료 연도")
         self.yearRangeLayout.addWidget(self.yearFromFilter)
         self.yearRangeLayout.addWidget(self.yearToFilter)
         self.vBoxLayout.addWidget(self.yearRangeLabel)
         self.vBoxLayout.addLayout(self.yearRangeLayout)
 
         # Subject
-        self.subjectLabel = BodyLabel("Subject", self)
+        self.subjectLabel = BodyLabel("과목", self)
         self.subjectFilter = QComboBox()
-        self.subjectFilter.setPlaceholderText("All subjects")
+        self.subjectFilter.setPlaceholderText("전체 과목")
         self.vBoxLayout.addWidget(self.subjectLabel)
         self.vBoxLayout.addWidget(self.subjectFilter)
 
         # Hashtag
-        self.tagLabel = BodyLabel("Hashtag", self)
+        self.tagLabel = BodyLabel("해시태그", self)
         self.tagFilter = LineEdit(self)
         self.tagFilter.setPlaceholderText("#계산, #SOLAS")
         self._apply_input_height(self.tagFilter)
@@ -90,31 +93,41 @@ class ExportInterface(QWidget):
         self.vBoxLayout.addWidget(self.tagFilter)
 
         # Random selection count
-        self.randomCountLabel = BodyLabel("Random question count (0 = all)", self)
+        self.randomCountLabel = BodyLabel("무작위 추출 문항 수 (0 = 전체)", self)
         self.randomCountSpin = QSpinBox(self)
         self.randomCountSpin.setRange(0, 1000)
         self.randomCountSpin.setValue(0)
         self.vBoxLayout.addWidget(self.randomCountLabel)
         self.vBoxLayout.addWidget(self.randomCountSpin)
 
-        self.randomSubjectLabel = BodyLabel("Random subjects", self)
-        self.multiExamModeCheck = QCheckBox(
-            "Combine subjects from multiple exams", self
-        )
-        self.multiExamModeCheck.setChecked(False)
+        self.compositionModeLabel = BodyLabel("구성 방식", self)
+        self.compositionModeWidget = QWidget(self)
+        self.compositionModeLayout = QHBoxLayout(self.compositionModeWidget)
+        self.compositionModeLayout.setContentsMargins(0, 0, 0, 0)
+        self.compositionModeLayout.setSpacing(18)
+        self.compositionModeGroup = QButtonGroup(self)
+        self.singleExamModeCheck = QRadioButton("한 시험에서 구성", self)
+        self.multiExamModeCheck = QRadioButton("여러 시험의 과목을 조합", self)
+        self.compositionModeGroup.addButton(self.singleExamModeCheck)
+        self.compositionModeGroup.addButton(self.multiExamModeCheck)
+        self.singleExamModeCheck.setChecked(True)
+        self.compositionModeLayout.addWidget(self.singleExamModeCheck)
+        self.compositionModeLayout.addWidget(self.multiExamModeCheck)
+        self.compositionModeLayout.addStretch(1)
         self.multiExamModeCheck.toggled.connect(
             self._on_multi_exam_mode_changed
         )
+        self.randomSubjectLabel = BodyLabel("과목별 무작위 출제", self)
         self.randomSubjectBulkWidget = QWidget(self)
         self.randomSubjectBulkLayout = QHBoxLayout(self.randomSubjectBulkWidget)
         self.randomSubjectBulkLayout.setContentsMargins(0, 0, 0, 0)
         self.randomSubjectBulkLayout.setSpacing(8)
-        self.allSubjectCountLabel = BodyLabel("All subjects same count", self)
+        self.allSubjectCountLabel = BodyLabel("과목당 문항 수", self)
         self.allSubjectCountSpin = QSpinBox(self)
         self.allSubjectCountSpin.setRange(1, 1000)
         self.allSubjectCountSpin.setValue(25)
         self._apply_input_height(self.allSubjectCountSpin)
-        self.btnApplyAllSubjects = PushButton("Apply to all subjects", self)
+        self.btnApplyAllSubjects = PushButton("전체 과목에 적용", self)
         self._apply_input_height(self.btnApplyAllSubjects)
         self.btnApplyAllSubjects.setFixedWidth(170)
         self.btnApplyAllSubjects.clicked.connect(self._apply_all_subject_count)
@@ -123,7 +136,7 @@ class ExportInterface(QWidget):
         self.randomSubjectBulkLayout.addWidget(self.btnApplyAllSubjects)
         self.randomSubjectBulkLayout.addStretch(1)
         self.subjectSelectionTable = QTableWidget(0, 3, self)
-        self.subjectSelectionTable.setHorizontalHeaderLabels(["Use", "Subject", "Questions"])
+        self.subjectSelectionTable.setHorizontalHeaderLabels(["사용", "과목", "문항 수"])
         self.subjectSelectionTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.subjectSelectionTable.setColumnWidth(0, 70)
         self.subjectSelectionTable.setColumnWidth(2, 120)
@@ -133,19 +146,22 @@ class ExportInterface(QWidget):
         self.subjectSelectionTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.subjectSelectionTable.setSelectionMode(QAbstractItemView.NoSelection)
         self.subjectSelectionRows = []
+        self.vBoxLayout.addWidget(self.compositionModeLabel)
+        self.vBoxLayout.addWidget(self.compositionModeWidget)
         self.vBoxLayout.addWidget(self.randomSubjectLabel)
-        self.vBoxLayout.addWidget(self.multiExamModeCheck)
         self.vBoxLayout.addWidget(self.randomSubjectBulkWidget)
         self.vBoxLayout.addWidget(self.subjectSelectionTable)
+        self.selectionSummaryLabel = BodyLabel("선택 0과목 · 예상 0문항", self)
+        self.vBoxLayout.addWidget(self.selectionSummaryLabel)
 
         # Choice shuffle
-        self.shuffleChoices = QCheckBox("Shuffle 4-choice options", self)
+        self.shuffleChoices = QCheckBox("4지선다 선지 순서 섞기", self)
         self.vBoxLayout.addWidget(self.shuffleChoices)
 
         self.vBoxLayout.addStretch(1)
 
         # Export Button
-        self.btnExport = PrimaryPushButton("Export", self)
+        self.btnExport = PrimaryPushButton("DOCX로 내보내기", self)
         self.btnExport.clicked.connect(self.export_docx)
         self.vBoxLayout.addWidget(self.btnExport)
 
@@ -163,6 +179,7 @@ class ExportInterface(QWidget):
 
     def load_options(self):
         options = self.repo.get_filter_options()
+        self._update_repository_status(options)
         self.examOptions = [dict(exam) for exam in options.get('exams', [])]
         self.examOptionsByCode = {
             exam['code']: exam
@@ -192,10 +209,23 @@ class ExportInterface(QWidget):
         # Subjects (based on selected exam)
         self.on_exam_changed()
 
+    def _update_repository_status(self, options):
+        labels = []
+        for exam in options.get('exams', []):
+            label = str(exam.get('mount_label') or '').strip()
+            if label and label not in labels:
+                labels.append(label)
+        if labels:
+            self.repositoryStatusLabel.setText(
+                f"연결된 문제은행: {', '.join(labels)}"
+            )
+        else:
+            self.repositoryStatusLabel.setText("현재 문제은행: 기본 문제은행")
+
     def on_exam_changed(self):
         exam_code = self.examFilter.currentData()
         self.subjectFilter.clear()
-        self.subjectFilter.addItem("All subjects", None)
+        self.subjectFilter.addItem("전체 과목", None)
         subjects = self.repo.get_subject_options(exam_code)
         for subject in subjects:
             self.subjectFilter.addItem(
@@ -213,14 +243,20 @@ class ExportInterface(QWidget):
         self.examFilter.setEnabled(not multi_exam)
         self.subjectFilter.setEnabled(not multi_exam)
         self.randomCountSpin.setEnabled(not multi_exam)
+        disabled_reason = (
+            "여러 시험 조합에서는 아래 표에서 시험과 과목을 선택합니다."
+            if multi_exam else ""
+        )
+        for widget in (self.examFilter, self.subjectFilter, self.randomCountSpin):
+            widget.setToolTip(disabled_reason)
         self._rebuild_subject_selection_rows()
 
     def _configure_subject_selection_table(self, multi_exam):
         self.subjectSelectionTable.clear()
         headers = (
-            ["Use", "Database", "Exam", "Subject", "Questions"]
+            ["사용", "문제은행", "시험 종류", "과목", "문항 수"]
             if multi_exam
-            else ["Use", "Subject", "Questions"]
+            else ["사용", "과목", "문항 수"]
         )
         self.subjectSelectionTable.setColumnCount(len(headers))
         self.subjectSelectionTable.setHorizontalHeaderLabels(headers)
@@ -244,6 +280,7 @@ class ExportInterface(QWidget):
             for exam in self.__dict__.get('examOptions', []):
                 for subject in self.repo.get_subject_options(exam['code']):
                     self._add_subject_selection_row(subject, exam, True)
+            self._update_selection_summary()
             return
 
         exam_code = self.examFilter.currentData()
@@ -253,6 +290,7 @@ class ExportInterface(QWidget):
             subjects = self.repo.get_subject_options(exam_code)
         for subject in subjects:
             self._add_subject_selection_row(subject, exam, False)
+        self._update_selection_summary()
 
     def _add_subject_selection_row(self, subject, exam=None, multi_exam=False):
         row = self.subjectSelectionTable.rowCount()
@@ -304,6 +342,24 @@ class ExportInterface(QWidget):
             'checkbox': checkbox,
             'count_spin': count_spin,
         })
+        checkbox.toggled.connect(self._update_selection_summary)
+        count_spin.valueChanged.connect(self._update_selection_summary)
+
+    def _update_selection_summary(self, *_args):
+        label = self.__dict__.get('selectionSummaryLabel')
+        if label is None:
+            return
+        selected = 0
+        total = 0
+        for row in self.__dict__.get('subjectSelectionRows', []):
+            checkbox = row.get('checkbox')
+            count_spin = row.get('count_spin')
+            if checkbox and checkbox.isChecked():
+                selected += 1
+                total += int(count_spin.value()) if count_spin else 0
+        label.setText(
+            f"선택 {selected}과목 · 예상 {total}문항"
+        )
 
     @staticmethod
     def _plain_exam_label(exam):
@@ -372,7 +428,7 @@ class ExportInterface(QWidget):
 
     def _build_multi_exam_title(self, today=None):
         today = today or date.today()
-        return f"{today:%Y.%m.%d} Multi-exam mock exam"
+        return f"{today:%Y.%m.%d} 여러 시험 통합 모의고사"
 
     def _build_multi_exam_filename(self, year_from, year_to, total_count):
         year_part = (
@@ -440,6 +496,7 @@ class ExportInterface(QWidget):
                 checkbox.setChecked(True)
             if count_spin:
                 count_spin.setValue(count)
+        self._update_selection_summary()
 
     def _get_filtered_unique_questions(
         self,
@@ -482,35 +539,32 @@ class ExportInterface(QWidget):
             or (not multi_exam_mode and not exam_code)
         ):
             InfoBar.error(
-                title="Missing options",
-                content="Please select exam and year range.",
+                title="출제 조건 확인 필요",
+                content="시험 종류와 출제 연도 범위를 선택해 주세요.",
                 parent=self
             )
             return
 
         if year_from > year_to:
             InfoBar.error(
-                title="Invalid year range",
-                content="Start year must be less than or equal to end year.",
+                title="출제 연도 입력 오류",
+                content="시작 연도는 종료 연도보다 작거나 같아야 합니다.",
                 parent=self
             )
             return
 
         if invalid_subjects:
             InfoBar.error(
-                title="Invalid random count",
-                content=f"Set a question count greater than 0 for: {', '.join(invalid_subjects)}.",
+                title="문항 수 입력 오류",
+                content=f"다음 과목의 문항 수를 1 이상으로 지정해 주세요: {', '.join(invalid_subjects)}",
                 parent=self
             )
             return
 
         if multi_exam_mode and not subject_requests:
             InfoBar.error(
-                title="No subjects selected",
-                content=(
-                    "Select at least one exam subject and set its question "
-                    "count."
-                ),
+                title="과목 선택 필요",
+                content="시험지에 포함할 과목을 하나 이상 선택하고 문항 수를 지정해 주세요.",
                 parent=self,
             )
             return
@@ -548,10 +602,10 @@ class ExportInterface(QWidget):
                 )
                 if request['count'] > available_count:
                     InfoBar.error(
-                        title="Not enough questions",
+                        title="출제 가능 문항 부족",
                         content=(
-                            f"{request_label}: requested {request['count']}, "
-                            f"but only {available_count} valid unique questions available."
+                            f"{request_label}: 요청 {request['count']}문항 / "
+                            f"사용 가능 {available_count}문항입니다. 조건이나 문항 수를 조정해 주세요."
                         ),
                         parent=self
                     )
@@ -565,11 +619,10 @@ class ExportInterface(QWidget):
                     )
                 except ValueError:
                     InfoBar.error(
-                        title="Not enough questions",
+                        title="출제 가능 문항 부족",
                         content=(
-                            f"{request_label}: requested {request['count']}, "
-                            f"but group-aware selection could not be filled from "
-                            f"{available_count} valid unique questions."
+                            f"{request_label}: 묶음 문항을 유지하면 요청 {request['count']}문항을 "
+                            f"구성할 수 없습니다. 사용 가능 문항은 {available_count}개입니다."
                         ),
                         parent=self
                     )
@@ -582,8 +635,8 @@ class ExportInterface(QWidget):
                 })
         elif random_count > 0 and not subject_code:
             InfoBar.error(
-                title="Subject required",
-                content="Select a subject for random extraction.",
+                title="과목 선택 필요",
+                content="무작위 추출에 사용할 과목을 선택해 주세요.",
                 parent=self
             )
             return
@@ -603,8 +656,11 @@ class ExportInterface(QWidget):
                 available_count = count_group_aware_questions(questions)
                 if random_count > available_count:
                     InfoBar.error(
-                        title="Not enough questions",
-                        content=f"Requested {random_count}, but only {available_count} valid unique questions available.",
+                        title="출제 가능 문항 부족",
+                        content=(
+                            f"요청 {random_count}문항 / 사용 가능 {available_count}문항입니다. "
+                            "조건이나 문항 수를 조정해 주세요."
+                        ),
                         parent=self
                     )
                     return
@@ -612,10 +668,10 @@ class ExportInterface(QWidget):
                     questions = self._sample_questions(questions, random_count)
                 except ValueError:
                     InfoBar.error(
-                        title="Not enough questions",
+                        title="출제 가능 문항 부족",
                         content=(
-                            f"Requested {random_count}, but group-aware selection "
-                            f"could not be filled from {available_count} valid unique questions."
+                            f"묶음 문항을 유지하면 요청 {random_count}문항을 구성할 수 없습니다. "
+                            f"사용 가능 문항은 {available_count}개입니다."
                         ),
                         parent=self
                     )
@@ -623,8 +679,8 @@ class ExportInterface(QWidget):
 
         if not questions:
             InfoBar.warning(
-                title="No results",
-                content="No questions found for the selected options.",
+                title="조건에 맞는 문제 없음",
+                content="출제 연도 범위, 과목 또는 해시태그 조건을 조정해 주세요.",
                 parent=self
             )
             return
@@ -648,7 +704,7 @@ class ExportInterface(QWidget):
                 exam_code, year_from, year_to, subject_code, random_count
             )
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save file", filename, "Word Documents (*.docx)"
+            self, "DOCX 시험지 저장", filename, "DOCX 문서 (*.docx)"
         )
 
         if file_path:
@@ -676,15 +732,15 @@ class ExportInterface(QWidget):
                 )
 
                 InfoBar.success(
-                    title="Export complete",
-                    content=f"Saved: {file_path}",
+                    title="내보내기 완료",
+                    content=f"DOCX 시험지를 저장했습니다: {file_path}",
                     parent=self,
                     duration=3000
                 )
             except Exception as e:
                 InfoBar.error(
-                    title="Export failed",
-                    content=str(e),
+                    title="내보내기 실패",
+                    content=f"DOCX 시험지를 저장하지 못했습니다. {e}",
                     parent=self
                 )
 

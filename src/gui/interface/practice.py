@@ -184,11 +184,14 @@ class PracticeInterface(QWidget):
             self,
         )
         layout.addWidget(desc)
+        self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
+        layout.addWidget(self.repositoryStatusLabel)
 
         self.examFilter = QComboBox(self)
         self.examFilter.currentIndexChanged.connect(self.on_exam_changed)
         self._apply_combo_item_height(self.examFilter)
-        layout.addWidget(BodyLabel("시험", self))
+        self.examLabel = BodyLabel("시험 종류", self)
+        layout.addWidget(self.examLabel)
         layout.addWidget(self.examFilter)
 
         yearLayout = QHBoxLayout()
@@ -198,14 +201,16 @@ class PracticeInterface(QWidget):
         self._apply_combo_item_height(self.yearToFilter)
         yearLayout.addWidget(self.yearFromFilter)
         yearLayout.addWidget(self.yearToFilter)
-        layout.addWidget(BodyLabel("연도 범위", self))
+        self.yearRangeLabel = BodyLabel("출제 연도 범위", self)
+        layout.addWidget(self.yearRangeLabel)
         layout.addLayout(yearLayout)
 
         self.tagFilter = QComboBox(self)
         self.tagFilter.setEditable(True)
         self.tagFilter.setPlaceholderText("#계산, #SOLAS")
         self._apply_combo_item_height(self.tagFilter)
-        layout.addWidget(BodyLabel("태그 필터", self))
+        self.tagFilterLabel = BodyLabel("해시태그 필터", self)
+        layout.addWidget(self.tagFilterLabel)
         layout.addWidget(self.tagFilter)
 
         bulkWidget = QWidget(self)
@@ -398,6 +403,7 @@ class PracticeInterface(QWidget):
 
     def load_options(self):
         options = self.repo.get_filter_options()
+        self._update_repository_status(options)
 
         self.examFilter.blockSignals(True)
         self.examFilter.clear()
@@ -422,6 +428,19 @@ class PracticeInterface(QWidget):
             self.yearToFilter.setCurrentIndex(len(years) - 1)
 
         self.on_exam_changed()
+
+    def _update_repository_status(self, options):
+        labels = []
+        for exam in options.get("exams", []):
+            label = str(exam.get("mount_label") or "").strip()
+            if label and label not in labels:
+                labels.append(label)
+        if labels:
+            self.repositoryStatusLabel.setText(
+                f"연결된 문제은행: {', '.join(labels)}"
+            )
+        else:
+            self.repositoryStatusLabel.setText("현재 문제은행: 기본 문제은행")
 
     @staticmethod
     def _exam_label(exam):

@@ -53,11 +53,14 @@ class BrowserInterface(QWidget):
     def init_ui(self):
         # Header
         self.headerLayout = QHBoxLayout()
-        self.searchLayout = QHBoxLayout()
+        self.searchRowWidget = QWidget(self)
+        self.searchLayout = QHBoxLayout(self.searchRowWidget)
+        self.searchLayout.setContentsMargins(0, 0, 0, 0)
         self.titleLabel = SubtitleLabel("문제 관리", self)
+        self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
         
         # Filters
-        self.examFilterLabel = BodyLabel("EXAM", self)
+        self.examFilterLabel = BodyLabel("시험 종류", self)
         self.examFilterLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.examFilterLabel.setMinimumWidth(44)
 
@@ -65,7 +68,7 @@ class BrowserInterface(QWidget):
         self.examFilter.setPlaceholderText("시험 선택")
         self._apply_combo_item_height(self.examFilter)
 
-        self.subjectFilterLabel = BodyLabel("SUBJECT", self)
+        self.subjectFilterLabel = BodyLabel("과목", self)
         self.subjectFilterLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.subjectFilterLabel.setMinimumWidth(64)
 
@@ -77,7 +80,7 @@ class BrowserInterface(QWidget):
         self.subjectFilter.currentIndexChanged.connect(lambda *_: self.load_data())
         
         self.searchBox = LineEdit()
-        self.searchBox.setPlaceholderText("태그/문항/선지 검색...")
+        self.searchBox.setPlaceholderText("해시태그 또는 문제 내용 검색")
         self.searchBox.setMinimumWidth(320)
         self.searchBox.returnPressed.connect(self.load_data)
         
@@ -88,17 +91,18 @@ class BrowserInterface(QWidget):
         self.btnAddManual.setToolTip("개인이 만든 문제를 수동으로 추가")
         self.btnAddManual.clicked.connect(self.add_manual_question)
 
-        self.btnAddDescriptive = PushButton("서술형 추가", self)
+        self.btnAddDescriptive = PushButton("서술형 문제 추가", self)
         self.btnAddDescriptive.setToolTip("문제와 모범답안으로 구성된 서술형 문제 추가")
         self.btnAddDescriptive.clicked.connect(self.add_descriptive_question)
 
         self.btnValidate = PrimaryPushButton("오류 검사", self)
         self.btnValidate.clicked.connect(self.load_validation_results)
 
-        self.btnDeleteSelected = PushButton("선택 삭제", self)
+        self.btnDeleteSelected = PushButton("선택 문제 삭제", self)
         self.btnDeleteSelected.clicked.connect(self.delete_selected_questions)
 
         self.headerLayout.addWidget(self.titleLabel)
+        self.headerLayout.addWidget(self.repositoryStatusLabel)
         self.headerLayout.addStretch(1)
         self.headerLayout.addWidget(self.examFilterLabel)
         self.headerLayout.addWidget(self.examFilter)
@@ -115,7 +119,7 @@ class BrowserInterface(QWidget):
         # Table
         self.table = TableWidget(self)
         self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["선택", "ID", "정보", "문제", "태그", "관리"])
+        self.table.setHorizontalHeaderLabels(["선택", "ID", "정보", "문제", "해시태그", "관리"])
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 54)
         self.table.setColumnWidth(1, 70)
@@ -127,7 +131,7 @@ class BrowserInterface(QWidget):
 
         # Layout
         self.vBoxLayout.addLayout(self.headerLayout)
-        self.vBoxLayout.addLayout(self.searchLayout)
+        self.vBoxLayout.addWidget(self.searchRowWidget)
         self.vBoxLayout.addWidget(self.table)
 
     def _init_explanation_sidecar(self):
@@ -210,10 +214,12 @@ class BrowserInterface(QWidget):
 
     def _load_exam_filters(self):
         current_code = self.examFilter.currentData()
+        options = self.repo.get_filter_options()
+        self._update_repository_status(options)
         self.examFilter.blockSignals(True)
         self.examFilter.clear()
         self.examFilter.addItem("전체 시험", None)
-        for exam in self.repo.get_filter_options().get('exams', []):
+        for exam in options.get('exams', []):
             prefix = f"{exam['mount_label']} · " if exam.get('mount_label') else ""
             self.examFilter.addItem(
                 f"{prefix}{exam['name']} ({exam.get('local_code') or exam['code']})",
@@ -225,6 +231,19 @@ class BrowserInterface(QWidget):
             if index >= 0:
                 self.examFilter.setCurrentIndex(index)
         self.examFilter.blockSignals(False)
+
+    def _update_repository_status(self, options):
+        labels = []
+        for exam in options.get('exams', []):
+            label = str(exam.get('mount_label') or '').strip()
+            if label and label not in labels:
+                labels.append(label)
+        if labels:
+            self.repositoryStatusLabel.setText(
+                f"연결된 문제은행: {', '.join(labels)}"
+            )
+        else:
+            self.repositoryStatusLabel.setText("현재 문제은행: 기본 문제은행")
 
     def _load_subject_filters(self):
         current_code = self.subjectFilter.currentData()
@@ -259,7 +278,7 @@ class BrowserInterface(QWidget):
         
     def load_data(self):
         self.validation_mode = False
-        self.table.setHorizontalHeaderLabels(["선택", "ID", "정보", "문제", "태그", "관리"])
+        self.table.setHorizontalHeaderLabels(["선택", "ID", "정보", "문제", "해시태그", "관리"])
         if self.examFilter.count() == 0:
             self._load_exam_filters()
         if self.subjectFilter.count() == 0:
@@ -403,7 +422,7 @@ class BrowserInterface(QWidget):
         if not updated:
             InfoBar.error(
                 title='오류',
-                content="DB 업데이트 실패",
+                content="문제은행에서 문제를 수정하지 못했습니다.",
                 parent=self
             )
             return
@@ -456,7 +475,7 @@ class BrowserInterface(QWidget):
         else:
             InfoBar.error(
                 title='추가 실패',
-                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                content="같은 연도/회차/문제번호가 이미 있거나 문제은행에 저장하지 못했습니다.",
                 parent=self
             )
 
@@ -490,7 +509,7 @@ class BrowserInterface(QWidget):
         else:
             InfoBar.error(
                 title='추가 실패',
-                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                content="같은 연도/회차/문제번호가 이미 있거나 문제은행에 저장하지 못했습니다.",
                 parent=self
             )
 
@@ -533,7 +552,7 @@ class BrowserInterface(QWidget):
         else:
             InfoBar.error(
                 title='복제 실패',
-                content="같은 연도/회차/문제번호가 이미 있거나 DB 저장에 실패했습니다.",
+                content="같은 연도/회차/문제번호가 이미 있거나 문제은행에 저장하지 못했습니다.",
                 parent=self
             )
 
@@ -687,7 +706,7 @@ class BrowserInterface(QWidget):
         else:
             InfoBar.error(
                 title='삭제 실패',
-                content="DB 삭제 실패",
+                content="문제은행에서 문제를 삭제하지 못했습니다.",
                 parent=self
             )
 

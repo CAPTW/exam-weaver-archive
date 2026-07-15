@@ -38,8 +38,13 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
     ], sample_metadata)
     widget = BrowserInterface(repo.db_path)
 
-    assert widget.examFilterLabel.text() == 'EXAM'
-    assert widget.subjectFilterLabel.text() == 'SUBJECT'
+    assert widget.examFilterLabel.text() == '시험 종류'
+    assert widget.subjectFilterLabel.text() == '과목'
+    assert widget.searchBox.placeholderText() == '해시태그 또는 문제 내용 검색'
+    assert widget.vBoxLayout.indexOf(widget.searchRowWidget) >= 0
+    assert widget.btnAddDescriptive.text() == '서술형 문제 추가'
+    assert widget.btnDeleteSelected.text() == '선택 문제 삭제'
+    assert '문제은행' in widget.repositoryStatusLabel.text()
 
     exam_index = widget.examFilter.findData('3급기관사')
     assert exam_index >= 0

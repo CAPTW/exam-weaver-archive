@@ -238,6 +238,43 @@ def test_export_interface_uses_injected_repository_with_mount_labels():
     APP.processEvents()
 
 
+def test_export_interface_exposes_two_korean_composition_modes():
+    widget = ExportInterface(repository=_MultiExamRepository())
+
+    assert widget.titleLabel.text() == "시험지 출력 (DOCX)"
+    assert widget.singleExamModeCheck.text() == "한 시험에서 구성"
+    assert widget.multiExamModeCheck.text() == "여러 시험의 과목을 조합"
+    assert widget.singleExamModeCheck.isChecked()
+    assert widget._is_multi_exam_mode() is False
+
+    widget.multiExamModeCheck.setChecked(True)
+    APP.processEvents()
+
+    assert widget._is_multi_exam_mode() is True
+    assert widget.subjectSelectionTable.horizontalHeaderItem(1).text() == "문제은행"
+    assert widget.subjectSelectionTable.horizontalHeaderItem(2).text() == "시험 종류"
+    assert widget.btnExport.text() == "DOCX로 내보내기"
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_export_selection_summary_counts_checked_rows():
+    widget = ExportInterface(repository=_MultiExamRepository())
+    widget.multiExamModeCheck.setChecked(True)
+    APP.processEvents()
+    first = widget.subjectSelectionRows[0]
+
+    first['checkbox'].setChecked(True)
+    first['count_spin'].setValue(7)
+    APP.processEvents()
+
+    assert widget.selectionSummaryLabel.text() == "선택 1과목 · 예상 7문항"
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_export_interface_set_repository_refreshes_filters_and_validator():
     class FilterRepositoryStub:
         def __init__(self, mount_id, mount_label, exam_name):
@@ -284,7 +321,7 @@ def test_multi_exam_mode_lists_subjects_from_every_exam():
     assert [
         interface.subjectSelectionTable.horizontalHeaderItem(index).text()
         for index in range(5)
-    ] == ['Use', 'Database', 'Exam', 'Subject', 'Questions']
+    ] == ['사용', '문제은행', '시험 종류', '과목', '문항 수']
     assert [row['exam_code'] for row in interface.subjectSelectionRows] == [
         'first::engineer',
         'second::navigation',
@@ -336,7 +373,7 @@ def test_multi_exam_title_and_filename_are_namespace_safe():
     interface = ExportInterface.__new__(ExportInterface)
 
     assert interface._build_multi_exam_title(date(2026, 7, 16)) == (
-        '2026.07.16 Multi-exam mock exam'
+        '2026.07.16 여러 시험 통합 모의고사'
     )
     assert interface._build_multi_exam_filename(2020, 2025, 50) == (
         'multi_exam_2020-2025_rand50.docx'
@@ -347,7 +384,7 @@ def test_export_interface_initializes_all_subject_bulk_controls(repo):
     interface = ExportInterface(repo.db_path)
 
     assert interface.allSubjectCountSpin.value() == 25
-    assert interface.btnApplyAllSubjects.text() == "Apply to all subjects"
+    assert interface.btnApplyAllSubjects.text() == "전체 과목에 적용"
     interface.deleteLater()
     APP.processEvents()
 
@@ -680,7 +717,7 @@ def test_export_docx_combines_subjects_from_different_exams(monkeypatch):
         'First DB · Engineer Exam · Engine 1',
         'Second DB · Navigation Exam · Navigation 1',
     ]
-    assert captured['title'].endswith('Multi-exam mock exam')
+    assert captured['title'].endswith('여러 시험 통합 모의고사')
 
 
 def test_multi_exam_export_requires_at_least_one_selected_subject(monkeypatch):
@@ -711,7 +748,7 @@ def test_multi_exam_export_requires_at_least_one_selected_subject(monkeypatch):
 
     interface.export_docx()
 
-    assert errors[0]['title'] == 'No subjects selected'
+    assert errors[0]['title'] == '과목 선택 필요'
 
 
 def test_multi_exam_export_reports_full_section_when_unique_is_insufficient(
@@ -1224,4 +1261,4 @@ def test_export_docx_requires_positive_count_for_selected_random_subject(monkeyp
 
     interface.export_docx()
 
-    assert errors[0]['title'] == "Invalid random count"
+    assert errors[0]['title'] == "문항 수 입력 오류"

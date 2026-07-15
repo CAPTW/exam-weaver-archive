@@ -28,6 +28,18 @@ def _select_subject(widget, subject_code, count):
     raise AssertionError(f"subject not found: {subject_code}")
 
 
+def test_practice_setup_uses_problem_bank_and_hashtag_language(repo):
+    widget = PracticeInterface(repo.db_path)
+
+    assert "문제은행" in widget.repositoryStatusLabel.text()
+    assert widget.examLabel.text() == "시험 종류"
+    assert widget.yearRangeLabel.text() == "출제 연도 범위"
+    assert widget.tagFilterLabel.text() == "해시태그 필터"
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_evaluate_answers_scores_by_question_and_subject(sample_question, repo, sample_metadata):
     repo.save_questions([sample_question], sample_metadata)
     question = repo.get_questions_with_choices(exam_code="3급기관사", limit=1)[0]
