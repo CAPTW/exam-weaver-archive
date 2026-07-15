@@ -8,6 +8,7 @@ datas = [
     ('src\\database\\seed.sql', 'src\\database'),
     ('src\\parser\\tessdata\\*.traineddata', 'src\\parser\\tessdata'),
     ('assets\\icons\\exam_generator_icon.ico', 'assets\\icons'),
+    ('assets\\language_packs\\menu\\*.json', 'assets\\language_packs\\menu'),
     ('assets\\mathjax\\tex-mml-svg.js', 'assets\\mathjax'),
     ('assets\\mathjax\\LICENSE', 'assets\\mathjax'),
 ]
