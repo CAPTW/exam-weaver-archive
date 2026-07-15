@@ -61,6 +61,47 @@ def _subject_request(code, name, count, checked=True):
     }
 
 
+class _MultiExamRepository:
+    def get_filter_options(self):
+        return {
+            'exams': [
+                {
+                    'code': 'first::engineer',
+                    'local_code': 'engineer',
+                    'name': 'Engineer Exam',
+                    'mount_label': 'First DB',
+                },
+                {
+                    'code': 'second::navigation',
+                    'local_code': 'navigation',
+                    'name': 'Navigation Exam',
+                    'mount_label': 'Second DB',
+                },
+            ],
+            'years': [2024, 2025],
+        }
+
+    def get_subject_options(self, exam_code):
+        return {
+            'first::engineer': [
+                {
+                    'code': 'first::engine1',
+                    'local_code': 'engine1',
+                    'name_ko': 'Engine 1',
+                    'mount_label': 'First DB',
+                },
+            ],
+            'second::navigation': [
+                {
+                    'code': 'second::nav1',
+                    'local_code': 'nav1',
+                    'name_ko': 'Navigation 1',
+                    'mount_label': 'Second DB',
+                },
+            ],
+        }[exam_code]
+
+
 def test_build_title_matches_reference_docx_header():
     interface = ExportInterface.__new__(ExportInterface)
 
@@ -177,6 +218,32 @@ def test_export_interface_set_repository_refreshes_filters_and_validator():
     assert interface.validator.repository is second
     assert interface.examFilter.itemData(0) == 'second::exam'
     assert interface.examFilter.itemText(0) == '두 번째 DB · 두 번째 시험 (exam)'
+
+    interface.deleteLater()
+    APP.processEvents()
+
+
+def test_multi_exam_mode_lists_subjects_from_every_exam():
+    interface = ExportInterface(repository=_MultiExamRepository())
+
+    interface.multiExamModeCheck.setChecked(True)
+
+    assert interface.subjectSelectionTable.columnCount() == 5
+    assert [
+        interface.subjectSelectionTable.horizontalHeaderItem(index).text()
+        for index in range(5)
+    ] == ['Use', 'Database', 'Exam', 'Subject', 'Questions']
+    assert [row['exam_code'] for row in interface.subjectSelectionRows] == [
+        'first::engineer',
+        'second::navigation',
+    ]
+    assert [row['subject_code'] for row in interface.subjectSelectionRows] == [
+        'first::engine1',
+        'second::nav1',
+    ]
+    assert not interface.examFilter.isEnabled()
+    assert not interface.subjectFilter.isEnabled()
+    assert not interface.randomCountSpin.isEnabled()
 
     interface.deleteLater()
     APP.processEvents()
