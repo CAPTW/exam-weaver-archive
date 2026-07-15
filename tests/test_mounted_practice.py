@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication
+import pytest
 
 from experiments.db_mount_prototype.mount_repo import (
     MountedDatabase,
@@ -184,6 +186,33 @@ def test_practice_interface_keeps_quiz_state_when_result_save_fails(tmp_path, mo
     assert widget.results_revealed is False
     assert widget.answers == answers_before
     assert "workspace write failed" in errors[0]["content"]
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_actual_manifest_exams_are_visible_in_practice_dropdown():
+    manifest = Path(__file__).resolve().parents[1] / "data" / "domain_dbs" / "mount_manifest.json"
+    if not manifest.is_file():
+        pytest.skip("source checkout has no mounted DB manifest")
+    repository = MountedExamRepository(manifest)
+    try:
+        expected_codes = {
+            exam["code"]
+            for exam in repository.get_filter_options().get("exams", [])
+        }
+    except (FileNotFoundError, OSError):
+        pytest.skip("mounted DB files are not available in this checkout")
+
+    widget = PracticeInterface(repository=repository)
+    actual_codes = {
+        widget.examFilter.itemData(index)
+        for index in range(widget.examFilter.count())
+    }
+
+    assert expected_codes
+    assert actual_codes == expected_codes
+    assert any(code.startswith("Maritime::") for code in actual_codes)
 
     widget.deleteLater()
     APP.processEvents()

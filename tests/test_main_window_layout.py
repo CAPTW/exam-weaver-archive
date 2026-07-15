@@ -47,6 +47,16 @@ def test_practice_interface_is_registered_in_main_window():
     assert "PracticeInterface" in gui_main.PracticeInterface.__name__
 
 
+def test_main_window_passes_and_refreshes_question_repository_for_practice():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert (
+        "PracticeInterface(self.db_path, self, repository=question_repository)"
+        in source
+    )
+    assert "self.practice_interface.set_repository(repository)" in source
+
+
 def test_codex_toggle_navigation_is_declared():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 

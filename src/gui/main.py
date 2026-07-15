@@ -143,7 +143,7 @@ class MainWindow(FluentWindow):
         # Interfaces
         self.home_interface = HomeInterface(self)
         self.browser_interface = BrowserInterface(self.db_path, self, repository=question_repository)
-        self.practice_interface = PracticeInterface(self.db_path, self)
+        self.practice_interface = PracticeInterface(self.db_path, self, repository=question_repository)
         self.export_interface = ExportInterface(self.db_path, self)
         self.import_interface = ImportInterface(self.db_path, self)
         self.db_mount_interface = DbMountInterface(BASE_DIR, self, db_path=self.db_path)
@@ -164,6 +164,7 @@ class MainWindow(FluentWindow):
         )
         self.question_repository_error = error
         self.browser_interface.set_repository(repository)
+        self.practice_interface.set_repository(repository)
         if error:
             self._show_question_repository_error()
 
