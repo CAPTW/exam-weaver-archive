@@ -370,8 +370,28 @@ class ExportInterface(QWidget):
         )
         return f"{today:%Y.%m.%d} {exam_name} 모의고사"
 
+    def _build_multi_exam_title(self, today=None):
+        today = today or date.today()
+        return f"{today:%Y.%m.%d} Multi-exam mock exam"
+
+    def _build_multi_exam_filename(self, year_from, year_to, total_count):
+        year_part = (
+            str(year_from)
+            if year_from == year_to
+            else f"{year_from}-{year_to}"
+        )
+        return f"multi_exam_{year_part}_rand{total_count}.docx"
+
     def _format_exam_name_for_title(self, exam_name):
         return re.sub(r"(?<=\d급)(?=\S)", " ", exam_name or "", count=1)
+
+    @staticmethod
+    def _selection_section_title(mount_label, exam_name, subject_name):
+        parts = [
+            str(value or '').strip()
+            for value in (mount_label, exam_name, subject_name)
+        ]
+        return " · ".join(part for part in parts if part)
 
     def _selected_random_subject_requests(self):
         requests = []
@@ -382,14 +402,32 @@ class ExportInterface(QWidget):
             if not checkbox or not checkbox.isChecked():
                 continue
             count = int(count_spin.value()) if count_spin else 0
+            section_title = self._selection_section_title(
+                row.get('mount_label'),
+                row.get('exam_name'),
+                row.get('subject_name'),
+            )
             if count <= 0:
-                invalid.append(row.get('name') or row.get('code'))
+                invalid.append(
+                    section_title
+                    if row.get('multi_exam')
+                    else row.get('name') or row.get('code')
+                )
                 continue
-            requests.append({
-                'code': row['code'],
-                'name': row['name'],
-                'count': count,
-            })
+            if row.get('multi_exam'):
+                requests.append({
+                    'exam_code': row['exam_code'],
+                    'code': row['subject_code'],
+                    'name': row['subject_name'],
+                    'section_title': section_title,
+                    'count': count,
+                })
+            else:
+                requests.append({
+                    'code': row['code'],
+                    'name': row['name'],
+                    'count': count,
+                })
         return requests, invalid
 
     def _apply_all_subject_count(self, count=None):

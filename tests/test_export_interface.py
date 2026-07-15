@@ -1,4 +1,5 @@
 import os
+from datetime import date
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -247,6 +248,48 @@ def test_multi_exam_mode_lists_subjects_from_every_exam():
 
     interface.deleteLater()
     APP.processEvents()
+
+
+def test_multi_exam_selected_requests_keep_section_identity():
+    interface = ExportInterface(repository=_MultiExamRepository())
+    interface.multiExamModeCheck.setChecked(True)
+    for row, count in zip(interface.subjectSelectionRows, (2, 3)):
+        row['checkbox'].setChecked(True)
+        row['count_spin'].setValue(count)
+
+    requests, invalid = interface._selected_random_subject_requests()
+
+    assert invalid == []
+    assert requests == [
+        {
+            'exam_code': 'first::engineer',
+            'code': 'first::engine1',
+            'name': 'Engine 1',
+            'section_title': 'First DB · Engineer Exam · Engine 1',
+            'count': 2,
+        },
+        {
+            'exam_code': 'second::navigation',
+            'code': 'second::nav1',
+            'name': 'Navigation 1',
+            'section_title': 'Second DB · Navigation Exam · Navigation 1',
+            'count': 3,
+        },
+    ]
+
+    interface.deleteLater()
+    APP.processEvents()
+
+
+def test_multi_exam_title_and_filename_are_namespace_safe():
+    interface = ExportInterface.__new__(ExportInterface)
+
+    assert interface._build_multi_exam_title(date(2026, 7, 16)) == (
+        '2026.07.16 Multi-exam mock exam'
+    )
+    assert interface._build_multi_exam_filename(2020, 2025, 50) == (
+        'multi_exam_2020-2025_rand50.docx'
+    )
 
 
 def test_export_interface_initializes_all_subject_bulk_controls(repo):
