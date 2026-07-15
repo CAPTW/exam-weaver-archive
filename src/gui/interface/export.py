@@ -53,7 +53,7 @@ class ExportInterface(QScrollArea):
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
         self.vBoxLayout.setSpacing(10)
 
-        self.titleLabel = SubtitleLabel("시험지 출력 (DOCX)", self)
+        self.titleLabel = SubtitleLabel("모의고사 출력 (DOCX)", self)
         self.vBoxLayout.addWidget(self.titleLabel)
 
         self.descLabel = BodyLabel(

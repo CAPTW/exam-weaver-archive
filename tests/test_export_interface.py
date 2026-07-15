@@ -242,7 +242,7 @@ def test_export_interface_uses_injected_repository_with_mount_labels():
 def test_export_interface_exposes_two_korean_composition_modes():
     widget = ExportInterface(repository=_MultiExamRepository())
 
-    assert widget.titleLabel.text() == "시험지 출력 (DOCX)"
+    assert widget.titleLabel.text() == "모의고사 출력 (DOCX)"
     assert widget.singleExamModeCheck.text() == "한 시험에서 구성"
     assert widget.multiExamModeCheck.text() == "여러 시험의 과목을 조합"
     assert widget.singleExamModeCheck.isChecked()

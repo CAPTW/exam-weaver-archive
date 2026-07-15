@@ -314,7 +314,7 @@ class MainWindow(FluentWindow):
             NavigationItemPosition.TOP
         )
         self.addSubInterface(
-            self.export_interface, FIF.PRINT, "시험지 출력", 
+            self.export_interface, FIF.PRINT, "모의고사 출력",
             NavigationItemPosition.TOP
         )
         self.addSubInterface(

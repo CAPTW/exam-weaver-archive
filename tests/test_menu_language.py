@@ -25,6 +25,14 @@ def test_builtin_menu_packs_supply_every_known_key():
         assert packs["en"].strings[key]
 
 
+def test_builtin_export_menu_labels_use_mock_exam_wording():
+    packs, warnings = discover_menu_language_packs(PROJECT_ROOT)
+
+    assert warnings == []
+    assert menu_text(packs["ko"], "menu.export") == "모의고사 출력"
+    assert menu_text(packs["en"], "menu.export") == "Mock Exam Export"
+
+
 def test_external_pack_uses_korean_fallback_and_ignores_unknown_keys(tmp_path):
     pack_dir = tmp_path / "data" / "language_packs" / "menu"
     pack_dir.mkdir(parents=True)
@@ -48,7 +56,7 @@ def test_external_pack_uses_korean_fallback_and_ignores_unknown_keys(tmp_path):
 
     assert warnings == []
     assert menu_text(packs["ja"], "menu.home") == "ホーム"
-    assert menu_text(packs["ja"], "menu.export") == "시험지 출력"
+    assert menu_text(packs["ja"], "menu.export") == "모의고사 출력"
     assert "unknown" not in packs["ja"].strings
 
 

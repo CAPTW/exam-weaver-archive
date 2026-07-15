@@ -81,6 +81,12 @@ def test_main_window_passes_and_refreshes_question_repository_for_export():
     assert "self.export_interface.set_repository(repository)" in source
 
 
+def test_main_window_declares_mock_exam_export_navigation_copy():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert 'self.export_interface, FIF.PRINT, "모의고사 출력"' in source
+
+
 def test_codex_toggle_navigation_is_declared():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 
