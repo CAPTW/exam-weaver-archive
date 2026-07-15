@@ -53,6 +53,7 @@ class BrowserInterface(QWidget):
     def init_ui(self):
         # Header
         self.headerLayout = QHBoxLayout()
+        self.searchLayout = QHBoxLayout()
         self.titleLabel = SubtitleLabel("문제 관리", self)
         
         # Filters
@@ -77,6 +78,7 @@ class BrowserInterface(QWidget):
         
         self.searchBox = LineEdit()
         self.searchBox.setPlaceholderText("태그/문항/선지 검색...")
+        self.searchBox.setMinimumWidth(320)
         self.searchBox.returnPressed.connect(self.load_data)
         
         self.btnRefresh = PrimaryPushButton("조회", self)
@@ -102,12 +104,13 @@ class BrowserInterface(QWidget):
         self.headerLayout.addWidget(self.examFilter)
         self.headerLayout.addWidget(self.subjectFilterLabel)
         self.headerLayout.addWidget(self.subjectFilter)
-        self.headerLayout.addWidget(self.searchBox)
         self.headerLayout.addWidget(self.btnAddManual)
         self.headerLayout.addWidget(self.btnAddDescriptive)
-        self.headerLayout.addWidget(self.btnRefresh)
         self.headerLayout.addWidget(self.btnValidate)
         self.headerLayout.addWidget(self.btnDeleteSelected)
+
+        self.searchLayout.addWidget(self.searchBox, 1)
+        self.searchLayout.addWidget(self.btnRefresh)
 
         # Table
         self.table = TableWidget(self)
@@ -124,6 +127,7 @@ class BrowserInterface(QWidget):
 
         # Layout
         self.vBoxLayout.addLayout(self.headerLayout)
+        self.vBoxLayout.addLayout(self.searchLayout)
         self.vBoxLayout.addWidget(self.table)
 
     def _init_explanation_sidecar(self):

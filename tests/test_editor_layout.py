@@ -444,6 +444,23 @@ def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
     APP.processEvents()
 
 
+def test_browser_search_controls_use_full_width_second_row(repo):
+    widget = BrowserInterface(repo.db_path)
+
+    assert widget.headerLayout.indexOf(widget.searchBox) == -1
+    assert widget.headerLayout.indexOf(widget.btnRefresh) == -1
+    assert widget.searchLayout.indexOf(widget.searchBox) == 0
+    assert widget.searchLayout.indexOf(widget.btnRefresh) == 1
+    assert widget.searchLayout.stretch(0) == 1
+    assert widget.searchBox.minimumWidth() >= 320
+    assert widget.vBoxLayout.itemAt(0).layout() is widget.headerLayout
+    assert widget.vBoxLayout.itemAt(1).layout() is widget.searchLayout
+    assert widget.vBoxLayout.itemAt(2).widget() is widget.table
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_browser_clone_button_creates_customized_personal_question(repo, monkeypatch):
     source_question = Question(
         number=1,
