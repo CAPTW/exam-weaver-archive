@@ -4,6 +4,7 @@ outputs/
 logs/
 tmp/
 _branches/
+.worktrees/
 *.db
 *.sqlite
 *.sqlite3
