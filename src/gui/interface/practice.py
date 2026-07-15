@@ -75,7 +75,10 @@ def evaluate_answers(questions, answers):
         if is_correct:
             correct_count += 1
 
-        exam_subject_id = question.get("exam_subject_id")
+        exam_subject_id = (
+            question.get("mounted_subject_code")
+            or question.get("exam_subject_id")
+        )
         subject_stats.setdefault(
             exam_subject_id,
             {
@@ -119,9 +122,12 @@ def save_practice_result(repo, mock_exam_id, questions, answers, duration_second
 
 
 class PracticeInterface(QWidget):
-    def __init__(self, db_path, parent=None):
+    def __init__(self, db_path=None, parent=None, repository=None):
         super().__init__(parent)
-        self.repo = ExamRepository(db_path)
+        if repository is None and db_path is None:
+            raise ValueError("db_path or repository is required")
+        self.repo = repository or ExamRepository(db_path)
+        self.pending_repository = None
         self.validator = QuestionValidator(self.repo)
         self.questions = []
         self.answers = {}
@@ -140,6 +146,18 @@ class PracticeInterface(QWidget):
         self.rootLayout.setContentsMargins(30, 30, 30, 30)
         self.rootLayout.setSpacing(12)
         self.init_ui()
+        self.load_options()
+
+    def set_repository(self, repository):
+        if self.questions:
+            self.pending_repository = repository
+            return
+        self._apply_repository(repository)
+
+    def _apply_repository(self, repository):
+        self.repo = repository
+        self.pending_repository = None
+        self.validator = QuestionValidator(repository)
         self.load_options()
 
     def init_ui(self):
@@ -383,8 +401,10 @@ class PracticeInterface(QWidget):
 
         self.examFilter.blockSignals(True)
         self.examFilter.clear()
+        self.examOptionsByCode = {}
         for exam in options.get("exams", []):
-            self.examFilter.addItem(f"{exam['name']} ({exam['code']})", exam["code"])
+            self.examOptionsByCode[exam["code"]] = dict(exam)
+            self.examFilter.addItem(self._exam_label(exam), exam["code"])
         if self.examFilter.count() > 0:
             preferred_exam = self._first_exam_code_with_questions()
             preferred_index = self.examFilter.findData(preferred_exam)
@@ -402,6 +422,14 @@ class PracticeInterface(QWidget):
             self.yearToFilter.setCurrentIndex(len(years) - 1)
 
         self.on_exam_changed()
+
+    @staticmethod
+    def _exam_label(exam):
+        mount_label = str(exam.get("mount_label") or "").strip()
+        exam_name = str(exam.get("name") or exam.get("code") or "")
+        exam_code = str(exam.get("local_code") or exam.get("code") or "")
+        prefix = f"{mount_label} · " if mount_label else ""
+        return f"{prefix}{exam_name} ({exam_code})"
 
     def _first_exam_code_with_questions(self):
         return self.repo.first_exam_code_with_questions()
@@ -549,7 +577,8 @@ class PracticeInterface(QWidget):
 
     def _create_mock_exam_record(self, questions):
         exam_code = self.examFilter.currentData()
-        exam_name = self._strip_combo_code(self.examFilter.currentText())
+        exam = self.examOptionsByCode.get(exam_code, {})
+        exam_name = exam.get("name") or self._strip_combo_code(self.examFilter.currentText())
         return self.repo.create_practice_attempt(
             exam_code=exam_code,
             exam_name=exam_name,
@@ -786,13 +815,17 @@ class PracticeInterface(QWidget):
                 return
 
         duration = int(time.time() - self.started_at) if self.started_at else 0
-        result = save_practice_result(
-            self.repo,
-            self.mock_exam_id,
-            self.questions,
-            self.answers,
-            duration,
-        )
+        try:
+            result = save_practice_result(
+                self.repo,
+                self.mock_exam_id,
+                self.questions,
+                self.answers,
+                duration,
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced to UI
+            InfoBar.error(title="결과 저장 실패", content=str(exc), parent=self)
+            return
         result["duration_seconds"] = duration
         self.results_revealed = True
         self.render_result(result)
@@ -860,3 +893,5 @@ class PracticeInterface(QWidget):
         self.grading_mode = GRADING_MODE_EXAM_END
         self.results_revealed = False
         self.stack.setCurrentWidget(self.setupPage)
+        if self.pending_repository is not None:
+            self._apply_repository(self.pending_repository)
