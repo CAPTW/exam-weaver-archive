@@ -12,6 +12,8 @@ def test_latest_app_launcher_runs_source_gui_with_venv_pythonw():
     assert ".venv\\Scripts\\pythonw.exe" in content
     assert "-m src.gui.main" in content
     assert "start \"\" \"%PYTHONW%\" -m src.gui.main" in content
+    assert 'git -C "%~dp0." rev-parse --git-common-dir' in content
+    assert '!REPO_ROOT!\\.venv\\Scripts\\pythonw.exe' in content
 
 
 def test_silent_launcher_uses_pythonw_without_hiding_gui_window():
