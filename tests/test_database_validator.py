@@ -181,6 +181,57 @@ def test_question_validator_accepts_legacy_choice_symbols(repo, sample_metadata,
     assert QuestionValidator(repo).scan() == []
 
 
+def test_question_validator_accepts_matching_numeric_choice_symbols(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.executemany(
+            "UPDATE question_choices SET choice_symbol = ? "
+            "WHERE question_id = ? AND choice_number = ?",
+            [
+                (str(number), question['id'], number)
+                for number in range(1, 5)
+            ],
+        )
+        conn.commit()
+
+    validator = QuestionValidator(repo)
+    stored = repo.get_questions_with_choices(limit=1)[0]
+
+    assert validator.scan() == []
+    assert validator.is_random_eligible(stored) is True
+
+
+def test_question_validator_rejects_mismatched_numeric_choice_symbol(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute(
+            "UPDATE question_choices SET choice_symbol = '2' "
+            "WHERE question_id = ? AND choice_number = 1",
+            (question['id'],),
+        )
+        conn.commit()
+
+    findings = QuestionValidator(repo).scan()
+
+    assert len(findings) == 1
+    assert 'invalid_choice_symbol' in {
+        issue['code']
+        for issue in findings[0]['issues']
+    }
+
+
 def test_question_validator_flags_missing_required_image(repo, sample_metadata, sample_question):
     sample_question.text = "다음 그림과 같은 회로의 명칭은?"
     sample_question.has_image = False
