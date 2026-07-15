@@ -47,6 +47,11 @@ class ImportInterface(QWidget):
         # Header
         self.titleLabel = SubtitleLabel("문제 가져오기", self)
         self.vBoxLayout.addWidget(self.titleLabel)
+        self.stepLabel = BodyLabel(
+            "1. 파일 선택  →  2. 분석 및 검수  →  3. 문제은행에 저장",
+            self,
+        )
+        self.vBoxLayout.addWidget(self.stepLabel)
 
         # File Selection Area
         self.fileLayout = QHBoxLayout()
@@ -81,11 +86,11 @@ class ImportInterface(QWidget):
 
         # Action Area
         self.actionLayout = QHBoxLayout()
-        self.parseBtn = PrimaryPushButton("PDF 파싱 시작", self)
+        self.parseBtn = PrimaryPushButton("분석 및 검수 시작", self)
         # self.parseBtn.setEnabled(False) 
         self.parseBtn.clicked.connect(self.start_parsing)
         
-        self.saveBtn = PrimaryPushButton("DB 저장", self)
+        self.saveBtn = PrimaryPushButton("문제은행에 저장", self)
         self.saveBtn.setEnabled(False)
         self.saveBtn.clicked.connect(self.save_to_db)
         
@@ -93,6 +98,8 @@ class ImportInterface(QWidget):
         self.actionLayout.addWidget(self.saveBtn)
         self.actionLayout.addStretch(1)
         self.vBoxLayout.addLayout(self.actionLayout)
+        self.qualitySummaryLabel = BodyLabel("분석 전", self)
+        self.vBoxLayout.addWidget(self.qualitySummaryLabel)
 
         # Progress Bar
         self.progressBar = IndeterminateProgressBar(self, start=False)
@@ -106,13 +113,13 @@ class ImportInterface(QWidget):
         self.vBoxLayout.addWidget(self.logView)
 
     def select_question_pdf(self):
-        fname, _ = QFileDialog.getOpenFileName(self, '문제지 PDF 선택', '', 'PDF/ZIP Files (*.pdf *.zip)')
+        fname, _ = QFileDialog.getOpenFileName(self, '문제지 PDF 선택', '', 'PDF/ZIP 파일 (*.pdf *.zip)')
         if fname:
             self.qPathLabel.setText(fname)
             self.log(f"문제지 선택됨: {fname}")
 
     def select_answer_pdf(self):
-        fname, _ = QFileDialog.getOpenFileName(self, '정답지 PDF 선택', '', 'PDF/ZIP Files (*.pdf *.zip)')
+        fname, _ = QFileDialog.getOpenFileName(self, '정답지 PDF 선택', '', 'PDF/ZIP 파일 (*.pdf *.zip)')
         if fname:
             self.aPathLabel.setText(fname)
             self.log(f"정답지 선택됨: {fname}")
@@ -123,8 +130,8 @@ class ImportInterface(QWidget):
         
         if "선택된 파일 없음" in [q_path, a_path]:
             InfoBar.error(
-                title='오류',
-                content="문제지와 정답지 파일을 모두 선택해주세요.",
+                title='입력 오류',
+                content="문제지와 정답지 파일을 모두 선택해 주세요.",
                 parent=self
             )
             return
@@ -147,6 +154,23 @@ class ImportInterface(QWidget):
         
         metadata = result['metadata']
         stats = result['stats']
+        validation_errors = list(result['validation'].errors)
+        total_questions = int(stats.get('total_questions') or 0)
+        quality_summary = result.get('quality_summary') or {}
+        review_count = int(
+            quality_summary.get('review_required', len(validation_errors)) or 0
+        )
+        review_count = min(max(review_count, 0), total_questions)
+        corrected_count = int(quality_summary.get('auto_corrected', 0) or 0)
+        normal_count = max(total_questions - review_count, 0)
+        summary_parts = [
+            f"전체 {total_questions}문항",
+            f"정상 {normal_count}문항",
+        ]
+        if corrected_count:
+            summary_parts.append(f"자동 교정 {corrected_count}문항")
+        summary_parts.append(f"검토 필요 {review_count}문항")
+        self.qualitySummaryLabel.setText(" · ".join(summary_parts))
         
         msg = f"""
 ===== 파싱 완료 =====
@@ -159,9 +183,9 @@ class ImportInterface(QWidget):
         self.log(msg, color='green')
         self.saveBtn.setEnabled(True)
         
-        if result['validation'].errors:
-            for err in result['validation'].errors:
-                self.log(f"Error: {err}", color='red')
+        if validation_errors:
+            for err in validation_errors:
+                self.log(f"검토 필요: {err}", color='red')
 
     def on_parsing_error(self, error_msg):
         self.parseBtn.setEnabled(True)
@@ -184,18 +208,18 @@ class ImportInterface(QWidget):
                 self.parsed_data['questions'],
                 self.parsed_data['metadata']
             )
-            self.log(f"DB 저장 완료: {count}개 문제 저장됨", color='green')
+            self.log(f"문제은행 저장 완료: {count}개 문제 저장됨", color='green')
             InfoBar.success(
-                title='성공',
-                content=f"{count}개 문제가 데이터베이스에 저장되었습니다.",
+                title='저장 완료',
+                content=f"{count}개 문제를 문제은행에 저장했습니다.",
                 parent=self
             )
             self.saveBtn.setEnabled(False)
         except Exception as e:
-            self.log(f"DB 저장 실패: {str(e)}", color='red')
+            self.log(f"문제은행 저장 실패: {str(e)}", color='red')
             InfoBar.error(
-                title='저장 실패',
-                content=str(e),
+                title='처리 실패',
+                content=f"문제은행에 저장하지 못했습니다. {e}",
                 parent=self
             )
 

@@ -67,20 +67,25 @@ class DbMountInterface(QWidget):
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
         self.vBoxLayout.setSpacing(16)
 
-        self.titleLabel = SubtitleLabel("DB Mount 관리", self)
+        self.titleLabel = SubtitleLabel("문제은행 연결 관리", self)
         self.vBoxLayout.addWidget(self.titleLabel)
         self.descriptionLabel = BodyLabel(
-            "사용할 DB를 선택하고, exam 단위 이동, DB package 내보내기/가져오기를 관리합니다.",
+            "사용할 문제은행을 선택하고 시험 단위 복사·이동과 파일 내보내기·가져오기를 관리합니다.",
             self,
         )
         self.vBoxLayout.addWidget(self.descriptionLabel)
+        self.connectionStatusLabel = BodyLabel(
+            "연결된 문제은행 0개 · 쓰기 가능 0개",
+            self,
+        )
+        self.vBoxLayout.addWidget(self.connectionStatusLabel)
 
         self.mountList = QListWidget(self)
         self.mountList.setMinimumHeight(118)
         self.mountList.setMaximumHeight(172)
         self.mountList.setSelectionMode(QListWidget.NoSelection)
         self.mountList.itemChanged.connect(self.on_mount_selection_changed)
-        self.vBoxLayout.addWidget(BodyLabel("사용할 DB", self))
+        self.vBoxLayout.addWidget(BodyLabel("사용할 문제은행", self))
         self.vBoxLayout.addWidget(self.mountList)
 
         self.selectionLayout = QHBoxLayout()
@@ -95,23 +100,26 @@ class DbMountInterface(QWidget):
         self.targetDbCombo.currentIndexChanged.connect(self._reset_plan)
         self.examCombo.currentIndexChanged.connect(self._reset_plan)
 
-        self.selectionLayout.addWidget(BodyLabel("Source", self))
+        self.sourceLabel = BodyLabel("원본 문제은행", self)
+        self.selectionLayout.addWidget(self.sourceLabel)
         self.selectionLayout.addWidget(self.sourceDbCombo)
-        self.selectionLayout.addWidget(BodyLabel("Target", self))
+        self.targetLabel = BodyLabel("대상 문제은행", self)
+        self.selectionLayout.addWidget(self.targetLabel)
         self.selectionLayout.addWidget(self.targetDbCombo)
-        self.selectionLayout.addWidget(BodyLabel("Exam", self))
+        self.examLabel = BodyLabel("시험 종류", self)
+        self.selectionLayout.addWidget(self.examLabel)
         self.selectionLayout.addWidget(self.examCombo)
         self.vBoxLayout.addLayout(self.selectionLayout)
 
         self.actionLayout = QHBoxLayout()
         self.refreshBtn = PushButton("새로고침", self)
-        self.saveMountBtn = PushButton("Mount 설정 저장", self)
-        self.renameDbBtn = PushButton("Source DB 이름/파일명 변경", self)
-        self.createDbBtn = PushButton("새 DB 만들기", self)
-        self.exportDbBtn = PushButton("Source DB 내보내기", self)
-        self.importDbBtn = PushButton("DB 가져오기", self)
-        self.copyExamBtn = PrimaryPushButton("Exam 사본 만들기", self)
-        self.dryRunBtn = PrimaryPushButton("Dry-run", self)
+        self.saveMountBtn = PushButton("연결 설정 저장", self)
+        self.renameDbBtn = PushButton("원본 문제은행 이름 변경", self)
+        self.createDbBtn = PushButton("새 문제은행 만들기", self)
+        self.exportDbBtn = PushButton("원본 문제은행 내보내기", self)
+        self.importDbBtn = PushButton("문제은행 가져오기", self)
+        self.copyExamBtn = PrimaryPushButton("시험 사본 만들기", self)
+        self.dryRunBtn = PrimaryPushButton("연결 사전 검사", self)
         self.applyBtn = PrimaryPushButton("이동 저장", self)
         self.applyBtn.setEnabled(False)
         self.refreshBtn.clicked.connect(self.refresh_mounts)
@@ -137,7 +145,7 @@ class DbMountInterface(QWidget):
 
         self.logView = QTextEdit(self)
         self.logView.setReadOnly(True)
-        self.logView.setPlaceholderText("DB mount 상태와 dry-run 결과가 여기에 표시됩니다.")
+        self.logView.setPlaceholderText("문제은행 연결 상태와 사전 검사 결과가 여기에 표시됩니다.")
         self.vBoxLayout.addWidget(self.logView)
 
     def refresh_mounts(self):
@@ -167,10 +175,17 @@ class DbMountInterface(QWidget):
                 self.mountList.addItem(item)
             self._rebuild_active_mounts()
             self._rebuild_source_target_combos()
-            self.log(f"{len(self.mounts)}개 mounted DB를 불러왔습니다. 활성: {len(self.active_mounts)}개")
+            self.log(
+                f"문제은행 {len(self.mounts)}개를 불러왔습니다. "
+                f"현재 사용: {len(self.active_mounts)}개"
+            )
         except Exception as exc:
-            self.log(f"Mount manifest 로드 실패: {exc}")
-            InfoBar.error(title="로드 실패", content=str(exc), parent=self)
+            self.log(f"문제은행 연결 설정 로드 실패: {exc}")
+            InfoBar.error(
+                title="처리 실패",
+                content=f"문제은행 연결 설정을 불러오지 못했습니다. {exc}",
+                parent=self,
+            )
         finally:
             self.mountList.blockSignals(False)
             self.sourceDbCombo.blockSignals(False)
@@ -187,7 +202,11 @@ class DbMountInterface(QWidget):
 
     def save_mount_selection(self):
         if not self.manifest_path.exists():
-            InfoBar.error(title="저장 실패", content="Mount manifest가 없습니다.", parent=self)
+            InfoBar.error(
+                title="처리 실패",
+                content="저장할 문제은행 연결 설정 파일이 없습니다.",
+                parent=self,
+            )
             return
 
         enabled_by_id = {
@@ -207,18 +226,18 @@ class DbMountInterface(QWidget):
         self._rebuild_active_mounts()
         self._rebuild_source_target_combos()
         self.on_source_changed()
-        self.log(f"Mount 설정 저장 완료. 활성: {len(self.active_mounts)}개")
+        self.log(f"연결 설정 저장 완료. 현재 사용: {len(self.active_mounts)}개")
         self.mountsChanged.emit()
-        InfoBar.success(title="저장 완료", content="Mount 설정을 저장했습니다.", parent=self)
+        InfoBar.success(title="저장 완료", content="문제은행 연결 설정을 저장했습니다.", parent=self)
 
     def rename_current_source_mount(self):
         mount = self._current_source_mount()
         if not mount:
-            InfoBar.error(title="선택 필요", content="이름을 바꿀 Source DB를 선택하세요.", parent=self)
+            InfoBar.error(title="선택 필요", content="이름을 바꿀 원본 문제은행을 선택하세요.", parent=self)
             return
         label, ok = QInputDialog.getText(
             self,
-            "DB 이름 변경",
+            "문제은행 이름 변경",
             "새 이름",
             text=mount.label,
         )
@@ -230,21 +249,21 @@ class DbMountInterface(QWidget):
             self.log(f"이름 변경 실패: {exc}")
             InfoBar.error(title="이름 변경 실패", content=str(exc), parent=self)
             return
-        InfoBar.success(title="이름 변경 완료", content="DB 이름과 파일명을 함께 변경했습니다.", parent=self)
+        InfoBar.success(title="이름 변경 완료", content="문제은행 이름과 파일명을 함께 변경했습니다.", parent=self)
 
     def create_user_database_from_prompt(self):
         mount_id, ok = QInputDialog.getText(
             self,
-            "새 DB 만들기",
-            "DB ID",
+            "새 문제은행 만들기",
+            "문제은행 ID",
             text="user_custom",
         )
         if not ok:
             return
         label, ok = QInputDialog.getText(
             self,
-            "새 DB 만들기",
-            "DB 이름",
+            "새 문제은행 만들기",
+            "문제은행 이름",
             text=mount_id,
         )
         if not ok:
@@ -252,24 +271,24 @@ class DbMountInterface(QWidget):
         try:
             created = self._create_user_database(mount_id, label)
         except Exception as exc:
-            self.log(f"새 DB 생성 실패: {exc}")
+            self.log(f"새 문제은행 생성 실패: {exc}")
             InfoBar.error(title="생성 실패", content=str(exc), parent=self)
             return
-        self.log(f"새 DB 생성 완료: {created.label} ({created.id}) -> {created.path}")
-        InfoBar.success(title="생성 완료", content="새 DB를 생성하고 mount에 추가했습니다.", parent=self)
+        self.log(f"새 문제은행 생성 완료: {created.label} ({created.id}) -> {created.path}")
+        InfoBar.success(title="생성 완료", content="새 문제은행을 만들고 연결 목록에 추가했습니다.", parent=self)
 
     def export_current_source_database(self):
         source = self._current_source_mount()
         if not source:
-            InfoBar.error(title="선택 필요", content="내보낼 Source DB를 선택하세요.", parent=self)
+            InfoBar.error(title="선택 필요", content="내보낼 원본 문제은행을 선택하세요.", parent=self)
             return
 
         default_path = self._default_export_path(source)
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Source DB 내보내기",
+            "원본 문제은행 내보내기",
             str(default_path),
-            "Exam DB Package (*.examdb.zip *.zip);;SQLite Database (*.db);;All Files (*)",
+            "문제은행 패키지 (*.examdb.zip *.zip);;SQLite 문제은행 (*.db);;모든 파일 (*)",
         )
         if not file_path:
             return
@@ -286,14 +305,14 @@ class DbMountInterface(QWidget):
                 copied_images = result.copied_images
                 missing_images = result.missing_images
         except Exception as exc:
-            self.log(f"DB 내보내기 실패: {exc}")
+            self.log(f"문제은행 내보내기 실패: {exc}")
             InfoBar.error(title="내보내기 실패", content=str(exc), parent=self)
             return
 
         size_mb = exported.stat().st_size / (1024 * 1024)
         self.log(
-            "DB 내보내기 완료\n"
-            f"source: {source.label} ({source.id})\n"
+            "문제은행 내보내기 완료\n"
+            f"원본 문제은행: {source.label} ({source.id})\n"
             f"output: {exported}\n"
             f"size: {size_mb:.2f} MB\n"
             f"packaged_images: {copied_images}\n"
@@ -301,16 +320,16 @@ class DbMountInterface(QWidget):
         )
         InfoBar.success(
             title="내보내기 완료",
-            content="선택한 Source DB를 저장했습니다.",
+            content="선택한 원본 문제은행을 저장했습니다.",
             parent=self,
         )
 
     def import_database_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "DB 가져오기",
+            "문제은행 가져오기",
             str(self.base_dir / "data" / "exports"),
-            "Exam DB Package or SQLite (*.examdb.zip *.zip *.db);;All Files (*)",
+            "문제은행 패키지 또는 SQLite (*.examdb.zip *.zip *.db);;모든 파일 (*)",
         )
         if not file_path:
             return
@@ -318,16 +337,16 @@ class DbMountInterface(QWidget):
         default_id = self._suggest_mount_id(file_path)
         mount_id, ok = QInputDialog.getText(
             self,
-            "DB 가져오기",
-            "Mount ID",
+            "문제은행 가져오기",
+            "연결 ID",
             text=default_id,
         )
         if not ok:
             return
         label, ok = QInputDialog.getText(
             self,
-            "DB 가져오기",
-            "DB 이름",
+            "문제은행 가져오기",
+            "문제은행 이름",
             text=Path(file_path).name,
         )
         if not ok:
@@ -336,25 +355,25 @@ class DbMountInterface(QWidget):
         try:
             result = self._import_database(file_path, mount_id, label)
         except Exception as exc:
-            self.log(f"DB 가져오기 실패: {exc}")
+            self.log(f"문제은행 가져오기 실패: {exc}")
             InfoBar.error(title="가져오기 실패", content=str(exc), parent=self)
             return
 
         self.log(
-            "DB 가져오기 완료\n"
-            f"mount: {result.mount.label} ({result.mount.id})\n"
+            "문제은행 가져오기 완료\n"
+            f"연결 항목: {result.mount.label} ({result.mount.id})\n"
             f"db: {result.imported_db_path}\n"
             f"package: {result.package}\n"
             f"copied_images: {result.copied_images}\n"
             f"updated_image_refs: {result.updated_image_refs}"
         )
-        InfoBar.success(title="가져오기 완료", content="DB를 mount 목록에 추가했습니다.", parent=self)
+        InfoBar.success(title="가져오기 완료", content="문제은행을 연결 목록에 추가했습니다.", parent=self)
 
     def copy_current_exam_to_target(self):
         answer = QMessageBox.question(
             self,
-            "Exam 사본 만들기",
-            "현재 Source의 Exam을 Target DB에 복사합니다. Source DB는 삭제되지 않습니다. 계속할까요?",
+            "시험 사본 만들기",
+            "현재 원본 문제은행의 시험을 대상 문제은행에 복사합니다. 원본 문제은행의 시험은 유지됩니다. 계속할까요?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -368,11 +387,11 @@ class DbMountInterface(QWidget):
             return
         self.log(
             "사본 생성 완료\n"
-            f"exam_code: {result.plan.exam_code}\n"
-            f"target_exam_id: {result.target_exam_id}\n"
-            f"target_backup: {result.target_backup}"
+            f"시험 코드: {result.plan.exam_code}\n"
+            f"대상 시험 ID: {result.target_exam_id}\n"
+            f"대상 백업: {result.target_backup}"
         )
-        InfoBar.success(title="사본 생성 완료", content="Exam 사본을 target DB에 만들었습니다.", parent=self)
+        InfoBar.success(title="사본 생성 완료", content="시험 사본을 대상 문제은행에 만들었습니다.", parent=self)
         self.refresh_mounts()
         self.mountsChanged.emit()
 
@@ -390,17 +409,17 @@ class DbMountInterface(QWidget):
                     f"{exam['name']} ({exam['code']}) - {exam['question_count']}문항",
                 )
         except Exception as exc:
-            self.log(f"Exam 목록 로드 실패: {exc}")
+            self.log(f"시험 목록 로드 실패: {exc}")
 
     def run_dry_run(self):
         source = self._current_source_mount()
         target = self._current_target_mount()
         exam_code = self._current_exam_code()
         if not source or not target or not exam_code:
-            InfoBar.error(title="선택 필요", content="Source, target, exam을 선택하세요.", parent=self)
+            InfoBar.error(title="선택 필요", content="원본 문제은행, 대상 문제은행, 시험 종류를 선택하세요.", parent=self)
             return
         if source.path == target.path:
-            InfoBar.error(title="선택 오류", content="Source와 target DB가 같습니다.", parent=self)
+            InfoBar.error(title="선택 오류", content="원본 문제은행과 대상 문제은행이 같습니다.", parent=self)
             return
 
         plan = dry_run_exam_move(source.path, target.path, exam_code)
@@ -408,9 +427,9 @@ class DbMountInterface(QWidget):
         self.applyBtn.setEnabled(plan.can_apply)
         self.log(self._format_plan(plan))
         if plan.can_apply:
-            InfoBar.success(title="Dry-run 통과", content="저장할 수 있습니다.", parent=self)
+            InfoBar.success(title="사전 검사 통과", content="시험을 안전하게 이동할 수 있습니다.", parent=self)
         else:
-            InfoBar.warning(title="Dry-run 차단", content="충돌/오류를 확인하세요.", parent=self)
+            InfoBar.warning(title="사전 검사 확인 필요", content="표시된 충돌이나 오류를 확인해 주세요.", parent=self)
 
     def apply_move(self):
         if not self.last_plan or not self.last_plan.can_apply:
@@ -420,11 +439,11 @@ class DbMountInterface(QWidget):
 
         answer = QMessageBox.question(
             self,
-            "Exam 이동 저장",
+            "시험 이동 저장",
             (
                 f"{self.last_plan.exam_code}\n\n"
-                "Source DB에서 target DB로 exam 전체를 이동합니다.\n"
-                "저장 전 source/target 백업이 생성됩니다. 계속할까요?"
+                "원본 문제은행에서 대상 문제은행으로 시험 전체를 이동합니다.\n"
+                "저장 전에 양쪽 문제은행의 백업을 만듭니다. 계속할까요?"
             ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -450,11 +469,11 @@ class DbMountInterface(QWidget):
 
         self.log(
             "이동 완료\n"
-            f"target_exam_id: {result.target_exam_id}\n"
-            f"source_backup: {result.source_backup}\n"
-            f"target_backup: {result.target_backup}"
+            f"대상 시험 ID: {result.target_exam_id}\n"
+            f"원본 백업: {result.source_backup}\n"
+            f"대상 백업: {result.target_backup}"
         )
-        InfoBar.success(title="이동 완료", content="exam 이동이 저장되었습니다.", parent=self)
+        InfoBar.success(title="이동 완료", content="시험 이동을 저장했습니다.", parent=self)
         self.refresh_mounts()
         self.mountsChanged.emit()
 
@@ -483,9 +502,9 @@ class DbMountInterface(QWidget):
         target = self._current_target_mount()
         exam_code = self._current_exam_code()
         if not source or not target or not exam_code:
-            raise ValueError("Source, target, exam을 선택하세요.")
+            raise ValueError("원본 문제은행, 대상 문제은행, 시험 종류를 선택하세요.")
         if source.id == target.id:
-            raise ValueError("Source와 target DB가 같습니다.")
+            raise ValueError("원본 문제은행과 대상 문제은행이 같습니다.")
         return copy_exam_to_mount(
             self.manifest_path,
             source_mount_id=source.id,
@@ -497,7 +516,7 @@ class DbMountInterface(QWidget):
     def _export_current_source_db(self, output_path):
         source = self._current_source_mount()
         if not source:
-            raise ValueError("내보낼 Source DB를 선택하세요.")
+            raise ValueError("내보낼 원본 문제은행을 선택하세요.")
         if self.manifest_path.exists():
             return export_mount_database(
                 self.manifest_path,
@@ -509,7 +528,7 @@ class DbMountInterface(QWidget):
     def _export_current_source_package(self, output_path):
         source = self._current_source_mount()
         if not source:
-            raise ValueError("내보낼 Source DB를 선택하세요.")
+            raise ValueError("내보낼 원본 문제은행을 선택하세요.")
         if self.manifest_path.exists():
             return export_mount_database_package(
                 self.manifest_path,
@@ -570,14 +589,14 @@ class DbMountInterface(QWidget):
             self.sourceDbCombo.blockSignals(False)
             self.targetDbCombo.blockSignals(False)
             self.log(
-                f"Mount manifest가 없습니다: {self.manifest_path}\n"
-                "먼저 data/domain_dbs/mount_manifest.json을 생성하세요."
+                f"문제은행 연결 설정 파일이 없습니다: {self.manifest_path}\n"
+                "먼저 문제은행 연결 설정을 생성해 주세요."
             )
             return
 
         fallback = MountedDatabase(
             id="app",
-            label="현재 앱 DB",
+            label="현재 앱 문제은행",
             domain="app",
             path=self.db_path,
             enabled=True,
@@ -594,8 +613,8 @@ class DbMountInterface(QWidget):
         self.sourceDbCombo.blockSignals(False)
         self.targetDbCombo.blockSignals(False)
         self.log(
-            f"Mount manifest가 없습니다: {self.manifest_path}\n"
-            "현재 앱 DB를 Source로 불러왔습니다. DB 내보내기는 사용할 수 있습니다."
+            f"문제은행 연결 설정 파일이 없습니다: {self.manifest_path}\n"
+            "현재 앱 문제은행을 원본으로 불러왔습니다. 문제은행 내보내기는 사용할 수 있습니다."
         )
         self.on_source_changed()
 
@@ -605,6 +624,14 @@ class DbMountInterface(QWidget):
             for index, mount in enumerate(self.mounts)
             if self.mountList.item(index) and self.mountList.item(index).checkState() == Qt.Checked
         ]
+        self._update_connection_status()
+
+    def _update_connection_status(self):
+        active = len(self.active_mounts)
+        writable = sum(not mount.read_only for mount in self.active_mounts)
+        self.connectionStatusLabel.setText(
+            f"연결된 문제은행 {active}개 · 쓰기 가능 {writable}개"
+        )
 
     def _rebuild_source_target_combos(self, source_id=None, target_id=None):
         self.sourceDbCombo.blockSignals(True)
@@ -652,7 +679,7 @@ class DbMountInterface(QWidget):
         return self.exam_rows[index]["code"]
 
     def _mount_label(self, mount):
-        suffix = "read-only" if mount.read_only else "writable"
+        suffix = "읽기 전용" if mount.read_only else "쓰기 가능"
         return f"{mount.label} ({mount.id}, {suffix})"
 
     def _mount_by_id(self, mount_id):
@@ -683,13 +710,13 @@ class DbMountInterface(QWidget):
 
     def _format_plan(self, plan: ExamMovePlan) -> str:
         payload = {
-            "exam_code": plan.exam_code,
-            "can_apply": plan.can_apply,
-            "source_db": plan.source_db,
-            "target_db": plan.target_db,
-            "counts": plan.counts,
-            "issues": [
-                {"code": issue.code, "message": issue.message, "severity": issue.severity}
+            "시험 코드": plan.exam_code,
+            "적용 가능": plan.can_apply,
+            "원본 문제은행": plan.source_db,
+            "대상 문제은행": plan.target_db,
+            "항목 수": plan.counts,
+            "확인 항목": [
+                {"코드": issue.code, "메시지": issue.message, "수준": issue.severity}
                 for issue in plan.issues
             ],
         }

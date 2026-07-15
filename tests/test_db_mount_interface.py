@@ -66,6 +66,14 @@ def _make_mount_interface(tmp_path):
 def test_db_mount_interface_populates_active_source_target_and_exam_dropdowns(tmp_path):
     widget, _manifest = _make_mount_interface(tmp_path)
 
+    assert widget.titleLabel.text() == "문제은행 연결 관리"
+    assert widget.sourceLabel.text() == "원본 문제은행"
+    assert widget.targetLabel.text() == "대상 문제은행"
+    assert widget.examLabel.text() == "시험 종류"
+    assert widget.dryRunBtn.text() == "연결 사전 검사"
+    assert widget.saveMountBtn.text() == "연결 설정 저장"
+    assert widget.copyExamBtn.text() == "시험 사본 만들기"
+    assert widget.connectionStatusLabel.text() == "연결된 문제은행 2개 · 쓰기 가능 2개"
     assert widget.mountList.count() == 3
     assert widget.sourceDbCombo.count() == 2
     assert widget.targetDbCombo.count() == 2
