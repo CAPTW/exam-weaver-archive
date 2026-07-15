@@ -45,6 +45,7 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
     assert widget.btnAddDescriptive.text() == '서술형 문제 추가'
     assert widget.btnDeleteSelected.text() == '선택 문제 삭제'
     assert '문제은행' in widget.repositoryStatusLabel.text()
+    assert widget.minimumSizeHint().width() <= 1050
 
     exam_index = widget.examFilter.findData('3급기관사')
     assert exam_index >= 0

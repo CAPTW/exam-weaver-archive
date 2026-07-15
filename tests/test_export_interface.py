@@ -3,7 +3,8 @@ from datetime import date
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QScrollArea
 
 from src.gui.interface.export import ExportInterface
 
@@ -401,6 +402,10 @@ def test_export_interface_initializes_hashtag_filter(repo):
 def test_export_interface_keeps_random_subject_section_visible_on_initial_window(repo):
     interface = ExportInterface(repo.db_path)
 
+    assert isinstance(interface, QScrollArea)
+    assert interface.widgetResizable() is True
+    assert interface.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert interface.minimumSizeHint().height() <= 720
     assert interface.vBoxLayout.spacing() <= 12
     assert interface.subjectSelectionTable.minimumHeight() >= 168
     assert interface.subjectSelectionTable.maximumHeight() <= 240

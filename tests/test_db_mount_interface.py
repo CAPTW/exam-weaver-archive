@@ -92,6 +92,18 @@ def test_db_mount_interface_populates_active_source_target_and_exam_dropdowns(tm
     APP.processEvents()
 
 
+def test_question_bank_connection_actions_fit_default_window_width(tmp_path):
+    widget, _manifest = _make_mount_interface(tmp_path)
+
+    assert widget.minimumSizeHint().width() <= 1050
+    assert widget.connectionActionLayout.count() == 3
+    assert widget.databaseActionLayout.count() == 5
+    assert widget.examActionLayout.count() == 4
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
 def test_db_mount_interface_can_enable_disable_mounts_and_save_manifest(tmp_path):
     widget, manifest = _make_mount_interface(tmp_path)
 

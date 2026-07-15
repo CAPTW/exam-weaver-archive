@@ -3,8 +3,9 @@
 import re
 from datetime import date
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QFileDialog, QComboBox, QHBoxLayout, QCheckBox, QSpinBox,
+    QWidget, QScrollArea, QFrame, QVBoxLayout, QFileDialog, QComboBox, QHBoxLayout, QCheckBox, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QButtonGroup, QRadioButton
 )
@@ -22,7 +23,7 @@ from ...database.validator import QuestionValidator
 from ...exporter.docx import DocxExporter
 
 
-class ExportInterface(QWidget):
+class ExportInterface(QScrollArea):
     def __init__(self, db_path=None, parent=None, repository=None):
         super().__init__(parent)
         if repository is None:
@@ -34,8 +35,13 @@ class ExportInterface(QWidget):
         self.exporter = DocxExporter()
         self.setObjectName("ExportInterface")
 
-        self.vBoxLayout = QVBoxLayout(self)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.contentWidget = QWidget(self)
+        self.vBoxLayout = QVBoxLayout(self.contentWidget)
         self.init_ui()
+        self.setWidget(self.contentWidget)
         self.load_options()
 
     def set_repository(self, repository):

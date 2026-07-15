@@ -29,6 +29,23 @@ APP_TITLE = "기출문제 문제은행 관리자"
 APP_ICON_FILENAME = "exam_generator_icon.ico"
 APP_USER_MODEL_ID = "CAPTW.ExamWeaverArchive.QuestionBankManager"
 DEFAULT_WINDOW_SIZE = (1500, 860)
+WINDOW_WORK_AREA_MARGIN = 32
+
+
+def calculate_initial_window_size(
+    default_size: tuple[int, int],
+    available_size: tuple[int, int],
+    margin: int = WINDOW_WORK_AREA_MARGIN,
+) -> tuple[int, int]:
+    """Keep the initial window inside the logical desktop work area."""
+    default_width, default_height = default_size
+    available_width, available_height = available_size
+    if available_width <= margin or available_height <= margin:
+        return default_size
+    return (
+        min(default_width, available_width - margin),
+        min(default_height, available_height - margin),
+    )
 
 
 def _install_crash_logging():
@@ -250,7 +267,15 @@ class MainWindow(FluentWindow):
         )
 
     def init_window(self):
-        self.resize(*DEFAULT_WINDOW_SIZE)
+        screen = QApplication.primaryScreen()
+        initial_size = DEFAULT_WINDOW_SIZE
+        if screen is not None:
+            available = screen.availableGeometry()
+            initial_size = calculate_initial_window_size(
+                DEFAULT_WINDOW_SIZE,
+                (available.width(), available.height()),
+            )
+        self.resize(*initial_size)
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(get_app_icon())
         self.move(100, 100)

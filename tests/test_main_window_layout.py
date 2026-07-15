@@ -16,6 +16,20 @@ def test_main_window_default_size_leaves_room_for_export_controls():
     assert gui_main.DEFAULT_WINDOW_SIZE[1] >= 860
 
 
+def test_initial_window_size_respects_125_percent_work_area():
+    assert gui_main.calculate_initial_window_size(
+        gui_main.DEFAULT_WINDOW_SIZE,
+        (1536, 826),
+    ) == (1500, 794)
+
+
+def test_initial_window_size_keeps_default_on_roomy_screen():
+    assert gui_main.calculate_initial_window_size(
+        gui_main.DEFAULT_WINDOW_SIZE,
+        (1920, 1032),
+    ) == gui_main.DEFAULT_WINDOW_SIZE
+
+
 def test_app_title_is_declared_for_exam_bank_admin():
     assert gui_main.APP_TITLE == "기출문제 문제은행 관리자"
 

@@ -1,7 +1,7 @@
 import sqlite3
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QHeaderView, QTableWidgetItem,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QHeaderView, QTableWidgetItem,
     QAbstractItemView, QCheckBox, QComboBox, QMessageBox, QTextEdit
 )
 from PyQt5.QtCore import Qt
@@ -58,6 +58,12 @@ class BrowserInterface(QWidget):
         self.searchLayout.setContentsMargins(0, 0, 0, 0)
         self.titleLabel = SubtitleLabel("문제 관리", self)
         self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
+        self.repositoryStatusLabel.setMaximumWidth(190)
+        self.titleBlockLayout = QVBoxLayout()
+        self.titleBlockLayout.setContentsMargins(0, 0, 0, 0)
+        self.titleBlockLayout.setSpacing(0)
+        self.titleBlockLayout.addWidget(self.titleLabel)
+        self.titleBlockLayout.addWidget(self.repositoryStatusLabel)
         
         # Filters
         self.examFilterLabel = BodyLabel("시험 종류", self)
@@ -66,6 +72,12 @@ class BrowserInterface(QWidget):
 
         self.examFilter = QComboBox()
         self.examFilter.setPlaceholderText("시험 선택")
+        self.examFilter.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.examFilter.setMinimumContentsLength(12)
+        self.examFilter.setMinimumWidth(150)
+        self.examFilter.setMaximumWidth(200)
         self._apply_combo_item_height(self.examFilter)
 
         self.subjectFilterLabel = BodyLabel("과목", self)
@@ -74,6 +86,12 @@ class BrowserInterface(QWidget):
 
         self.subjectFilter = QComboBox()
         self.subjectFilter.setPlaceholderText("과목 선택")
+        self.subjectFilter.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.subjectFilter.setMinimumContentsLength(10)
+        self.subjectFilter.setMinimumWidth(140)
+        self.subjectFilter.setMaximumWidth(190)
         self._apply_combo_item_height(self.subjectFilter)
 
         self.examFilter.currentIndexChanged.connect(lambda *_: self._on_exam_filter_changed())
@@ -101,17 +119,22 @@ class BrowserInterface(QWidget):
         self.btnDeleteSelected = PushButton("선택 문제 삭제", self)
         self.btnDeleteSelected.clicked.connect(self.delete_selected_questions)
 
-        self.headerLayout.addWidget(self.titleLabel)
-        self.headerLayout.addWidget(self.repositoryStatusLabel)
+        self.actionLayout = QGridLayout()
+        self.actionLayout.setContentsMargins(0, 0, 0, 0)
+        self.actionLayout.setHorizontalSpacing(6)
+        self.actionLayout.setVerticalSpacing(4)
+        self.actionLayout.addWidget(self.btnAddManual, 0, 0)
+        self.actionLayout.addWidget(self.btnAddDescriptive, 0, 1)
+        self.actionLayout.addWidget(self.btnValidate, 1, 0)
+        self.actionLayout.addWidget(self.btnDeleteSelected, 1, 1)
+
+        self.headerLayout.addLayout(self.titleBlockLayout)
         self.headerLayout.addStretch(1)
         self.headerLayout.addWidget(self.examFilterLabel)
         self.headerLayout.addWidget(self.examFilter)
         self.headerLayout.addWidget(self.subjectFilterLabel)
         self.headerLayout.addWidget(self.subjectFilter)
-        self.headerLayout.addWidget(self.btnAddManual)
-        self.headerLayout.addWidget(self.btnAddDescriptive)
-        self.headerLayout.addWidget(self.btnValidate)
-        self.headerLayout.addWidget(self.btnDeleteSelected)
+        self.headerLayout.addLayout(self.actionLayout)
 
         self.searchLayout.addWidget(self.searchBox, 1)
         self.searchLayout.addWidget(self.btnRefresh)
@@ -239,11 +262,11 @@ class BrowserInterface(QWidget):
             if label and label not in labels:
                 labels.append(label)
         if labels:
-            self.repositoryStatusLabel.setText(
-                f"연결된 문제은행: {', '.join(labels)}"
-            )
+            status = f"연결된 문제은행: {', '.join(labels)}"
         else:
-            self.repositoryStatusLabel.setText("현재 문제은행: 기본 문제은행")
+            status = "현재 문제은행: 기본 문제은행"
+        self.repositoryStatusLabel.setText(status)
+        self.repositoryStatusLabel.setToolTip(status)
 
     def _load_subject_filters(self):
         current_code = self.subjectFilter.currentData()
