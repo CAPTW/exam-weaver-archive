@@ -1,0 +1,15 @@
+{
+  "locale": "en",
+  "display_name": "English",
+  "version": 1,
+  "strings": {
+    "menu.home": "Home",
+    "menu.question_management": "Question Management",
+    "menu.practice": "Practice",
+    "menu.export": "Export Exam",
+    "menu.import": "Import Questions",
+    "menu.question_bank_connections": "Question Bank Connections",
+    "menu.codex": "Codex",
+    "menu.settings": "Settings"
+  }
+}
