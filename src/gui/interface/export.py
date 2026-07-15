@@ -22,15 +22,24 @@ from ...exporter.docx import DocxExporter
 
 
 class ExportInterface(QWidget):
-    def __init__(self, db_path, parent=None):
+    def __init__(self, db_path=None, parent=None, repository=None):
         super().__init__(parent)
-        self.repo = ExamRepository(db_path)
+        if repository is None:
+            if db_path is None:
+                raise ValueError("db_path or repository is required")
+            repository = ExamRepository(db_path)
+        self.repo = repository
         self.validator = QuestionValidator(self.repo)
         self.exporter = DocxExporter()
         self.setObjectName("ExportInterface")
 
         self.vBoxLayout = QVBoxLayout(self)
         self.init_ui()
+        self.load_options()
+
+    def set_repository(self, repository):
+        self.repo = repository
+        self.validator = QuestionValidator(repository)
         self.load_options()
 
     def init_ui(self):
@@ -151,7 +160,7 @@ class ExportInterface(QWidget):
         self.examFilter.blockSignals(True)
         self.examFilter.clear()
         for exam in options.get('exams', []):
-            self.examFilter.addItem(f"{exam['name']} ({exam['code']})", exam['code'])
+            self.examFilter.addItem(self._exam_label(exam), exam['code'])
         if self.examFilter.count() > 0:
             self.examFilter.setCurrentIndex(0)
         self.examFilter.blockSignals(False)
@@ -209,12 +218,20 @@ class ExportInterface(QWidget):
         })
 
     @staticmethod
+    def _exam_label(exam):
+        name = exam.get('name') or exam.get('code') or ''
+        code = exam.get('local_code') or exam.get('code') or ''
+        prefix = f"{exam['mount_label']} · " if exam.get('mount_label') else ""
+        return f"{prefix}{name} ({code})"
+
+    @staticmethod
     def _subject_label(subject):
         name = subject.get('name_ko') or subject.get('code') or ''
-        code = subject.get('code') or ''
+        code = subject.get('local_code') or subject.get('code') or ''
+        prefix = f"{subject['mount_label']} · " if subject.get('mount_label') else ""
         if not code or code.startswith(('custom_', 'auto_')) or code == name:
-            return name
-        return f"{name} ({code})"
+            return f"{prefix}{name}"
+        return f"{prefix}{name} ({code})"
 
     def _build_title(self, exam_text, year_from, year_to, subject_text, random_count):
         year_part = str(year_from) if year_from == year_to else f"{year_from}-{year_to}"
@@ -229,12 +246,16 @@ class ExportInterface(QWidget):
 
     def _build_filename(self, exam_code, year_from, year_to, subject_code, random_count):
         year_part = str(year_from) if year_from == year_to else f"{year_from}-{year_to}"
-        filename = f"{exam_code}_{year_part}"
+        filename = f"{self._local_filter_code(exam_code)}_{year_part}"
         if subject_code:
-            filename += f"_{subject_code}"
+            filename += f"_{self._local_filter_code(subject_code)}"
         if random_count:
             filename += f"_rand{random_count}"
         return filename + ".docx"
+
+    @staticmethod
+    def _local_filter_code(code):
+        return str(code or '').split('::', 1)[-1]
 
     def _build_multi_subject_title(self, exam_text, year_from, year_to, subject_requests):
         title = self._build_title(exam_text, year_from, year_to, None, None)

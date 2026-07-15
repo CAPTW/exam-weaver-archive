@@ -75,6 +75,21 @@ def test_build_title_matches_reference_docx_header():
     assert title == "2023-2025 4급 기관사\n기관1"
 
 
+def test_build_filename_uses_local_codes_for_mounted_filters():
+    interface = ExportInterface.__new__(ExportInterface)
+
+    filename = interface._build_filename(
+        'Maritime::coast_guard_navigation',
+        2024,
+        2025,
+        'Maritime::navigation',
+        25,
+    )
+
+    assert filename == 'coast_guard_navigation_2024-2025_navigation_rand25.docx'
+    assert ':' not in filename
+
+
 def test_subject_label_hides_auto_generated_codes():
     assert ExportInterface._subject_label({
         'name_ko': '컴퓨터 이해',
@@ -88,6 +103,83 @@ def test_subject_label_hides_auto_generated_codes():
         'name_ko': '기관1',
         'code': 'engine1',
     }) == '기관1 (engine1)'
+
+
+def test_export_interface_uses_injected_repository_with_mount_labels():
+    class MountedRepositoryStub:
+        def __init__(self):
+            self.requested_exam_code = None
+
+        def get_filter_options(self):
+            return {
+                'exams': [{
+                    'name': '해양경찰 항해학',
+                    'code': 'Maritime::coast_guard_navigation',
+                    'local_code': 'coast_guard_navigation',
+                    'mount_label': 'Maritime',
+                }],
+                'years': [2025],
+            }
+
+        def get_subject_options(self, exam_code):
+            self.requested_exam_code = exam_code
+            return [{
+                'name_ko': '항해학',
+                'code': 'Maritime::navigation',
+                'local_code': 'navigation',
+                'mount_label': 'Maritime',
+            }]
+
+    repository = MountedRepositoryStub()
+
+    interface = ExportInterface(repository=repository)
+
+    assert interface.repo is repository
+    assert interface.examFilter.itemText(0) == 'Maritime · 해양경찰 항해학 (coast_guard_navigation)'
+    assert interface.examFilter.itemData(0) == 'Maritime::coast_guard_navigation'
+    assert repository.requested_exam_code == 'Maritime::coast_guard_navigation'
+    assert interface.subjectFilter.itemText(1) == 'Maritime · 항해학 (navigation)'
+    assert interface.subjectFilter.itemData(1) == 'Maritime::navigation'
+
+    interface.deleteLater()
+    APP.processEvents()
+
+
+def test_export_interface_set_repository_refreshes_filters_and_validator():
+    class FilterRepositoryStub:
+        def __init__(self, mount_id, mount_label, exam_name):
+            self.exam_code = f'{mount_id}::exam'
+            self.mount_label = mount_label
+            self.exam_name = exam_name
+
+        def get_filter_options(self):
+            return {
+                'exams': [{
+                    'name': self.exam_name,
+                    'code': self.exam_code,
+                    'local_code': 'exam',
+                    'mount_label': self.mount_label,
+                }],
+                'years': [2025],
+            }
+
+        def get_subject_options(self, exam_code):
+            assert exam_code == self.exam_code
+            return []
+
+    first = FilterRepositoryStub('first', '첫 번째 DB', '첫 시험')
+    second = FilterRepositoryStub('second', '두 번째 DB', '두 번째 시험')
+    interface = ExportInterface(repository=first)
+
+    interface.set_repository(second)
+
+    assert interface.repo is second
+    assert interface.validator.repository is second
+    assert interface.examFilter.itemData(0) == 'second::exam'
+    assert interface.examFilter.itemText(0) == '두 번째 DB · 두 번째 시험 (exam)'
+
+    interface.deleteLater()
+    APP.processEvents()
 
 
 def test_export_interface_initializes_all_subject_bulk_controls(repo):
