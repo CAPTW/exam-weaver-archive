@@ -22,8 +22,10 @@ from typing import Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
 from src.database.repository import ExamRepository
+from src.database.validator import QuestionValidator
 from src.parser.offline_sources import (
     DocumentRole,
+    RejectedOfflineQuestion,
     classify_offline_document,
     parse_offline_question_pdf,
 )
@@ -32,6 +34,28 @@ from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question
 
 PLACEHOLDER_TEXT = "원문 보기 참조"
 CHOICE_SYMBOLS = ("㉮", "㉯", "㉴", "㉵", "⑤")
+STAGING_BLOCKING_QUALITY_CODES = frozenset(
+    {
+        "empty_question_text",
+        "ocr_placeholder",
+        "suspicious_text_artifact",
+        "ocr_noise_text",
+        "broken_unit_text",
+        "unbalanced_delimiter",
+        "invalid_session",
+        "invalid_question_number",
+        "invalid_correct_answer",
+        "invalid_answer_state",
+        "choice_count",
+        "empty_choice_text",
+        "invalid_choice_symbol",
+        "missing_choice_image_file",
+        "missing_image_path",
+        "missing_image_file",
+        "missing_required_image",
+        "missing_model_answer",
+    }
+)
 REQUIRED_SCHEMA: Mapping[str, frozenset[str]] = {
     "exams": frozenset({"id", "code", "name"}),
     "subjects": frozenset({"id", "code", "name_ko"}),
@@ -169,6 +193,20 @@ class ExamSetValidation:
 
 
 @dataclass(frozen=True)
+class QualityFinding:
+    question_id: int
+    issue_codes: tuple[str, ...]
+    summary: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "question_id": self.question_id,
+            "issue_codes": list(self.issue_codes),
+            "summary": self.summary,
+        }
+
+
+@dataclass(frozen=True)
 class ValidationReport:
     path: Path
     valid: bool
@@ -180,6 +218,7 @@ class ValidationReport:
     missing_provenance_count: int = 0
     counts: Mapping[str, int] = field(default_factory=dict)
     sets: tuple[ExamSetValidation, ...] = ()
+    quality_findings: tuple[QualityFinding, ...] = ()
     error_codes: tuple[str, ...] = ()
     details: tuple[str, ...] = ()
 
@@ -199,6 +238,7 @@ class ValidationReport:
             "missing_provenance_count": self.missing_provenance_count,
             "counts": dict(self.counts),
             "sets": [item.to_dict() for item in self.sets],
+            "quality_findings": [item.to_dict() for item in self.quality_findings],
             "error_codes": list(self.error_codes),
             "details": list(self.details),
         }
@@ -420,6 +460,12 @@ def build_staging_database(
         try:
             metadata = _infer_document_metadata(path, source_root)
             parsed = parse_offline_question_pdf(path, metadata)
+            _record_rejected_questions(
+                database_path,
+                str(row["relative_path"]),
+                metadata,
+                parsed.rejected,
+            )
             expected_count = metadata.get("expected_question_count")
             if not isinstance(expected_count, int) or expected_count < 1:
                 raise ValueError("question coverage is not registered independently")
@@ -472,6 +518,12 @@ def build_staging_database(
             )
             expected_by_key.setdefault(key, set()).update(expected_numbers)
             expected_definitions[key] = ExpectedExamSet(*key, expected_numbers)
+            if parsed.rejected:
+                _record_set_rejections(
+                    database_path,
+                    expected_definitions[key],
+                    len(parsed.rejected),
+                )
             rejected_count += len(parsed.rejected)
             _mark_document_build(
                 database_path,
@@ -503,6 +555,7 @@ def build_staging_database(
         "rebuild_json": reports / "rebuild_summary.json",
         "validation_json": reports / "validation.json",
         "validation_csv": reports / "validation_sets.csv",
+        "quarantine_json": reports / "quality_quarantine.json",
     }
     _write_json(report_paths["inventory_json"], {"counts": dict(counts), "documents": inventory})
     _write_inventory_csv(report_paths["inventory_csv"], inventory)
@@ -521,6 +574,13 @@ def build_staging_database(
     validation = validate_staging_database(database_path, expected_sets)
     _write_json(report_paths["validation_json"], validation.to_dict())
     _write_validation_csv(report_paths["validation_csv"], validation.sets)
+    _write_json(
+        report_paths["quarantine_json"],
+        {
+            "parser_rejections": _load_quarantine_rows(database_path),
+            "quality_findings": [item.to_dict() for item in validation.quality_findings],
+        },
+    )
     return summary
 
 
@@ -534,6 +594,7 @@ def validate_staging_database(
     normalized_sets = tuple(_coerce_expected_set(item) for item in expected_sets)
     errors: list[str] = []
     details: list[str] = []
+    quality_findings: tuple[QualityFinding, ...] = ()
     if not database_path.is_file():
         return ValidationReport(
             path=database_path,
@@ -765,6 +826,14 @@ def validate_staging_database(
                 len(item.missing_provenance) for item in set_reports
             )
             counts = _database_counts_from_connection(connection)
+        try:
+            quality_findings = _scan_staging_quality(database_path)
+        except Exception as exc:
+            errors.append("quality_gate_scan_error")
+            details.append(f"quality scan failed: {type(exc).__name__}: {exc}")
+        else:
+            if quality_findings:
+                errors.append("quality_gate_findings")
     except sqlite3.DatabaseError as exc:
         return ValidationReport(
             path=database_path,
@@ -787,9 +856,44 @@ def validate_staging_database(
         missing_provenance_count=missing_provenance_count,
         counts=counts,
         sets=set_reports,
+        quality_findings=quality_findings,
         error_codes=unique_errors,
         details=tuple(details),
     )
+
+
+def _scan_staging_quality(path: Path) -> tuple[QualityFinding, ...]:
+    findings = QuestionValidator(_ReadOnlyValidationRepository(path)).scan(limit=None)
+    blocked: list[QualityFinding] = []
+    for finding in findings:
+        selected = [
+            issue
+            for issue in finding["issues"]
+            if issue["code"] in STAGING_BLOCKING_QUALITY_CODES
+        ]
+        if not selected:
+            continue
+        blocked.append(
+            QualityFinding(
+                question_id=int(finding["question_id"]),
+                issue_codes=tuple(
+                    dict.fromkeys(str(issue["code"]) for issue in selected)
+                ),
+                summary=", ".join(str(issue["message"]) for issue in selected),
+            )
+        )
+    return tuple(blocked)
+
+
+class _ReadOnlyValidationRepository(ExamRepository):
+    """ExamRepository query surface without schema initialization or writes."""
+
+    def __init__(self, path: Path):
+        super().__init__(str(path.resolve()))
+        self._initialized = True
+
+    def _get_connection(self) -> sqlite3.Connection:
+        return sqlite3.connect(f"{Path(self.db_path).resolve().as_uri()}?mode=ro", uri=True)
 
 
 def replace_mounted_database(
@@ -964,6 +1068,21 @@ def _initialize_rebuild_schema(path: Path) -> None:
                 rejected_count INTEGER NOT NULL,
                 PRIMARY KEY (exam_type, subject_name, year, session)
             );
+            CREATE TABLE IF NOT EXISTS offline_rebuild_quarantine (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_relative_path TEXT NOT NULL,
+                exam_type TEXT NOT NULL,
+                subject_name TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                session INTEGER NOT NULL,
+                question_number INTEGER NOT NULL,
+                source_page INTEGER NOT NULL,
+                reason_codes_json TEXT NOT NULL,
+                stem TEXT NOT NULL,
+                choices_json TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                diagnostics_json TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS offline_rebuild_set_provenance (
                 exam_type TEXT NOT NULL, subject_name TEXT NOT NULL,
                 year INTEGER NOT NULL, session INTEGER NOT NULL,
@@ -981,9 +1100,88 @@ def _initialize_rebuild_schema(path: Path) -> None:
 def _record_set_rejections(path: Path, expected: ExpectedExamSet, count: int) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute(
-            "INSERT OR REPLACE INTO offline_rebuild_rejections VALUES (?, ?, ?, ?, ?)",
+            """
+            INSERT INTO offline_rebuild_rejections VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(exam_type, subject_name, year, session)
+            DO UPDATE SET rejected_count = rejected_count + excluded.rejected_count
+            """,
             (*expected.key, int(count)),
         )
+
+
+def _record_rejected_questions(
+    path: Path,
+    source_relative_path: str,
+    metadata: Mapping[str, object],
+    rejected: Sequence[RejectedOfflineQuestion],
+) -> None:
+    rows = [
+        (
+            source_relative_path,
+            str(metadata["exam_type"]),
+            str(metadata["subject_name"]),
+            int(metadata["year"]),
+            int(metadata["session"]),
+            int(item.question.number),
+            int(item.question.source_page),
+            json.dumps(list(item.reason_codes), ensure_ascii=False),
+            item.question.stem,
+            json.dumps(list(item.question.choices), ensure_ascii=False),
+            float(item.question.confidence),
+            json.dumps(list(item.question.diagnostics), ensure_ascii=False),
+        )
+        for item in rejected
+    ]
+    if not rows:
+        return
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO offline_rebuild_quarantine (
+                source_relative_path, exam_type, subject_name, year, session,
+                question_number, source_page, reason_codes_json, stem,
+                choices_json, confidence, diagnostics_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+
+def _load_quarantine_rows(path: Path) -> list[dict[str, object]]:
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='offline_rebuild_quarantine'"
+        ).fetchone()
+        if not exists:
+            return []
+        rows = connection.execute(
+            """
+            SELECT source_relative_path, exam_type, subject_name, year, session,
+                   question_number, source_page, reason_codes_json, stem,
+                   choices_json, confidence, diagnostics_json
+            FROM offline_rebuild_quarantine
+            ORDER BY source_relative_path, question_number, id
+            """
+        ).fetchall()
+    return [
+        {
+            "source_relative_path": str(row["source_relative_path"]),
+            "exam_type": str(row["exam_type"]),
+            "subject_name": str(row["subject_name"]),
+            "year": int(row["year"]),
+            "session": int(row["session"]),
+            "question_number": int(row["question_number"]),
+            "source_page": int(row["source_page"]),
+            "reason_codes": json.loads(str(row["reason_codes_json"])),
+            "stem": str(row["stem"]),
+            "choices": json.loads(str(row["choices_json"])),
+            "confidence": float(row["confidence"]),
+            "diagnostics": json.loads(str(row["diagnostics_json"])),
+        }
+        for row in rows
+    ]
 
 
 def _persist_registered_set(

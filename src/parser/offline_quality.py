@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .formatting import has_suspicious_text_artifact
 from .offline_exam import ParsedOfflineQuestion
+from .text_quality import text_quality_issue_codes
 
 
 MIN_IMPORT_CONFIDENCE = 0.70
@@ -65,6 +67,9 @@ def validate_offline_question(
 
     if not stem:
         reasons.append("empty_stem")
+    _append_text_quality_reasons(reasons, stem, "stem")
+    for choice in choices:
+        _append_text_quality_reasons(reasons, choice, "choice")
     if len(choices) not in (4, 5):
         reasons.append("invalid_choice_count")
     if any(not choice for choice in choices):
@@ -128,7 +133,18 @@ def validate_offline_question(
     ):
         reasons.append("parser_diagnostic")
 
-    return QualityResult(importable=not reasons, reason_codes=tuple(reasons))
+    unique_reasons = tuple(dict.fromkeys(reasons))
+    return QualityResult(importable=not unique_reasons, reason_codes=unique_reasons)
+
+
+def _append_text_quality_reasons(reasons: list[str], text: str, location: str) -> None:
+    if has_suspicious_text_artifact(text):
+        reasons.append(f"suspicious_{location}")
+    for code in text_quality_issue_codes(text):
+        if code == "unbalanced_delimiter":
+            reasons.append(f"unbalanced_{location}_delimiter")
+        else:
+            reasons.append(f"{code}_{location}")
 
 
 def _looks_like_promoted_propositions(choices: list[str]) -> bool:

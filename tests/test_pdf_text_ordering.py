@@ -76,6 +76,49 @@ def test_pdf_extractor_places_overlapping_parenthesis_after_choice_marker():
     assert '㉯ (출력용량) / (입력용량)' in text
 
 
+def test_pdf_extractor_restores_arrows_by_visual_position_not_stream_order():
+    page = SimpleNamespace(
+        rect=SimpleNamespace(width=728),
+        get_text=lambda kind: [
+            _word(80, 100, 130, '정적압축'),
+            _word(160, 100, 210, '정적팽창'),
+            _word(240, 100, 290, '단열팽창'),
+            _word(320, 100, 370, '단열압축'),
+            # The PDF stream emits symbols last even though their x positions
+            # place them between the four process labels.
+            _word(140, 100, 150, '→'),
+            _word(220, 100, 230, '→'),
+            _word(300, 100, 310, '→'),
+        ] if kind == 'words' else [],
+    )
+
+    text = PDFExtractor()._extract_positioned_text(page)
+
+    assert text == '정적압축 → 정적팽창 → 단열팽창 → 단열압축'
+
+
+def test_pdf_extractor_restores_arrows_between_multiword_sequence_steps():
+    page = SimpleNamespace(
+        rect=SimpleNamespace(width=728),
+        get_text=lambda kind: [
+            _word(394.9, 483.3, 447.4, '㉮총톤수'),
+            _word(453.4, 483.3, 477.4, '측정'),
+            _word(489.4, 483.3, 513.4, '등기'),
+            _word(525.4, 483.3, 561.4, '선적항'),
+            _word(567.4, 483.3, 591.4, '결정'),
+            _word(603.4, 483.3, 627.4, '등록'),
+            # Stream order puts all arrows last; coordinates carry the order.
+            _word(477.4, 483.3, 489.4, '→'),
+            _word(513.4, 483.3, 525.4, '→'),
+            _word(591.4, 483.3, 603.4, '→'),
+        ] if kind == 'words' else [],
+    )
+
+    text = PDFExtractor()._extract_positioned_text(page)
+
+    assert text == '㉮총톤수 측정→등기→선적항 결정→등록'
+
+
 def test_pdf_extractor_uses_ocr_for_short_native_text_with_embedded_images():
     assert PDFExtractor._should_use_ocr_fallback('', False) is True
     assert PDFExtractor._should_use_ocr_fallback('해사영어 정답안', True) is True

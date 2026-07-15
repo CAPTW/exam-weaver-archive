@@ -22,6 +22,7 @@ from src.parser.formatting import (
     normalize_latex_text,
     repair_extracted_text_artifacts,
 )
+from src.parser.text_quality import has_unbalanced_delimiters as _has_unbalanced_delimiters
 
 
 @dataclass
@@ -306,18 +307,7 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
 
 
 def has_unbalanced_delimiters(text: str) -> bool:
-    value = str(text or "")
-    paren_depth = 0
-    extra_close = 0
-    for index, char in enumerate(value):
-        if char == "(":
-            paren_depth += 1
-        elif char == ")":
-            if paren_depth:
-                paren_depth -= 1
-            elif not re.search(r"\d+\s*$", value[:index]):
-                extra_close += 1
-    return paren_depth != 0 or extra_close != 0 or value.count("[") != value.count("]")
+    return _has_unbalanced_delimiters(text)
 
 
 def write_report(

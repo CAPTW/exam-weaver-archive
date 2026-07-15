@@ -1,6 +1,7 @@
 import json
 
 from scripts.repair_db_text import has_unbalanced_delimiters, repair_text_and_format
+from src.database.validator import QuestionValidator
 
 
 def test_has_unbalanced_delimiters_ignores_fraction_parentheses():
@@ -13,6 +14,9 @@ def test_has_unbalanced_delimiters_ignores_fraction_parentheses():
     assert not has_unbalanced_delimiters(
         "Pointed out (   ) by PSC officer as follows; 1) Annual survey not conducted for safety construction cert.2) The incinerator not working."
     )
+    example = '"Ex.) In spite of the rough weather, we finished loading cargoes."'
+    assert not has_unbalanced_delimiters(example)
+    assert not QuestionValidator(None)._has_unbalanced_delimiters(example)
 
 
 def test_has_unbalanced_delimiters_detects_real_imbalance():

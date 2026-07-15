@@ -204,6 +204,7 @@ def has_suspicious_text_artifact(value: str) -> bool:
             continue
         return True
     suspect_patterns = [
+        r'(?:→\s*){2,}$',
         r'제\s+번\s+\d+\s+',
         r'제\s+심\s+\d+\s+',
         r'행정\s+사이클.+?\s+[24]\s+(?:있|하중|인장)',
@@ -702,6 +703,7 @@ def repair_misordered_prompt_artifacts(text: str) -> str:
 
 def repair_reversed_choice_fragments(text: str) -> str:
     raw = str(text or '').strip()
+    raw = _repair_displaced_sequence_arrows(raw)
     raw = _repair_known_choice_misorders(raw)
     raw = re.sub(
         r'^임의의\s+시간의\s+기간\s+중\s+시간과\s+임의의\s+24\s+'
@@ -1101,6 +1103,23 @@ def repair_reversed_choice_fragments(text: str) -> str:
         raw,
     )
     return raw
+
+
+def _repair_displaced_sequence_arrows(text: str) -> str:
+    """Restore arrows emitted after all labels by PDF stream-order extraction."""
+    raw = str(text or '').strip()
+    match = re.fullmatch(r'(?P<body>.*?\S)(?P<arrows>(?:\s*→){2,})\s*', raw)
+    if not match:
+        return raw
+
+    body = match.group('body').strip()
+    arrow_count = match.group('arrows').count('→')
+    tokens = body.split()
+    if '→' in body or len(tokens) != arrow_count + 1:
+        return raw
+    if any(not re.search(r'[0-9A-Za-z가-힣一-龥]', token) for token in tokens):
+        return raw
+    return '→'.join(tokens)
 
 
 def _repair_known_choice_misorders(text: str) -> str:

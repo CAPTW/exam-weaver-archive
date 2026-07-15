@@ -163,6 +163,27 @@ def test_repair_extracted_text_artifacts_reorders_reversed_choice_fragments():
     ) == "줄의 법칙"
 
 
+def test_repair_extracted_text_artifacts_restores_displaced_sequence_arrows():
+    assert repair_extracted_text_artifacts(
+        "정적압축 정적팽창 단열팽창 단열압축→ → →"
+    ) == "정적압축→정적팽창→단열팽창→단열압축"
+    assert repair_extracted_text_artifacts("1 2 3 4→ → →") == "1→2→3→4"
+
+
+def test_repair_extracted_text_artifacts_does_not_guess_ambiguous_tail_arrows():
+    assert repair_extracted_text_artifacts("밸브를 열고 상태를 확인한다→ →") == (
+        "밸브를 열고 상태를 확인한다→ →"
+    )
+    assert repair_extracted_text_artifacts("A B C→ → →") == "A B C→ → →"
+
+
+def test_suspicious_text_detector_flags_displaced_sequence_arrows():
+    assert has_suspicious_text_artifact(
+        "정적압축 정적팽창 단열팽창 단열압축→ → →"
+    )
+    assert not has_suspicious_text_artifact("정적압축→정적팽창→단열팽창→단열압축")
+
+
 def test_repair_extracted_text_artifacts_rebuilds_rest_hours_numeric_choice():
     assert repair_extracted_text_artifacts(
         "임의의 시간의 기간 중 시간과 임의의 24 10 7 일의 기간 중 시간을 하회해서는 안 된다77."

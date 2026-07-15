@@ -80,6 +80,23 @@ def test_question_validator_accepts_imported_exam_session_identifiers(
     )
 
 
+def test_question_validator_maps_shared_text_quality_codes(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    sample_question.text = "다음 (설명에서 [0/해 값을 고르시오."
+    repo.save_questions([sample_question], sample_metadata)
+
+    codes = {
+        issue["code"]
+        for finding in QuestionValidator(repo).scan()
+        for issue in finding["issues"]
+    }
+
+    assert {"broken_unit_text", "unbalanced_delimiter"} <= codes
+
+
 def test_question_validator_accepts_clean_question(repo, sample_metadata, sample_question):
     repo.save_questions([sample_question], sample_metadata)
 

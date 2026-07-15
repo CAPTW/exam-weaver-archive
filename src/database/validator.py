@@ -5,6 +5,12 @@ from typing import Dict, List
 from ..parser.formatting import has_suspicious_text_artifact
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..parser.text_quality import (
+    BROKEN_UNIT_PATTERN,
+    OCR_NOISE_PATTERN,
+    has_unbalanced_delimiters,
+    text_quality_issue_codes,
+)
 
 
 class QuestionValidator:
@@ -24,13 +30,8 @@ class QuestionValidator:
         r'\bfig\.?\b|\bfigure\b|\bdiagram\b)',
         re.IGNORECASE,
     )
-    OCR_NOISE_PATTERN = re.compile(
-        r'(?:0[卜ㅏ]|(?<![A-Za-z])[O0]h(?![A-Za-z])|[卜入人]{2,}|으\s*(?:9|느|그)|으\s+거|'
-        r'[가-힣A-Za-z][卜入人][가-힣A-Za-z]|[쥐튢飇恤喬盞])'
-    )
-    BROKEN_UNIT_PATTERN = re.compile(
-        r'\[(?:0/해|Ⅵ|H기|시|외|이(?=\s|$|[\]\)])|P비|kg되|넣디|Q|\(\)|\))'
-    )
+    OCR_NOISE_PATTERN = OCR_NOISE_PATTERN
+    BROKEN_UNIT_PATTERN = BROKEN_UNIT_PATTERN
     LEGACY_CHOICE_SYMBOLS = {
         1: {'㉮', '가', '가.', '가)', 'ㄱ'},
         2: {'㉯', '나', '나.', '나)', 'ㄴ'},
@@ -198,28 +199,16 @@ class QuestionValidator:
         return bool(self.IMAGE_HINT_PATTERN.search(text))
 
     def _validate_text_quality(self, text: str, label: str, issues: List[Dict]) -> None:
-        if self.OCR_NOISE_PATTERN.search(text):
+        codes = text_quality_issue_codes(text)
+        if 'ocr_noise' in codes:
             issues.append(self._issue('ocr_noise_text', f'{label} OCR 잡문자 의심', 'error'))
-        if self.BROKEN_UNIT_PATTERN.search(text):
+        if 'broken_unit' in codes:
             issues.append(self._issue('broken_unit_text', f'{label} 단위/수식 깨짐 의심', 'warning'))
-        if self._has_unbalanced_delimiters(text):
+        if 'unbalanced_delimiter' in codes:
             issues.append(self._issue('unbalanced_delimiter', f'{label} 괄호/대괄호 불균형', 'warning'))
 
     def _has_unbalanced_delimiters(self, text: str) -> bool:
-        value = str(text or '')
-        if not value:
-            return False
-        paren_depth = 0
-        extra_close = 0
-        for index, char in enumerate(value):
-            if char == '(':
-                paren_depth += 1
-            elif char == ')':
-                if paren_depth:
-                    paren_depth -= 1
-                elif not re.search(r'\d+\s*$', value[:index]):
-                    extra_close += 1
-        return paren_depth != 0 or extra_close != 0 or value.count('[') != value.count(']')
+        return has_unbalanced_delimiters(text)
 
     def _valid_session(self, value) -> bool:
         if not isinstance(value, int):

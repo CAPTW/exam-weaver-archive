@@ -22,15 +22,20 @@ from src.database.staging import (
     registered_provider_preflight,
 )
 from src.parser.offline_exam import ParsedOfflineQuestion
-from src.parser.offline_sources import DocumentRole, OfflineParseResult
+from src.parser.offline_sources import (
+    DocumentRole,
+    OfflineParseResult,
+    RejectedOfflineQuestion,
+)
 from src.parser.question import Choice, Question
 
 
 def _question(number: int, *, answer: int = 1, placeholder: bool = False) -> Question:
+    symbols = ("㉮", "㉯", "㉴", "㉵")
     choices = [
         Choice(
             number=index,
-            symbol=str(index),
+            symbol=symbols[index - 1],
             text="원문 보기 참조" if placeholder and index == 1 else f"선지 {index}",
         )
         for index in range(1, 5)
@@ -130,6 +135,548 @@ def test_applies_exact_source_repairs_transactionally_to_staging_database(tmp_pa
         ]
     assert stem == "원문에서 확인한 발문은?"
     assert choices == ["갑", "을", "병", "정"]
+
+
+def test_applies_legacy_repairs_by_exam_and_subject_code_with_missing_page(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "legacy.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id, subject_code, exam_code = connection.execute(
+            """
+            SELECT q.id, s.code, e.code
+            FROM questions q
+            JOIN exam_subjects es ON es.id = q.exam_subject_id
+            JOIN subjects s ON s.id = es.subject_id
+            JOIN exams e ON e.id = es.exam_id
+            """
+        ).fetchone()
+        connection.execute(
+            "UPDATE questions SET source_page = NULL WHERE id = ?", (question_id,)
+        )
+        other_exam_id = connection.execute(
+            "INSERT INTO exams (code, name) VALUES ('다른시험', '다른 시험')"
+        ).lastrowid
+        subject_id = connection.execute(
+            "SELECT id FROM subjects WHERE code = ?", (subject_code,)
+        ).fetchone()[0]
+        other_exam_subject_id = connection.execute(
+            """
+            INSERT INTO exam_subjects (exam_id, subject_id, display_order)
+            VALUES (?, ?, 1)
+            """,
+            (other_exam_id, subject_id),
+        ).lastrowid
+        connection.execute(
+            """
+            INSERT INTO questions (
+                exam_subject_id, year, session, question_number,
+                question_text, correct_answer, source_page
+            ) VALUES (?, 2024, 2, 1, '다른 시험의 같은 번호', 1, NULL)
+            """,
+            (other_exam_subject_id,),
+        )
+
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "exam_code": exam_code,
+                        "subject_code": subject_code,
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 33,
+                        "repaired_stem": "원문으로 복구한 발문",
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_audited_repairs(database, repairs)
+
+    assert result.applied_records == 1
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            "SELECT question_text, source_page FROM questions ORDER BY id"
+        ).fetchall()
+    assert rows == [("원문으로 복구한 발문", 33), ("다른 시험의 같은 번호", None)]
+
+
+def test_builds_maritime_repair_bundle_from_partial_exact_source_fields(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "legacy.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id = connection.execute("SELECT id FROM questions").fetchone()[0]
+    audit = tmp_path / "navigation.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "id": question_id,
+                        "status": "confirmed",
+                        "source_filename": "2024/source.pdf",
+                        "source_page": 7,
+                        "exact_source_value": {
+                            "question_text": "원문 발문",
+                            "choice_2": "원문 둘째 선지",
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "bundle.json"
+
+    payload = build_bundle(database, [audit], output)
+
+    assert payload["repairs"] == [
+        {
+            "exam_code": "해경",
+            "subject_code": "navigation",
+            "year": 2024,
+            "session": 2,
+            "question_number": 1,
+            "source_page": 7,
+            "expected_current_source_page": 1,
+            "source_pdf_relative_path": "2024/source.pdf",
+            "repaired_stem": "원문 발문",
+            "repaired_choices": ["선지 1", "원문 둘째 선지", "선지 3", "선지 4"],
+            "confidence": "exact_source",
+        }
+    ]
+    assert json.loads(output.read_text(encoding="utf-8")) == payload
+
+
+def test_exact_source_repairs_correct_audited_source_page_idempotently(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "wrong-source-page.db"
+    _database(database, [_question(1)])
+    repairs = tmp_path / "source-page-repairs.json"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 13,
+                        "expected_current_source_page": 1,
+                        "repaired_stem": "원문 발문",
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    first = apply_audited_repairs(database, repairs)
+    second = apply_audited_repairs(database, repairs)
+
+    assert first.changed_source_pages == 1
+    assert second.changed_source_pages == 0
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT source_page FROM questions").fetchone()[0] == 13
+
+
+def test_exact_source_repairs_restore_missing_choice_rows(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "missing-choice.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id = connection.execute("SELECT id FROM questions").fetchone()[0]
+        connection.execute(
+            "DELETE FROM question_choices WHERE question_id = ? AND choice_number = 1",
+            (question_id,),
+        )
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_choices": ["원문 1", "원문 2", "원문 3", "원문 4"],
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    apply_audited_repairs(database, repairs)
+
+    with sqlite3.connect(database) as connection:
+        choices = connection.execute(
+            """
+            SELECT choice_number, choice_symbol, choice_text
+            FROM question_choices WHERE question_id = ? ORDER BY choice_number
+            """,
+            (question_id,),
+        ).fetchall()
+    assert choices == [
+        (1, "㉮", "원문 1"),
+        (2, "㉯", "원문 2"),
+        (3, "㉴", "원문 3"),
+        (4, "㉵", "원문 4"),
+    ]
+
+
+def test_exact_source_repairs_restore_image_only_choice_rows(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "missing-image-choices.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id = connection.execute("SELECT id FROM questions").fetchone()[0]
+        connection.execute(
+            "DELETE FROM question_choices WHERE question_id = ?", (question_id,)
+        )
+    repairs = tmp_path / "image-repairs.json"
+    image_paths = [f"data/extracted/repairs/q1_choice_{number}.png" for number in range(1, 5)]
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_choices": ["", "", "", ""],
+                        "repaired_choice_image_paths": image_paths,
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    apply_audited_repairs(database, repairs)
+
+    with sqlite3.connect(database) as connection:
+        choices = connection.execute(
+            """
+            SELECT choice_number, choice_text, choice_image_path
+            FROM question_choices WHERE question_id = ? ORDER BY choice_number
+            """,
+            (question_id,),
+        ).fetchall()
+    assert choices == [
+        (number, "", image_paths[number - 1]) for number in range(1, 5)
+    ]
+
+
+def test_builds_maritime_bundle_for_image_only_choices(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "legacy-images.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id = connection.execute("SELECT id FROM questions").fetchone()[0]
+        connection.execute(
+            "DELETE FROM question_choices WHERE question_id = ?", (question_id,)
+        )
+    image_paths = [f"data/extracted/repairs/q1_choice_{number}.png" for number in range(1, 5)]
+    audit = tmp_path / "image-audit.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "id": question_id,
+                        "status": "confirmed",
+                        "source_filename": "2024/source.pdf",
+                        "source_page": 7,
+                        "exact_source_value": {"choice_image_paths": image_paths},
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bundle(database, [audit], tmp_path / "bundle.json")
+
+    repair = payload["repairs"][0]
+    assert repair["repaired_choices"] == ["", "", "", ""]
+    assert repair["repaired_choice_image_paths"] == image_paths
+
+
+def test_exact_source_repairs_restore_question_image(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "question-image.db"
+    _database(database, [_question(1)])
+    repairs = tmp_path / "question-image-repairs.json"
+    image_path = "data/extracted/images/ocr_repairs/1/question.png"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_question_image_path": image_path,
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_audited_repairs(database, repairs)
+
+    assert result.changed_question_images == 1
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT has_image, image_path FROM questions"
+        ).fetchone() == (1, image_path)
+
+
+def test_builds_maritime_bundle_with_question_image(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "legacy-question-image.db"
+    _database(database, [_question(1)])
+    image_path = "data/extracted/images/ocr_repairs/1/question.png"
+    audit = tmp_path / "question-image-audit.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "id": 1,
+                        "status": "confirmed",
+                        "source_filename": "2024/source.pdf",
+                        "source_page": 7,
+                        "exact_source_value": {
+                            "question_image_path": image_path,
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bundle(database, [audit], tmp_path / "bundle.json")
+
+    assert payload["repairs"][0]["repaired_question_image_path"] == image_path
+
+
+def test_builds_maritime_bundle_from_nested_visual_audit_schema(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "nested-visual-audit.db"
+    _database(database, [_question(1)])
+    audit = tmp_path / "nested-visual-audit.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "id": 1,
+                        "status": "confirmed",
+                        "source_evidence": {
+                            "source_pdf": "E:/corpus/0. 기출문제 모음/2019/source.pdf",
+                            "source_page": 7,
+                        },
+                        "exact_source_value": {
+                            "question_text": "원문 발문",
+                            "choices": [
+                                {"choice_number": number, "choice_text": f"원문 {number}"}
+                                for number in range(1, 5)
+                            ],
+                            "choice_image_crops": [
+                                {
+                                    "choice_number": number,
+                                    "path": f"data/extracted/repairs/choice_{number}.png",
+                                }
+                                for number in range(1, 5)
+                            ],
+                            "source_figure_crop": "data/extracted/repairs/question.png",
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bundle(database, [audit], tmp_path / "bundle.json")
+
+    repair = payload["repairs"][0]
+    assert repair["source_pdf_relative_path"] == "2019/source.pdf"
+    assert repair["source_page"] == 7
+    assert repair["repaired_stem"] == "원문 발문"
+    assert repair["repaired_choices"] == ["원문 1", "원문 2", "원문 3", "원문 4"]
+    assert repair["repaired_choice_image_paths"] == [
+        f"data/extracted/repairs/choice_{number}.png" for number in range(1, 5)
+    ]
+    assert repair["repaired_question_image_path"] == "data/extracted/repairs/question.png"
+
+
+def test_maritime_bundle_merges_compatible_duplicate_audits(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "duplicate-audits.db"
+    _database(database, [_question(1)])
+    common = {
+        "id": 1,
+        "status": "confirmed",
+        "source_filename": "2024/source.pdf",
+        "source_page": 1,
+    }
+    stem_audit = tmp_path / "stem.json"
+    stem_audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {**common, "exact_source_value": {"question_text": "정확 발문"}}
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    choice_audit = tmp_path / "choices.json"
+    choice_audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {**common, "exact_source_value": {"choices": ["가", "나", "다", "라"]}}
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    spacing_audit = tmp_path / "spacing.json"
+    spacing_audit.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {**common, "exact_source_value": {"question_text": "정확   발문"}}
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bundle(
+        database,
+        [stem_audit, spacing_audit, choice_audit],
+        tmp_path / "bundle.json",
+    )
+
+    assert len(payload["repairs"]) == 1
+    assert payload["repairs"][0]["repaired_stem"] == "정확 발문"
+    assert payload["repairs"][0]["repaired_choices"] == ["가", "나", "다", "라"]
+
+
+def test_maritime_bundle_rejects_conflicting_duplicate_audits(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "conflicting-audits.db"
+    _database(database, [_question(1)])
+    audits = []
+    for index, stem in enumerate(("원문 A", "원문 B"), start=1):
+        audit = tmp_path / f"audit-{index}.json"
+        audit.write_text(
+            json.dumps(
+                {
+                    "records": [
+                        {
+                            "id": 1,
+                            "status": "confirmed",
+                            "source_filename": "2024/source.pdf",
+                            "source_page": 1,
+                            "exact_source_value": {"question_text": stem},
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        audits.append(audit)
+
+    with pytest.raises(ValueError, match="conflicting duplicate audited repair"):
+        build_bundle(database, audits, tmp_path / "bundle.json")
+
+
+def test_maritime_bundle_can_explicitly_prefer_later_direct_source_audit(tmp_path):
+    from scripts.build_maritime_source_repairs import build_bundle
+
+    database = tmp_path / "superseding-audits.db"
+    _database(database, [_question(1)])
+    audits = []
+    for index, stem in enumerate(("이전 감사값", "재대조한 원문"), start=1):
+        audit = tmp_path / f"audit-{index}.json"
+        audit.write_text(
+            json.dumps(
+                {
+                    "records": [
+                        {
+                            "id": 1,
+                            "status": "confirmed",
+                            "source_filename": "2024/source.pdf",
+                            "source_page": 1,
+                            "exact_source_value": {"question_text": stem},
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        audits.append(audit)
+
+    payload = build_bundle(
+        database,
+        audits,
+        tmp_path / "bundle.json",
+        prefer_later_audit=True,
+    )
+
+    assert payload["repairs"][0]["repaired_stem"] == "재대조한 원문"
 
 
 def test_registered_provider_reuses_preparsed_source_pages(tmp_path):
@@ -232,6 +779,7 @@ def test_build_inventories_documents_writes_reports_schema_and_provenance(tmp_pa
         "rebuild_json",
         "validation_json",
         "validation_csv",
+        "quarantine_json",
     }
     assert all(Path(path).is_file() for path in summary.report_paths.values())
     validation_payload = json.loads(
@@ -485,6 +1033,94 @@ def test_validation_rejects_non_database_and_missing_application_schema(tmp_path
     assert empty_report.integrity_check == "ok"
     assert empty_report.schema_valid is False
     assert "application_schema" in empty_report.error_codes
+
+
+def test_staging_quality_gate_blocks_persisted_ocr_corruption(tmp_path):
+    staging_db = tmp_path / "staging.db"
+    _database(staging_db, [_question(1)])
+    with sqlite3.connect(staging_db) as connection:
+        connection.execute(
+            "UPDATE questions SET question_text = ? WHERE question_number = 1",
+            ("깨진 0卜 문장",),
+        )
+
+    report = validate_staging_database(staging_db, [_expected(1)])
+
+    assert report.valid is False
+    assert "quality_gate_findings" in report.error_codes
+    assert report.quality_findings[0].issue_codes == ("ocr_noise_text",)
+
+
+def test_build_records_rejected_candidate_details_and_report(tmp_path, monkeypatch):
+    from src.database import staging
+
+    root = tmp_path / "pdfs"
+    root.mkdir()
+    question_pdf = root / "2024_해경_항해_문제.pdf"
+    question_pdf.write_bytes(b"synthetic")
+    accepted = ParsedOfflineQuestion(
+        1,
+        "정상 발문",
+        ["하나", "둘", "셋", "넷"],
+        1,
+        1.0,
+        (),
+    )
+    rejected_question = ParsedOfflineQuestion(
+        2,
+        "격리 발문",
+        ["깨진 선지→ →", "둘", "셋", "넷"],
+        3,
+        0.95,
+        ("source_text_repair",),
+    )
+    monkeypatch.setattr(
+        staging,
+        "parse_offline_question_pdf",
+        lambda path, metadata: OfflineParseResult(
+            path=path,
+            role=DocumentRole.QUESTION,
+            metadata=MappingProxyType(dict(metadata)),
+            questions=(accepted,),
+            rejected=(
+                RejectedOfflineQuestion(rejected_question, ("suspicious_choice",)),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        staging,
+        "_infer_document_metadata",
+        lambda path, _root: {
+            "exam_type": "해경",
+            "subject_name": "항해",
+            "year": 2024,
+            "session": 2,
+            "document_id": path.stem,
+            "expected_question_count": 1,
+        },
+    )
+    monkeypatch.setattr(staging, "_resolve_answer_key", lambda *_args: ({1: 1}, None))
+
+    summary = build_staging_database(
+        root,
+        tmp_path / "staging.db",
+        tmp_path / "reports",
+        inventory_contract=None,
+    )
+
+    with sqlite3.connect(summary.staging_db) as connection:
+        row = connection.execute(
+            "SELECT reason_codes_json, stem, source_page, choices_json "
+            "FROM offline_rebuild_quarantine"
+        ).fetchone()
+    assert json.loads(row[0]) == ["suspicious_choice"]
+    assert row[1:3] == ("격리 발문", 3)
+    assert json.loads(row[3])[0] == "깨진 선지→ →"
+    payload = json.loads(
+        summary.report_paths["quarantine_json"].read_text(encoding="utf-8")
+    )
+    assert payload["parser_rejections"][0]["reason_codes"] == ["suspicious_choice"]
+    assert payload["parser_rejections"][0]["question_number"] == 2
 
 
 def test_replacement_validation_failure_leaves_mounted_bytes_unchanged(tmp_path):

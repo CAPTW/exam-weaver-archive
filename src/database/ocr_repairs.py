@@ -8,11 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+CHOICE_SYMBOLS = ("㉮", "㉯", "㉴", "㉵", "⑤")
+
+
 @dataclass(frozen=True)
 class OcrRepairResult:
     exact_records: int
     applied_records: int
+    changed_source_pages: int
     changed_stems: int
+    changed_question_images: int
     changed_choice_sets: int
 
 
@@ -30,29 +35,50 @@ def apply_audited_repairs(
         if item.get("confidence") == "exact_source"
     ]
     applied_records = 0
+    changed_source_pages = 0
     changed_stems = 0
+    changed_question_images = 0
     changed_choice_sets = 0
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         for repair in exact:
+            exam_code = str(repair.get("exam_code", "") or "").strip()
+            subject_code = str(repair.get("subject_code", "") or "").strip()
+            if bool(exam_code) != bool(subject_code):
+                raise ValueError(
+                    "audited repair requires both exam_code and subject_code"
+                )
+            if exam_code:
+                subject_predicate = "e.code = ? AND s.code = ?"
+                subject_params = (exam_code, subject_code)
+                identity_subject = (exam_code, subject_code)
+            else:
+                subject = str(repair.get("subject", "") or "").strip()
+                if not subject:
+                    raise ValueError("audited repair is missing subject identity")
+                subject_predicate = "s.name_ko = ?"
+                subject_params = (subject,)
+                identity_subject = (subject,)
             rows = connection.execute(
-                """
+                f"""
                 SELECT q.id, q.question_text, q.source_page
                 FROM questions q
                 JOIN exam_subjects es ON es.id = q.exam_subject_id
                 JOIN subjects s ON s.id = es.subject_id
-                WHERE s.name_ko = ? AND q.year = ? AND q.session = ?
+                JOIN exams e ON e.id = es.exam_id
+                WHERE {subject_predicate}
+                  AND q.year = ? AND q.session = ?
                   AND q.question_number = ?
                 """,
                 (
-                    str(repair["subject"]),
+                    *subject_params,
                     int(repair["year"]),
                     int(repair["session"]),
                     int(repair["question_number"]),
                 ),
             ).fetchall()
             identity = (
-                repair["subject"],
+                *identity_subject,
                 repair["year"],
                 repair["session"],
                 repair["question_number"],
@@ -62,20 +88,64 @@ def apply_audited_repairs(
                     f"audited repair identity is not unique: {identity!r}: {len(rows)}"
                 )
             question_id, current_stem, source_page = rows[0]
-            if int(source_page or 0) != int(repair["source_page"]):
+            audited_source_page = int(repair["source_page"])
+            source_page_matches = (
+                source_page is not None
+                and int(source_page) == audited_source_page
+            )
+            expected_current_page = repair.get("expected_current_source_page")
+            source_page_is_audited_previous = (
+                expected_current_page is not None
+                and source_page is not None
+                and int(source_page) == int(expected_current_page)
+            )
+            if (
+                source_page is not None
+                and not source_page_matches
+                and not source_page_is_audited_previous
+            ):
                 raise ValueError(
                     "audited repair source page mismatch: "
                     f"{identity!r}: database={source_page!r} "
-                    f"audit={repair['source_page']!r}"
+                    f"audit={repair['source_page']!r} "
+                    f"expected_previous={expected_current_page!r}"
                 )
+            if not source_page_matches:
+                connection.execute(
+                    "UPDATE questions SET source_page = ? WHERE id = ?",
+                    (audited_source_page, int(question_id)),
+                )
+                changed_source_pages += 1
 
             repaired_stem = repair.get("repaired_stem")
             if repaired_stem is not None and str(current_stem) != str(repaired_stem):
                 connection.execute(
-                    "UPDATE questions SET question_text = ? WHERE id = ?",
+                    """
+                    UPDATE questions
+                    SET question_text = ?, question_format_json = NULL
+                    WHERE id = ?
+                    """,
                     (str(repaired_stem), int(question_id)),
                 )
                 changed_stems += 1
+
+            repaired_question_image = repair.get("repaired_question_image_path")
+            if repaired_question_image is not None:
+                repaired_question_image = str(repaired_question_image).strip()
+                if not repaired_question_image:
+                    raise ValueError(
+                        f"invalid audited question image: {identity!r}"
+                    )
+                current_question_image = connection.execute(
+                    "SELECT has_image, image_path FROM questions WHERE id = ?",
+                    (int(question_id),),
+                ).fetchone()
+                if current_question_image != (1, repaired_question_image):
+                    connection.execute(
+                        "UPDATE questions SET has_image = 1, image_path = ? WHERE id = ?",
+                        (repaired_question_image, int(question_id)),
+                    )
+                    changed_question_images += 1
 
             repaired_choices = repair.get("repaired_choices")
             if repaired_choices is not None:
@@ -84,28 +154,75 @@ def apply_audited_repairs(
                     5,
                 ):
                     raise ValueError(f"invalid audited choices: {identity!r}")
+                repaired_choice_images = repair.get("repaired_choice_image_paths")
+                if repaired_choice_images is not None and (
+                    not isinstance(repaired_choice_images, list)
+                    or len(repaired_choice_images) != len(repaired_choices)
+                ):
+                    raise ValueError(f"invalid audited choice images: {identity!r}")
                 rows = connection.execute(
                     """
-                    SELECT choice_number, choice_text FROM question_choices
+                    SELECT choice_number, choice_text, choice_image_path
+                    FROM question_choices
                     WHERE question_id = ? ORDER BY choice_number
                     """,
                     (int(question_id),),
                 ).fetchall()
-                if [int(row[0]) for row in rows] != list(
-                    range(1, len(repaired_choices) + 1)
+                expected = [str(value) for value in repaired_choices]
+                current_images = {int(row[0]): row[2] for row in rows}
+                if repaired_choice_images is None:
+                    expected_images = [
+                        current_images.get(number)
+                        for number in range(1, len(expected) + 1)
+                    ]
+                else:
+                    expected_images = [
+                        str(value) if value is not None and str(value).strip() else None
+                        for value in repaired_choice_images
+                    ]
+                if any(
+                    not text.strip() and not image_path
+                    for text, image_path in zip(expected, expected_images)
                 ):
                     raise ValueError(
-                        f"audited repair choice structure mismatch: {identity!r}"
+                        f"audited choice has neither text nor image: {identity!r}"
                     )
-                expected = [str(value) for value in repaired_choices]
-                if [str(row[1]) for row in rows] != expected:
+                current_numbers = [int(row[0]) for row in rows]
+                current_text = [str(row[1]) for row in rows]
+                current_image_list = [row[2] for row in rows]
+                expected_numbers = list(range(1, len(expected) + 1))
+                if (
+                    current_numbers != expected_numbers
+                    or current_text != expected
+                    or current_image_list != expected_images
+                ):
+                    connection.execute(
+                        """
+                        DELETE FROM question_choices
+                        WHERE question_id = ? AND choice_number > ?
+                        """,
+                        (int(question_id), len(expected)),
+                    )
                     connection.executemany(
                         """
-                        UPDATE question_choices SET choice_text = ?
-                        WHERE question_id = ? AND choice_number = ?
+                        INSERT INTO question_choices (
+                            question_id, choice_number, choice_symbol,
+                            choice_text, choice_image_path, choice_format_json
+                        ) VALUES (?, ?, ?, ?, ?, NULL)
+                        ON CONFLICT(question_id, choice_number) DO UPDATE SET
+                            choice_symbol = excluded.choice_symbol,
+                            choice_text = excluded.choice_text,
+                            choice_image_path = excluded.choice_image_path,
+                            choice_format_json = NULL
                         """,
                         [
-                            (text, int(question_id), number)
+                            (
+                                int(question_id),
+                                number,
+                                CHOICE_SYMBOLS[number - 1],
+                                text,
+                                expected_images[number - 1],
+                            )
                             for number, text in enumerate(expected, start=1)
                         ],
                     )
@@ -118,6 +235,8 @@ def apply_audited_repairs(
     return OcrRepairResult(
         exact_records=len(exact),
         applied_records=applied_records,
+        changed_source_pages=changed_source_pages,
         changed_stems=changed_stems,
+        changed_question_images=changed_question_images,
         changed_choice_sets=changed_choice_sets,
     )

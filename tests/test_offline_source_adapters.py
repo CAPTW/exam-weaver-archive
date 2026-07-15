@@ -948,3 +948,69 @@ def test_public_ocr_reads_paired_scanned_answer_with_shared_extractor(monkeypatc
     assert extracted == [Path("answer.pdf")]
     assert answer_key == {1: 1, 2: 2, 3: 3, 4: 4, 5: 1}
     assert [question.correct_answer for question in parsed.questions] == [1, 2, 3, 4, 1]
+
+
+@pytest.mark.parametrize(
+    ("stem", "choices", "reason"),
+    [
+        (
+            "카르노 사이클에 해당하는 것은?",
+            ("정적압축 정적팽창 단열팽창 단열압축→ → →", "나", "다", "라"),
+            "suspicious_choice",
+        ),
+        (
+            "압력은 [0/해 로 표시한다.",
+            ("가", "나", "다", "라"),
+            "broken_unit_stem",
+        ),
+        (
+            "다음 (설명 중 옳은 것은?",
+            ("가", "나", "다", "라"),
+            "unbalanced_stem_delimiter",
+        ),
+        (
+            "다음 중 옳은 것은?",
+            ("정상", "0卜 잡문자", "다", "라"),
+            "ocr_noise_choice",
+        ),
+    ],
+)
+def test_offline_quality_rejects_residual_text_corruption(stem, choices, reason):
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_quality import validate_offline_question
+
+    result = validate_offline_question(
+        ParsedOfflineQuestion(1, stem, list(choices), 1, 1.0, ())
+    )
+
+    assert result.importable is False
+    assert reason in result.reason_codes
+
+
+def test_offline_quality_accepts_valid_arrows_and_example_parenthesis():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_quality import validate_offline_question
+
+    result = validate_offline_question(
+        ParsedOfflineQuestion(
+            1,
+            "A → B의 관계는?",
+            ["Ex.) 정상 예시", "나", "다", "라"],
+            1,
+            1.0,
+            (),
+        )
+    )
+
+    assert result.importable is True
+
+
+def test_shared_text_quality_allows_valid_korean_translation_and_common_words():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    assert text_quality_issue_codes(
+        '"These goods emit flammable gases." [이 화물은 인화성 가스를 방출한다.]'
+    ) == ()
+    assert text_quality_issue_codes(
+        "연필을 쥐는 것처럼 주사기를 쥐고 피부를 누른다."
+    ) == ()
