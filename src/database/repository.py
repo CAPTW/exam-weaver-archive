@@ -5,7 +5,7 @@ import re
 from datetime import date
 from contextlib import nullcontext
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Mapping, Sequence
 
 from ..utils.tagger import build_tags
 from ..parser.question import ALL_CHOICES_CORRECT
@@ -906,6 +906,116 @@ class ExamRepository:
                 ORDER BY s.name_ko ASC
             """)
             return [{'code': r[0], 'name_ko': r[1]} for r in cursor.fetchall()]
+
+    def first_exam_code_with_questions(self) -> Optional[str]:
+        """Return the first configured exam that owns at least one question."""
+        self._ensure_initialized()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT e.code
+                FROM exams e
+                JOIN exam_subjects es ON es.exam_id = e.id
+                JOIN questions q ON q.exam_subject_id = es.id
+                GROUP BY e.id, e.code
+                ORDER BY e.id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+        return row[0] if row else None
+
+    def create_practice_attempt(
+        self,
+        *,
+        exam_code: str,
+        exam_name: str,
+        questions: Sequence[Mapping[str, Any]],
+    ) -> int:
+        """Create a legacy mock-exam record for a local practice attempt."""
+        self._ensure_initialized()
+        mock_name = f"{date.today():%Y.%m.%d} {exam_name} 풀이"
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM exams WHERE code = ?",
+                (exam_code,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Unknown exam code: {exam_code}")
+            cursor = conn.execute(
+                "INSERT INTO mock_exams (exam_id, name) VALUES (?, ?)",
+                (row[0], mock_name),
+            )
+            mock_exam_id = int(cursor.lastrowid)
+            conn.executemany(
+                """
+                INSERT INTO mock_exam_questions (
+                    mock_exam_id,
+                    question_id,
+                    display_order
+                )
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (mock_exam_id, int(question["id"]), display_order)
+                    for display_order, question in enumerate(questions, 1)
+                ],
+            )
+        return mock_exam_id
+
+    def complete_practice_attempt(
+        self,
+        attempt_id: int,
+        *,
+        result: Mapping[str, Any],
+        duration_seconds: int,
+    ) -> None:
+        """Persist overall and per-subject results for a local attempt."""
+        self._ensure_initialized()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO exam_results (
+                    mock_exam_id,
+                    total_questions,
+                    correct_count,
+                    score,
+                    time_spent_seconds
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    int(result.get("total") or 0),
+                    int(result.get("correct") or 0),
+                    float(result.get("score") or 0.0),
+                    int(duration_seconds),
+                ),
+            )
+            for exam_subject_id, stats in (result.get("subject_stats") or {}).items():
+                total = int(stats.get("total") or 0)
+                correct = int(stats.get("correct") or 0)
+                subject_score = round((correct / total) * 100, 1) if total else 0.0
+                conn.execute(
+                    """
+                    INSERT INTO exam_results (
+                        mock_exam_id,
+                        exam_subject_id,
+                        total_questions,
+                        correct_count,
+                        score,
+                        time_spent_seconds
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        attempt_id,
+                        exam_subject_id,
+                        total,
+                        correct,
+                        subject_score,
+                        int(duration_seconds),
+                    ),
+                )
 
     def get_manual_question_template(self) -> Dict[str, Any]:
         """Return default values for a user-authored, non-imported question."""

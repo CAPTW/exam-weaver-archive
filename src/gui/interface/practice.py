@@ -1,6 +1,5 @@
 import random
 import time
-from datetime import date
 from pathlib import Path
 
 from PyQt5.QtCore import Qt
@@ -111,50 +110,11 @@ def evaluate_answers(questions, answers):
 
 def save_practice_result(repo, mock_exam_id, questions, answers, duration_seconds):
     result = evaluate_answers(questions, answers)
-    with repo._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO exam_results (
-                mock_exam_id, total_questions, correct_count, score, time_spent_seconds
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                mock_exam_id,
-                result["total"],
-                result["correct"],
-                result["score"],
-                duration_seconds,
-            ),
-        )
-        for exam_subject_id, stats in result["subject_stats"].items():
-            subject_score = (
-                round((stats["correct"] / stats["total"]) * 100, 1)
-                if stats["total"]
-                else 0.0
-            )
-            cursor.execute(
-                """
-                INSERT INTO exam_results (
-                    mock_exam_id,
-                    exam_subject_id,
-                    total_questions,
-                    correct_count,
-                    score,
-                    time_spent_seconds
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    mock_exam_id,
-                    exam_subject_id,
-                    stats["total"],
-                    stats["correct"],
-                    subject_score,
-                    duration_seconds,
-                ),
-            )
+    repo.complete_practice_attempt(
+        mock_exam_id,
+        result=result,
+        duration_seconds=duration_seconds,
+    )
     return result
 
 
@@ -444,19 +404,7 @@ class PracticeInterface(QWidget):
         self.on_exam_changed()
 
     def _first_exam_code_with_questions(self):
-        with self.repo._get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT e.code
-                FROM exams e
-                JOIN exam_subjects es ON es.exam_id = e.id
-                JOIN questions q ON q.exam_subject_id = es.id
-                GROUP BY e.id, e.code
-                ORDER BY e.id ASC
-                LIMIT 1
-                """
-            ).fetchone()
-        return row[0] if row else None
+        return self.repo.first_exam_code_with_questions()
 
     def on_exam_changed(self):
         exam_code = self.examFilter.currentData()
@@ -602,28 +550,11 @@ class PracticeInterface(QWidget):
     def _create_mock_exam_record(self, questions):
         exam_code = self.examFilter.currentData()
         exam_name = self._strip_combo_code(self.examFilter.currentText())
-        mock_name = f"{date.today():%Y.%m.%d} {exam_name} 풀이"
-        with self.repo._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM exams WHERE code = ?", (exam_code,))
-            row = cursor.fetchone()
-            if not row:
-                raise ValueError(f"Unknown exam code: {exam_code}")
-            exam_id = row[0]
-            cursor.execute(
-                "INSERT INTO mock_exams (exam_id, name) VALUES (?, ?)",
-                (exam_id, mock_name),
-            )
-            mock_exam_id = cursor.lastrowid
-            for display_order, question in enumerate(questions, 1):
-                cursor.execute(
-                    """
-                    INSERT INTO mock_exam_questions (mock_exam_id, question_id, display_order)
-                    VALUES (?, ?, ?)
-                    """,
-                    (mock_exam_id, question["id"], display_order),
-                )
-        return mock_exam_id
+        return self.repo.create_practice_attempt(
+            exam_code=exam_code,
+            exam_name=exam_name,
+            questions=questions,
+        )
 
     def _build_choice_orders(self, questions):
         orders = {}

@@ -87,6 +87,35 @@ def test_save_practice_result_records_overall_and_subject_rows(repo, sample_meta
     assert rows[1][1:] == (1, 1, 100.0, 7)
 
 
+def test_exam_repository_public_practice_api_preserves_legacy_tables(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(exam_code="3급기관사", limit=1)[0]
+
+    attempt_id = repo.create_practice_attempt(
+        exam_code="3급기관사",
+        exam_name="3급 기관사",
+        questions=[question],
+    )
+    result = evaluate_answers(
+        [question],
+        {question["id"]: question["correct_answer"]},
+    )
+    repo.complete_practice_attempt(
+        attempt_id,
+        result=result,
+        duration_seconds=7,
+    )
+
+    with sqlite3.connect(repo.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM mock_exams").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM mock_exam_questions").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM exam_results").fetchone()[0] == 2
+
+
 def test_practice_interface_starts_click_grades_and_shows_result(repo, sample_metadata, sample_question):
     repo.save_questions([sample_question], sample_metadata)
     widget = PracticeInterface(repo.db_path)
