@@ -62,6 +62,57 @@ def _subject_request(code, name, count, checked=True):
     }
 
 
+def _multi_exam_subject_request(
+    exam_code,
+    exam_name,
+    subject_code,
+    subject_name,
+    mount_label,
+    count,
+):
+    return {
+        'exam_code': exam_code,
+        'exam_name': exam_name,
+        'subject_code': subject_code,
+        'code': subject_code,
+        'subject_name': subject_name,
+        'name': subject_name,
+        'mount_label': mount_label,
+        'multi_exam': True,
+        'checkbox': _Check(True),
+        'count_spin': _Spin(count),
+    }
+
+
+def _multi_exam_export_interface(rows):
+    interface = ExportInterface.__new__(ExportInterface)
+    interface.multiExamModeCheck = _Check(True)
+    interface.examFilter = _Combo(None, '')
+    interface.yearFromFilter = _Combo(2024, '2024')
+    interface.yearToFilter = _Combo(2025, '2025')
+    interface.subjectFilter = _Combo(None, 'All subjects')
+    interface.tagFilter = _Line('#safety')
+    interface.randomCountSpin = _Spin(0)
+    interface.shuffleChoices = _Check(False)
+    interface.subjectSelectionRows = rows
+    return interface
+
+
+def _eligible_export_question(question_id, text, year=2025):
+    return {
+        'id': question_id,
+        'year': year,
+        'question_text': text,
+        'choices': [],
+        'correct_answer': 1,
+    }
+
+
+class _AlwaysEligibleValidator:
+    def is_random_eligible(self, _question):
+        return True
+
+
 class _MultiExamRepository:
     def get_filter_options(self):
         return {
@@ -535,6 +586,188 @@ def test_export_docx_combines_random_questions_from_multiple_subjects(monkeypatc
         ('기관1', [1]),
         ('기관2', [3, 4]),
     ]
+
+
+def test_export_docx_combines_subjects_from_different_exams(monkeypatch):
+    interface = _multi_exam_export_interface([
+        _multi_exam_subject_request(
+            'first::engineer',
+            'Engineer Exam',
+            'first::engine1',
+            'Engine 1',
+            'First DB',
+            1,
+        ),
+        _multi_exam_subject_request(
+            'second::navigation',
+            'Navigation Exam',
+            'second::nav1',
+            'Navigation 1',
+            'Second DB',
+            1,
+        ),
+    ])
+    captured = {'calls': []}
+
+    class Repo:
+        def get_questions_with_choices(self, **kwargs):
+            captured['calls'].append(kwargs)
+            if kwargs['exam_code'] == 'first::engineer':
+                return [
+                    _eligible_export_question(
+                        'first::1', 'shared logical question', 2024
+                    ),
+                ]
+            return [
+                _eligible_export_question(
+                    'second::1', 'shared logical question', 2025
+                ),
+                _eligible_export_question(
+                    'second::2', 'navigation replacement question', 2025
+                ),
+            ]
+
+    class Exporter:
+        def export(
+            self,
+            title,
+            questions,
+            file_path,
+            shuffle_choices=False,
+            sections=None,
+        ):
+            captured['title'] = title
+            captured['questions'] = questions
+            captured['sections'] = sections
+
+    interface.repo = Repo()
+    interface.validator = _AlwaysEligibleValidator()
+    interface.exporter = Exporter()
+    monkeypatch.setattr(
+        'src.gui.interface.export.random.sample',
+        lambda population, count: list(population)[:count],
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.QFileDialog.getSaveFileName',
+        lambda *_args, **_kwargs: (
+            'C:/tmp/multi.docx',
+            'Word Documents (*.docx)',
+        ),
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.InfoBar.success',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.InfoBar.error',
+        lambda **_kwargs: None,
+    )
+
+    interface.export_docx()
+
+    assert [
+        (call['exam_code'], call['subject_code'], call['tag_query'])
+        for call in captured['calls']
+    ] == [
+        ('first::engineer', 'first::engine1', '#safety'),
+        ('second::navigation', 'second::nav1', '#safety'),
+    ]
+    assert [question['id'] for question in captured['questions']] == [
+        'first::1',
+        'second::2',
+    ]
+    assert [section['title'] for section in captured['sections']] == [
+        'First DB · Engineer Exam · Engine 1',
+        'Second DB · Navigation Exam · Navigation 1',
+    ]
+    assert captured['title'].endswith('Multi-exam mock exam')
+
+
+def test_multi_exam_export_requires_at_least_one_selected_subject(monkeypatch):
+    row = _multi_exam_subject_request(
+        'first::engineer',
+        'Engineer Exam',
+        'first::engine1',
+        'Engine 1',
+        'First DB',
+        1,
+    )
+    row['checkbox'].setChecked(False)
+    interface = _multi_exam_export_interface([row])
+    interface.repo = type(
+        'Repo',
+        (),
+        {'get_questions_with_choices': lambda self, **_kwargs: []},
+    )()
+    errors = []
+    monkeypatch.setattr(
+        'src.gui.interface.export.InfoBar.error',
+        lambda **kwargs: errors.append(kwargs),
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.InfoBar.warning',
+        lambda **_kwargs: None,
+    )
+
+    interface.export_docx()
+
+    assert errors[0]['title'] == 'No subjects selected'
+
+
+def test_multi_exam_export_reports_full_section_when_unique_is_insufficient(
+    monkeypatch,
+):
+    interface = _multi_exam_export_interface([
+        _multi_exam_subject_request(
+            'first::engineer',
+            'Engineer Exam',
+            'first::engine1',
+            'Engine 1',
+            'First DB',
+            1,
+        ),
+        _multi_exam_subject_request(
+            'second::navigation',
+            'Navigation Exam',
+            'second::nav1',
+            'Navigation 1',
+            'Second DB',
+            1,
+        ),
+    ])
+
+    class Repo:
+        def get_questions_with_choices(self, **kwargs):
+            return [
+                _eligible_export_question(
+                    f"{kwargs['exam_code']}::1",
+                    'same logical question',
+                ),
+            ]
+
+    interface.repo = Repo()
+    interface.validator = _AlwaysEligibleValidator()
+    errors = []
+    dialog_calls = []
+    monkeypatch.setattr(
+        'src.gui.interface.export.random.sample',
+        lambda population, count: list(population)[:count],
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.InfoBar.error',
+        lambda **kwargs: errors.append(kwargs),
+    )
+    monkeypatch.setattr(
+        'src.gui.interface.export.QFileDialog.getSaveFileName',
+        lambda *_args, **_kwargs: dialog_calls.append(True) or ('', ''),
+    )
+
+    interface.export_docx()
+
+    assert 'Second DB · Navigation Exam · Navigation 1' in (
+        errors[0]['content']
+    )
+    assert dialog_calls == []
 
 
 def test_export_docx_random_subject_keeps_grouped_questions_together_in_group_order(monkeypatch):

@@ -474,8 +474,13 @@ class ExportInterface(QWidget):
         tag_query = self._current_tag_query()
         random_count = self.randomCountSpin.value()
         subject_requests, invalid_subjects = self._selected_random_subject_requests()
+        multi_exam_mode = self._is_multi_exam_mode()
 
-        if not exam_code or year_from is None or year_to is None:
+        if (
+            year_from is None
+            or year_to is None
+            or (not multi_exam_mode and not exam_code)
+        ):
             InfoBar.error(
                 title="Missing options",
                 content="Please select exam and year range.",
@@ -499,14 +504,31 @@ class ExportInterface(QWidget):
             )
             return
 
+        if multi_exam_mode and not subject_requests:
+            InfoBar.error(
+                title="No subjects selected",
+                content=(
+                    "Select at least one exam subject and set its question "
+                    "count."
+                ),
+                parent=self,
+            )
+            return
+
         sections = None
         if subject_requests:
             questions = []
             sections = []
             selected_keys = set()
             for request in subject_requests:
+                request_exam_code = (
+                    request['exam_code']
+                    if multi_exam_mode
+                    else exam_code
+                )
+                request_label = request.get('section_title') or request['name']
                 subject_questions = self._get_filtered_unique_questions(
-                    exam_code,
+                    request_exam_code,
                     request['code'],
                     year_from,
                     year_to,
@@ -528,7 +550,7 @@ class ExportInterface(QWidget):
                     InfoBar.error(
                         title="Not enough questions",
                         content=(
-                            f"{request['name']}: requested {request['count']}, "
+                            f"{request_label}: requested {request['count']}, "
                             f"but only {available_count} valid unique questions available."
                         ),
                         parent=self
@@ -545,7 +567,7 @@ class ExportInterface(QWidget):
                     InfoBar.error(
                         title="Not enough questions",
                         content=(
-                            f"{request['name']}: requested {request['count']}, "
+                            f"{request_label}: requested {request['count']}, "
                             f"but group-aware selection could not be filled from "
                             f"{available_count} valid unique questions."
                         ),
@@ -555,7 +577,7 @@ class ExportInterface(QWidget):
                 questions.extend(selected_questions)
                 selected_keys.update(selection_content_keys(selected_questions))
                 sections.append({
-                    'title': request['name'],
+                    'title': request_label,
                     'questions': selected_questions,
                 })
         elif random_count > 0 and not subject_code:
@@ -607,7 +629,13 @@ class ExportInterface(QWidget):
             )
             return
 
-        if subject_requests:
+        if multi_exam_mode:
+            filename = self._build_multi_exam_filename(
+                year_from,
+                year_to,
+                sum(request['count'] for request in subject_requests),
+            )
+        elif subject_requests:
             filename = self._build_filename(
                 exam_code,
                 year_from,
@@ -625,7 +653,9 @@ class ExportInterface(QWidget):
 
         if file_path:
             try:
-                if subject_requests:
+                if multi_exam_mode:
+                    title = self._build_multi_exam_title()
+                elif subject_requests:
                     title = self._build_mock_exam_title(
                         self.examFilter.currentText()
                     )
