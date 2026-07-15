@@ -98,6 +98,13 @@ class ExportInterface(QWidget):
         self.vBoxLayout.addWidget(self.randomCountSpin)
 
         self.randomSubjectLabel = BodyLabel("Random subjects", self)
+        self.multiExamModeCheck = QCheckBox(
+            "Combine subjects from multiple exams", self
+        )
+        self.multiExamModeCheck.setChecked(False)
+        self.multiExamModeCheck.toggled.connect(
+            self._on_multi_exam_mode_changed
+        )
         self.randomSubjectBulkWidget = QWidget(self)
         self.randomSubjectBulkLayout = QHBoxLayout(self.randomSubjectBulkWidget)
         self.randomSubjectBulkLayout.setContentsMargins(0, 0, 0, 0)
@@ -127,6 +134,7 @@ class ExportInterface(QWidget):
         self.subjectSelectionTable.setSelectionMode(QAbstractItemView.NoSelection)
         self.subjectSelectionRows = []
         self.vBoxLayout.addWidget(self.randomSubjectLabel)
+        self.vBoxLayout.addWidget(self.multiExamModeCheck)
         self.vBoxLayout.addWidget(self.randomSubjectBulkWidget)
         self.vBoxLayout.addWidget(self.subjectSelectionTable)
 
@@ -155,11 +163,16 @@ class ExportInterface(QWidget):
 
     def load_options(self):
         options = self.repo.get_filter_options()
+        self.examOptions = [dict(exam) for exam in options.get('exams', [])]
+        self.examOptionsByCode = {
+            exam['code']: exam
+            for exam in self.examOptions
+        }
 
         # Exams
         self.examFilter.blockSignals(True)
         self.examFilter.clear()
-        for exam in options.get('exams', []):
+        for exam in self.examOptions:
             self.examFilter.addItem(self._exam_label(exam), exam['code'])
         if self.examFilter.count() > 0:
             self.examFilter.setCurrentIndex(0)
@@ -184,18 +197,64 @@ class ExportInterface(QWidget):
         self.subjectFilter.clear()
         self.subjectFilter.addItem("All subjects", None)
         subjects = self.repo.get_subject_options(exam_code)
-        if hasattr(self, 'subjectSelectionTable'):
-            self.subjectSelectionTable.setRowCount(0)
-            self.subjectSelectionRows = []
         for subject in subjects:
             self.subjectFilter.addItem(
                 self._subject_label(subject),
                 subject['code']
             )
-            if hasattr(self, 'subjectSelectionTable'):
-                self._add_subject_selection_row(subject)
+        self._rebuild_subject_selection_rows(subjects)
 
-    def _add_subject_selection_row(self, subject):
+    def _is_multi_exam_mode(self):
+        checkbox = self.__dict__.get('multiExamModeCheck')
+        return bool(checkbox and checkbox.isChecked())
+
+    def _on_multi_exam_mode_changed(self, checked):
+        multi_exam = bool(checked)
+        self.examFilter.setEnabled(not multi_exam)
+        self.subjectFilter.setEnabled(not multi_exam)
+        self.randomCountSpin.setEnabled(not multi_exam)
+        self._rebuild_subject_selection_rows()
+
+    def _configure_subject_selection_table(self, multi_exam):
+        self.subjectSelectionTable.clear()
+        headers = (
+            ["Use", "Database", "Exam", "Subject", "Questions"]
+            if multi_exam
+            else ["Use", "Subject", "Questions"]
+        )
+        self.subjectSelectionTable.setColumnCount(len(headers))
+        self.subjectSelectionTable.setHorizontalHeaderLabels(headers)
+        self.subjectSelectionTable.setColumnWidth(0, 70)
+        self.subjectSelectionTable.setColumnWidth(len(headers) - 1, 120)
+        stretch_columns = (2, 3) if multi_exam else (1,)
+        for column in stretch_columns:
+            self.subjectSelectionTable.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.Stretch
+            )
+
+    def _rebuild_subject_selection_rows(self, selected_exam_subjects=None):
+        if not hasattr(self, 'subjectSelectionTable'):
+            return
+        multi_exam = self._is_multi_exam_mode()
+        self.subjectSelectionTable.setRowCount(0)
+        self.subjectSelectionRows = []
+        self._configure_subject_selection_table(multi_exam)
+
+        if multi_exam:
+            for exam in self.__dict__.get('examOptions', []):
+                for subject in self.repo.get_subject_options(exam['code']):
+                    self._add_subject_selection_row(subject, exam, True)
+            return
+
+        exam_code = self.examFilter.currentData()
+        exam = self.__dict__.get('examOptionsByCode', {}).get(exam_code)
+        subjects = selected_exam_subjects
+        if subjects is None:
+            subjects = self.repo.get_subject_options(exam_code)
+        for subject in subjects:
+            self._add_subject_selection_row(subject, exam, False)
+
+    def _add_subject_selection_row(self, subject, exam=None, multi_exam=False):
         row = self.subjectSelectionTable.rowCount()
         self.subjectSelectionTable.insertRow(row)
 
@@ -204,34 +263,73 @@ class ExportInterface(QWidget):
         count_spin.setRange(0, 1000)
         count_spin.setValue(0)
 
-        subject_item = QTableWidgetItem(
-            self._subject_label(subject)
-        )
         self.subjectSelectionTable.setCellWidget(row, 0, checkbox)
-        self.subjectSelectionTable.setItem(row, 1, subject_item)
-        self.subjectSelectionTable.setCellWidget(row, 2, count_spin)
+        if multi_exam:
+            self.subjectSelectionTable.setItem(
+                row,
+                1,
+                QTableWidgetItem(
+                    (exam or {}).get('mount_label')
+                    or subject.get('mount_label')
+                    or ''
+                ),
+            )
+            self.subjectSelectionTable.setItem(
+                row, 2, QTableWidgetItem(self._plain_exam_label(exam or {}))
+            )
+            self.subjectSelectionTable.setItem(
+                row, 3, QTableWidgetItem(self._plain_subject_label(subject))
+            )
+            self.subjectSelectionTable.setCellWidget(row, 4, count_spin)
+        else:
+            self.subjectSelectionTable.setItem(
+                row, 1, QTableWidgetItem(self._subject_label(subject))
+            )
+            self.subjectSelectionTable.setCellWidget(row, 2, count_spin)
+
+        subject_name = subject.get('name_ko') or subject['code']
         self.subjectSelectionRows.append({
+            'exam_code': (exam or {}).get('code'),
+            'exam_name': (exam or {}).get('name') or '',
+            'subject_code': subject['code'],
             'code': subject['code'],
-            'name': subject['name_ko'],
+            'subject_name': subject_name,
+            'name': subject_name,
+            'mount_label': (
+                (exam or {}).get('mount_label')
+                or subject.get('mount_label')
+                or ''
+            ),
+            'multi_exam': multi_exam,
             'checkbox': checkbox,
             'count_spin': count_spin,
         })
 
     @staticmethod
-    def _exam_label(exam):
+    def _plain_exam_label(exam):
         name = exam.get('name') or exam.get('code') or ''
         code = exam.get('local_code') or exam.get('code') or ''
+        if not code or code == name:
+            return name
+        return f"{name} ({code})"
+
+    @staticmethod
+    def _exam_label(exam):
         prefix = f"{exam['mount_label']} · " if exam.get('mount_label') else ""
-        return f"{prefix}{name} ({code})"
+        return f"{prefix}{ExportInterface._plain_exam_label(exam)}"
+
+    @staticmethod
+    def _plain_subject_label(subject):
+        name = subject.get('name_ko') or subject.get('code') or ''
+        code = subject.get('local_code') or subject.get('code') or ''
+        if not code or code.startswith(('custom_', 'auto_')) or code == name:
+            return name
+        return f"{name} ({code})"
 
     @staticmethod
     def _subject_label(subject):
-        name = subject.get('name_ko') or subject.get('code') or ''
-        code = subject.get('local_code') or subject.get('code') or ''
         prefix = f"{subject['mount_label']} · " if subject.get('mount_label') else ""
-        if not code or code.startswith(('custom_', 'auto_')) or code == name:
-            return f"{prefix}{name}"
-        return f"{prefix}{name} ({code})"
+        return f"{prefix}{ExportInterface._plain_subject_label(subject)}"
 
     def _build_title(self, exam_text, year_from, year_to, subject_text, random_count):
         year_part = str(year_from) if year_from == year_to else f"{year_from}-{year_to}"
@@ -272,8 +370,28 @@ class ExportInterface(QWidget):
         )
         return f"{today:%Y.%m.%d} {exam_name} 모의고사"
 
+    def _build_multi_exam_title(self, today=None):
+        today = today or date.today()
+        return f"{today:%Y.%m.%d} Multi-exam mock exam"
+
+    def _build_multi_exam_filename(self, year_from, year_to, total_count):
+        year_part = (
+            str(year_from)
+            if year_from == year_to
+            else f"{year_from}-{year_to}"
+        )
+        return f"multi_exam_{year_part}_rand{total_count}.docx"
+
     def _format_exam_name_for_title(self, exam_name):
         return re.sub(r"(?<=\d급)(?=\S)", " ", exam_name or "", count=1)
+
+    @staticmethod
+    def _selection_section_title(mount_label, exam_name, subject_name):
+        parts = [
+            str(value or '').strip()
+            for value in (mount_label, exam_name, subject_name)
+        ]
+        return " · ".join(part for part in parts if part)
 
     def _selected_random_subject_requests(self):
         requests = []
@@ -284,14 +402,32 @@ class ExportInterface(QWidget):
             if not checkbox or not checkbox.isChecked():
                 continue
             count = int(count_spin.value()) if count_spin else 0
+            section_title = self._selection_section_title(
+                row.get('mount_label'),
+                row.get('exam_name'),
+                row.get('subject_name'),
+            )
             if count <= 0:
-                invalid.append(row.get('name') or row.get('code'))
+                invalid.append(
+                    section_title
+                    if row.get('multi_exam')
+                    else row.get('name') or row.get('code')
+                )
                 continue
-            requests.append({
-                'code': row['code'],
-                'name': row['name'],
-                'count': count,
-            })
+            if row.get('multi_exam'):
+                requests.append({
+                    'exam_code': row['exam_code'],
+                    'code': row['subject_code'],
+                    'name': row['subject_name'],
+                    'section_title': section_title,
+                    'count': count,
+                })
+            else:
+                requests.append({
+                    'code': row['code'],
+                    'name': row['name'],
+                    'count': count,
+                })
         return requests, invalid
 
     def _apply_all_subject_count(self, count=None):
@@ -338,8 +474,13 @@ class ExportInterface(QWidget):
         tag_query = self._current_tag_query()
         random_count = self.randomCountSpin.value()
         subject_requests, invalid_subjects = self._selected_random_subject_requests()
+        multi_exam_mode = self._is_multi_exam_mode()
 
-        if not exam_code or year_from is None or year_to is None:
+        if (
+            year_from is None
+            or year_to is None
+            or (not multi_exam_mode and not exam_code)
+        ):
             InfoBar.error(
                 title="Missing options",
                 content="Please select exam and year range.",
@@ -363,14 +504,31 @@ class ExportInterface(QWidget):
             )
             return
 
+        if multi_exam_mode and not subject_requests:
+            InfoBar.error(
+                title="No subjects selected",
+                content=(
+                    "Select at least one exam subject and set its question "
+                    "count."
+                ),
+                parent=self,
+            )
+            return
+
         sections = None
         if subject_requests:
             questions = []
             sections = []
             selected_keys = set()
             for request in subject_requests:
+                request_exam_code = (
+                    request['exam_code']
+                    if multi_exam_mode
+                    else exam_code
+                )
+                request_label = request.get('section_title') or request['name']
                 subject_questions = self._get_filtered_unique_questions(
-                    exam_code,
+                    request_exam_code,
                     request['code'],
                     year_from,
                     year_to,
@@ -392,7 +550,7 @@ class ExportInterface(QWidget):
                     InfoBar.error(
                         title="Not enough questions",
                         content=(
-                            f"{request['name']}: requested {request['count']}, "
+                            f"{request_label}: requested {request['count']}, "
                             f"but only {available_count} valid unique questions available."
                         ),
                         parent=self
@@ -409,7 +567,7 @@ class ExportInterface(QWidget):
                     InfoBar.error(
                         title="Not enough questions",
                         content=(
-                            f"{request['name']}: requested {request['count']}, "
+                            f"{request_label}: requested {request['count']}, "
                             f"but group-aware selection could not be filled from "
                             f"{available_count} valid unique questions."
                         ),
@@ -419,7 +577,7 @@ class ExportInterface(QWidget):
                 questions.extend(selected_questions)
                 selected_keys.update(selection_content_keys(selected_questions))
                 sections.append({
-                    'title': request['name'],
+                    'title': request_label,
                     'questions': selected_questions,
                 })
         elif random_count > 0 and not subject_code:
@@ -471,7 +629,13 @@ class ExportInterface(QWidget):
             )
             return
 
-        if subject_requests:
+        if multi_exam_mode:
+            filename = self._build_multi_exam_filename(
+                year_from,
+                year_to,
+                sum(request['count'] for request in subject_requests),
+            )
+        elif subject_requests:
             filename = self._build_filename(
                 exam_code,
                 year_from,
@@ -489,7 +653,9 @@ class ExportInterface(QWidget):
 
         if file_path:
             try:
-                if subject_requests:
+                if multi_exam_mode:
+                    title = self._build_multi_exam_title()
+                elif subject_requests:
                     title = self._build_mock_exam_title(
                         self.examFilter.currentText()
                     )
