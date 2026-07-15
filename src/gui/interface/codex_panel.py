@@ -50,6 +50,9 @@ PROGRESS_MESSAGES = [
     "프로젝트 문맥을 확인하고 있습니다.",
     "응답 이벤트를 기다리고 있습니다.",
 ]
+USER_BLOCK_TITLE = "사용자"
+SYSTEM_BLOCK_TITLE = "시스템"
+ERROR_BLOCK_TITLE = "오류"
 CODEX_TEXT_FONT_FAMILY = '"Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", sans-serif'
 CODEX_MATH_FONT_FAMILY = (
     '"Cambria Math", "STIX Two Math", "Segoe UI Symbol", '
@@ -888,7 +891,7 @@ class CodexRunWorker(QThread):
                         developer_instructions=CODEX_PANEL_INSTRUCTIONS,
                     )
                 self.thread_ready.emit(thread.id)
-                self.status.emit(f"Thread: {thread.id}")
+                self.status.emit(f"작업: {thread.id}")
                 self.progress.emit("스레드를 준비했습니다.")
 
                 turn_input = [TextInput(self.prompt)]
@@ -931,7 +934,7 @@ class CodexRunWorker(QThread):
 
                 status_value = getattr(completed_status, "value", completed_status)
                 if status_value == "failed":
-                    message = getattr(completed_error, "message", None) or "Codex turn failed."
+                    message = getattr(completed_error, "message", None) or "Codex 작업에 실패했습니다."
                     raise RuntimeError(message)
 
                 self.completed.emit(thread.id, "".join(chunks).strip())
@@ -1104,7 +1107,7 @@ class CodexInterface(QWidget):
         self.loginButton = PushButton("로그인", self)
         self.loginButton.clicked.connect(self.login_codex)
 
-        self.newThreadButton = PushButton("새 Thread", self)
+        self.newThreadButton = PushButton("새 작업", self)
         self.newThreadButton.clicked.connect(self.new_thread)
 
         if self.side_panel:
@@ -1121,7 +1124,8 @@ class CodexInterface(QWidget):
             controls_layout.addLayout(option_row)
             controls_layout.addLayout(button_row)
         else:
-            controls_layout.addWidget(BodyLabel("Model", self))
+            self.modelLabel = BodyLabel("모델", self)
+            controls_layout.addWidget(self.modelLabel)
             controls_layout.addWidget(self.modelCombo)
             controls_layout.addWidget(self.sandboxCombo)
             controls_layout.addWidget(self.approvalCombo)
@@ -1308,10 +1312,10 @@ class CodexInterface(QWidget):
             )
             return
 
-        self._append_block("You", prompt)
+        self._append_block(USER_BLOCK_TITLE, prompt)
         if self.image_paths:
             names = ", ".join(Path(path).name for path in self.image_paths)
-            self._append_text(f"\nImages: {names}")
+            self._append_text(f"\n이미지: {names}")
         self._append_block("Codex")
         self.promptBox.clear()
         image_paths = list(self.image_paths)
@@ -1345,8 +1349,8 @@ class CodexInterface(QWidget):
 
     def new_thread(self):
         self.thread_id = None
-        self._set_status("새 Thread 준비")
-        self._append_block("System", "새 Codex Thread를 시작합니다.")
+        self._set_status("새 작업 준비")
+        self._append_block(SYSTEM_BLOCK_TITLE, "새 Codex 작업을 시작합니다.")
 
     def check_status(self):
         if self.status_worker is not None and self.status_worker.isRunning():
@@ -1376,7 +1380,7 @@ class CodexInterface(QWidget):
             self,
             "Codex에 보낼 이미지 선택",
             "",
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+            "이미지 파일 (*.png *.jpg *.jpeg *.webp *.bmp)",
         )
         for path in paths:
             self._add_image_path(path)
@@ -1441,7 +1445,7 @@ class CodexInterface(QWidget):
 
     def _on_error(self, message: str):
         self._end_progress("오류")
-        self._append_block("Error", message)
+        self._append_block(ERROR_BLOCK_TITLE, message)
         self._set_status("오류")
         InfoBar.error(
             title="Codex 오류",
@@ -1480,8 +1484,8 @@ class CodexInterface(QWidget):
     def _on_login_started(self, verification_url: str, user_code: str):
         self._set_status("브라우저에서 Codex 로그인 진행 중")
         self._append_block(
-            "System",
-            f"Codex 로그인 페이지가 열렸습니다.\nURL: {verification_url}\nCode: {user_code}",
+            SYSTEM_BLOCK_TITLE,
+            f"Codex 로그인 페이지가 열렸습니다.\n주소: {verification_url}\n코드: {user_code}",
         )
         InfoBar.info(
             title="Codex 로그인",
@@ -1534,7 +1538,7 @@ class CodexInterface(QWidget):
         if not text:
             return
         if not self._chat_blocks:
-            self._chat_blocks.append({"title": "System", "text": ""})
+            self._chat_blocks.append({"title": SYSTEM_BLOCK_TITLE, "text": ""})
         self._chat_blocks[-1]["text"] += text
         self._render_chat()
 

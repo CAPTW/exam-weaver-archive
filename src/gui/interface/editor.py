@@ -193,7 +193,7 @@ class QuestionEditor(QDialog):
         self.modelAnswerText.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         self.tagsInput = LineEdit(self)
-        self.tagsInput.setPlaceholderText("태그 (콤마로 구분)")
+        self.tagsInput.setPlaceholderText("해시태그 (쉼표로 구분)")
         self.tagsInput.setText(self.question_data.get('tags') or '')
         self._apply_input_height(self.tagsInput)
         
@@ -210,12 +210,12 @@ class QuestionEditor(QDialog):
         self.imageStatusLabel.setWordWrap(True)
         self.btnImage = PushButton("이미지 추가" if self.create_mode else "이미지 변경", self)
         self.btnPasteImage = PushButton("붙여넣기", self)
-        self.btnCopyImage = PushButton("클립보드 복사", self)
+        self.btnCopyImage = PushButton("클립보드에 복사", self)
         self.btnClearImage = PushButton("삭제", self)
         for button, width in (
             (self.btnImage, 120),
             (self.btnPasteImage, 100),
-            (self.btnCopyImage, 130),
+            (self.btnCopyImage, 140),
             (self.btnClearImage, 80),
         ):
             self._apply_input_height(button)
@@ -262,7 +262,7 @@ class QuestionEditor(QDialog):
         self.choiceSectionLabel = BodyLabel("선지", self)
         self.answerSectionLabel = BodyLabel("정답", self)
         self.modelAnswerSectionLabel = BodyLabel("모범답안", self)
-        self.tagsSectionLabel = BodyLabel("태그", self)
+        self.tagsSectionLabel = BodyLabel("해시태그", self)
         self.imageSectionLabel = BodyLabel("이미지", self)
 
         self.viewLayout.addWidget(self.questionSectionLabel)

@@ -7,6 +7,9 @@ from PyQt5.QtWidgets import QApplication
 
 from src.gui.interface.codex_panel import (
     CodexInterface,
+    ERROR_BLOCK_TITLE,
+    SYSTEM_BLOCK_TITLE,
+    USER_BLOCK_TITLE,
     apply_hidden_codex_process_patch,
     find_mathjax_script_path,
     mathjax_script_url,
@@ -30,6 +33,33 @@ def test_codex_panel_defaults_to_read_only_and_denies_approval_requests(tmp_path
     assert widget.side_panel is True
     assert widget.collapseButton.text() == "접기"
     assert widget.loginButton.text() == "로그인"
+    assert widget.newThreadButton.text() == "새 작업"
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_codex_panel_uses_korean_user_system_and_error_titles(tmp_path):
+    widget = CodexInterface(tmp_path, side_panel=True)
+
+    widget._append_block(USER_BLOCK_TITLE, "질문")
+    widget._append_block(SYSTEM_BLOCK_TITLE, "상태")
+    widget._append_block(ERROR_BLOCK_TITLE, "실패")
+
+    assert [block["title"] for block in widget._chat_blocks[-3:]] == [
+        "사용자",
+        "시스템",
+        "오류",
+    ]
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_full_codex_panel_labels_model_in_korean(tmp_path):
+    widget = CodexInterface(tmp_path, side_panel=False)
+
+    assert widget.modelLabel.text() == "모델"
 
     widget.deleteLater()
     APP.processEvents()

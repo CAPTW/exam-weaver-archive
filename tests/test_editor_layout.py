@@ -85,6 +85,23 @@ def test_question_editor_combo_items_store_user_data():
     APP.processEvents()
 
 
+def test_question_editor_uses_hashtag_and_explicit_image_action_labels():
+    editor = QuestionEditor(
+        question_data=_question_editor_data(),
+        subject_options=[{'code': 'engine1', 'name_ko': '기관1'}],
+    )
+
+    assert editor.tagsSectionLabel.text() == '해시태그'
+    assert editor.tagsInput.placeholderText() == '해시태그 (쉼표로 구분)'
+    assert editor.btnImage.text() == '이미지 변경'
+    assert editor.btnPasteImage.text() == '붙여넣기'
+    assert editor.btnCopyImage.text() == '클립보드에 복사'
+    assert editor.btnClearImage.text() == '삭제'
+
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_question_editor_preserves_all_choices_correct_answer():
     editor = QuestionEditor(
         question_data={
@@ -454,7 +471,8 @@ def test_browser_search_controls_use_full_width_second_row(repo):
     assert widget.searchLayout.stretch(0) == 1
     assert widget.searchBox.minimumWidth() >= 320
     assert widget.vBoxLayout.itemAt(0).layout() is widget.headerLayout
-    assert widget.vBoxLayout.itemAt(1).layout() is widget.searchLayout
+    assert widget.vBoxLayout.itemAt(1).widget() is widget.searchRowWidget
+    assert widget.searchRowWidget.layout() is widget.searchLayout
     assert widget.vBoxLayout.itemAt(2).widget() is widget.table
 
     widget.deleteLater()
@@ -557,7 +575,7 @@ def test_browser_descriptive_add_button_creates_model_answer_question(repo, monk
     monkeypatch.setattr(browser_module, "QuestionEditor", FakeDescriptiveQuestionDialog)
     widget = BrowserInterface(repo.db_path)
 
-    assert widget.btnAddDescriptive.text() == "서술형 추가"
+    assert widget.btnAddDescriptive.text() == "서술형 문제 추가"
     widget.add_descriptive_question()
 
     saved = repo.get_questions_with_choices(exam_code=MANUAL_EXAM_CODE, limit=1)
@@ -615,7 +633,7 @@ def test_question_editor_image_actions_are_separate_horizontal_buttons(tmp_path)
     assert editor.imageButtonLayout.count() == 4
     assert [editor.imageButtonLayout.itemAt(i).widget() for i in range(4)] == buttons
     assert [button.text() for button in buttons] == [
-        '이미지 변경', '붙여넣기', '클립보드 복사', '삭제'
+        '이미지 변경', '붙여넣기', '클립보드에 복사', '삭제'
     ]
     assert all(
         not left.geometry().intersects(right.geometry())
