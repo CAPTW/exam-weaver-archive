@@ -1003,9 +1003,10 @@ class OfflineExamParser:
             diagnostics.append("ambiguous_top_margin")
 
         confidence = self._region_confidence(region)
+        stem = "\n".join(part.strip() for part in stem_parts if part.strip())
         return ParsedOfflineQuestion(
             number=number,
-            stem="\n".join(part.strip() for part in stem_parts if part.strip()),
+            stem=self._repair_stem_ocr_damage(stem),
             choices=choices,
             source_page=region[0].page,
             confidence=confidence,
@@ -2889,6 +2890,42 @@ class OfflineExamParser:
 
     def _strip_damaged_marker(self, value: str) -> str:
         return _DAMAGED_MARKER.sub("", value.strip()).strip(" .):-")
+
+    @staticmethod
+    def _repair_stem_ocr_damage(value: str) -> str:
+        """Restore a standard Korean question ending lost by raster OCR."""
+
+        value = re.sub(
+            r"가장\s+옳지\s*\n\s*[0O°아야오으][^\n]{0,24}$",
+            "가장 옳지 않은 것은?",
+            value,
+        )
+        value = re.sub(
+            r"가장\s+옳지\s+않은\s*\n\s*[27]?것\s*은?\s*[279?]?$",
+            "가장 옳지 않은 것은?",
+            value,
+        )
+        value = re.sub(
+            r"가장\s+옳은\s*\n\s*거\s*은\s*[279?]?$",
+            "가장 옳은 것은?",
+            value,
+        )
+        value = re.sub(
+            r"가장\s+옳은\s*\n\s*[27]?것\s*은?\s*[279?]?$",
+            "가장 옳은 것은?",
+            value,
+        )
+        value = re.sub(
+            r"가장\s*\n\s*[오우呈으①][^\n]{0,24}$",
+            "가장 옳은 것은?",
+            value,
+        )
+        value = re.sub(
+            r"가장\s+옳지\s+않는\s+것은\s*[?？]$",
+            "가장 옳지 않은 것은?",
+            value,
+        )
+        return re.sub(r"가장\s+옳지\s*$", "가장 옳지 않은 것은?", value)
 
     @staticmethod
     def _repair_choice_ocr_spacing(value: str) -> str:

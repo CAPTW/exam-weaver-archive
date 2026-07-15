@@ -294,6 +294,48 @@ def test_ambiguous_balanced_wrapped_lines_after_third_marker_fail_closed():
     assert validate_offline_question(question).importable is False
 
 
+def test_repairs_garbled_standard_question_terminator_from_scanned_korean_exam():
+    page = _page(
+        _line(
+            ["9.", "다음", "중", "내연기관", "윤활유의", "기능으로", "가장", "옳지"],
+            y=0.12,
+        ),
+        _line(["0", "V으", "거", "으7"], y=0.16, xs=[0.08, 0.12, 0.20, 0.25]),
+        _line(["①", "산화작용"], y=0.22, xs=[0.08, 0.12]),
+        _line(["②", "냉각작용"], y=0.28, xs=[0.08, 0.12]),
+        _line(["③", "기밀작용"], y=0.34, xs=[0.08, 0.12]),
+        _line(["④", "방청작용"], y=0.40, xs=[0.08, 0.12]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.stem == "다음 중 내연기관 윤활유의 기능으로 가장 옳지 않은 것은?"
+    assert question.choices == ["산화작용", "냉각작용", "기밀작용", "방청작용"]
+
+
+def test_repairs_other_proven_standard_korean_question_terminator_damage():
+    repairs = {
+        "가장 옳지 않은\n7것은2": "가장 옳지 않은 것은?",
+        "가장 옳은\n거 은?": "가장 옳은 것은?",
+        "가장 옳은\n7것은7": "가장 옳은 것은?",
+        "가장\n오 으 거 으7": "가장 옳은 것은?",
+        "가장\n呈은 74 은?": "가장 옳은 것은?",
+        "가장 옳지": "가장 옳지 않은 것은?",
+        "가장 옳지 않는 것은?": "가장 옳지 않은 것은?",
+    }
+
+    assert {
+        damaged: OfflineExamParser._repair_stem_ocr_damage(damaged)
+        for damaged in repairs
+    } == repairs
+
+
+def test_does_not_rewrite_complete_question_terminator_with_exception_clause():
+    stem = "가장 옳지 않은 것은? (단, 예외규정은 고려하지 않는다.)"
+
+    assert OfflineExamParser._repair_stem_ocr_damage(stem) == stem
+
+
 def test_damaged_two_by_two_choice_grid_is_recovered_without_promoting_view_rows():
     page = _page(
         _line(["19.", "다음", "보기에서", "옳은", "조합은?"], y=0.12),

@@ -83,6 +83,209 @@ def _texts(page: StructuredPage):
     return [" ".join(word.text for word in line.words) for line in page.lines]
 
 
+def _ocr_page_from_lines(*lines: str) -> StructuredPage:
+    items = []
+    for row, line in enumerate(lines):
+        for column, text in enumerate(line.split()):
+            items.append(
+                {
+                    "text": text,
+                    "bbox": (40 + column * 80, 40 + row * 30, 110 + column * 80, 62 + row * 30),
+                    "confidence": 0.9,
+                }
+            )
+    return build_structured_page(
+        items,
+        page_number=1,
+        width=1000,
+        height=1400,
+        source="ocr",
+        images=((0, 0, 1000, 1400),),
+    )
+
+
+def test_prefers_complete_tesseract_page_for_english_heavy_scanned_exam():
+    windows_page = _ocr_page_from_lines(
+        "Every crew member shall participate ⅲ at least ()11e fire drill",
+        "board that particular ship ⅱ1 the previous 1교)nth",
+        "after modificatlon Of a mtlJOl character when crew iS engaged",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "Every crew member shall participate in at least one fire drill",
+        "board that particular ship in the previous month",
+        "after modification of a major character when crew is engaged",
+    )
+
+    assert PDFExtractor._should_prefer_tesseract_ocr_page(
+        windows_page, tesseract_page
+    ) is True
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+    assert "at least one" in PDFExtractor._ocr_page_plain_text(selected)
+    assert "previous month" in PDFExtractor._ocr_page_plain_text(selected)
+
+
+def test_keeps_windows_page_when_tesseract_result_is_incomplete():
+    windows_page = _ocr_page_from_lines(
+        "Every crew member shall participate in at least one fire drill",
+        "board that particular ship in the previous month",
+        "after modification of a major character when crew is engaged",
+    )
+    incomplete_tesseract_page = _ocr_page_from_lines("Every crew member")
+
+    assert PDFExtractor._should_prefer_tesseract_ocr_page(
+        windows_page, incomplete_tesseract_page
+    ) is False
+
+
+def test_tesseract_text_keeps_windows_question_and_choice_layout_markers():
+    windows_page = _ocr_page_from_lines(
+        "9. 다음 보기",
+        "Every crew member shall participate ⅲ at least ()11e fire drill every month",
+        "board that particular ship ⅱ1 the previous 1교)nth after modificatlon Of a mtlJOl character",
+        "① rescue fire",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "다음 보기",
+        "Every crew member shall participate in at least one fire drill every month",
+        "board that particular ship in the previous month after modification of a major character",
+        "rescue fire",
+    )
+
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+
+    assert len(selected.lines) == len(windows_page.lines)
+    assert selected.lines[0].text.startswith("9.")
+    assert selected.lines[-1].text.startswith("①")
+    assert "at least one" in PDFExtractor._ocr_page_plain_text(selected)
+    assert "previous month" in PDFExtractor._ocr_page_plain_text(selected)
+
+
+def test_tesseract_text_replaces_damaged_ocr_choice_prefix_with_windows_marker():
+    windows_page = _ocr_page_from_lines(
+        "6. Which signal is correct?",
+        "① rescue fire",
+        "② abandon ship fire",
+        "③ fire emergency steering",
+        "④ abandon ship emergency steering",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "6) Which signal is correct?",
+        "0) rescue fire",
+        "Q) abandon ship fire",
+        "6) fire emergency steering",
+        "4) abandon ship emergency steering",
+    )
+
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+
+    assert [line.text.split()[0] for line in selected.lines] == [
+        "6.",
+        "①",
+        "②",
+        "③",
+        "④",
+    ]
+
+
+def test_tesseract_merge_must_preserve_importable_question_coverage():
+    windows_page = _ocr_page_from_lines(
+        "1. First question?",
+        "① one",
+        "② two",
+        "③ three",
+        "④ four",
+        "2. Second question?",
+        "① alpha",
+        "② beta",
+        "③ gamma",
+        "④ delta",
+    )
+    damaged_merge = _ocr_page_from_lines(
+        "1. First question?",
+        "① one",
+        "② two",
+        "③ three",
+        "④ four",
+        "2. Second question?",
+        "① alpha",
+        "② beta",
+        "③ gamma",
+    )
+
+    assert PDFExtractor._preserves_importable_question_coverage(
+        windows_page, damaged_merge
+    ) is False
+
+
+def test_builds_structured_page_from_tesseract_tsv_coordinates():
+    tsv = "\n".join(
+        (
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+            "5\t1\t1\t1\t1\t1\t100\t140\t120\t28\t96.5\tEvery",
+            "5\t1\t1\t1\t1\t2\t230\t140\t100\t28\t94.0\tcrew",
+            "5\t1\t1\t1\t2\t1\t600\t210\t100\t28\t92.0\t다음",
+            "5\t1\t1\t1\t2\t2\t710\t210\t100\t28\t91.0\t문제",
+            "5\t1\t1\t1\t3\t1\t100\t270\t120\t28\t90.0\tSecond",
+            "5\t1\t1\t1\t4\t1\t600\t330\t100\t28\t89.0\t오른쪽",
+            '5\t1\t1\t1\t5\t1\t100\t390\t120\t28\t88.0\t"SOLAS',
+            "5\t1\t1\t1\t5\t2\t230\t390\t100\t28\t87.0\tRule",
+        )
+    )
+
+    page = PDFExtractor._structured_page_from_tesseract_tsv(
+        tsv,
+        page_number=3,
+        page_width=500,
+        page_height=700,
+        image_width=1000,
+        image_height=1400,
+        divider_x=500,
+    )
+
+    assert _texts(page) == ["Every crew", "Second", '"SOLAS Rule', "다음 문제", "오른쪽"]
+    assert [line.column for line in page.lines] == [0, 0, 0, 1, 1]
+    assert page.lines[0].words[0].bbox == pytest.approx((0.1, 0.1, 0.22, 0.12))
+
+
+def test_extracts_optional_tesseract_page_as_structured_words(monkeypatch):
+    tsv = "\n".join(
+        (
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+            "5\t1\t1\t1\t1\t1\t20\t30\t50\t20\t95.0\tEvery",
+            "5\t1\t1\t1\t1\t2\t80\t30\t40\t20\t93.0\tcrew",
+        )
+    )
+    monkeypatch.setattr(extractor_module.shutil, "which", lambda _name: "tesseract")
+    commands = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=tsv.encode("utf-8"),
+        )
+
+    monkeypatch.setattr(extractor_module.subprocess, "run", run)
+
+    page = PDFExtractor._extract_tesseract_structured_page(
+        Image.new("RGB", (200, 300), "white"),
+        page_number=4,
+        page_width=100,
+        page_height=150,
+        divider_x=None,
+    )
+
+    assert page is not None
+    assert _texts(page) == ["Every crew"]
+    assert commands[0][-2:] == ["-c", "tessedit_create_tsv=1"]
+
+
 def test_targeted_ton_hour_rows_merge_only_numeric_raster_evidence(monkeypatch):
     lines = []
     for row, (ton, hour) in enumerate(((200, 12), (200, 24), (300, 12), (300, 24))):

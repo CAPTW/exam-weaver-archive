@@ -86,6 +86,71 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_applies_exact_source_repairs_transactionally_to_staging_database(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    _database(database, [_question(1)])
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_stem": "원문에서 확인한 발문은?",
+                        "repaired_choices": ["갑", "을", "병", "정"],
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_audited_repairs(database, repairs)
+
+    assert result.applied_records == 1
+    with sqlite3.connect(database) as connection:
+        question_id, stem = connection.execute(
+            "SELECT id, question_text FROM questions"
+        ).fetchone()
+        choices = [
+            row[0]
+            for row in connection.execute(
+                "SELECT choice_text FROM question_choices "
+                "WHERE question_id = ? ORDER BY choice_number",
+                (question_id,),
+            )
+        ]
+    assert stem == "원문에서 확인한 발문은?"
+    assert choices == ["갑", "을", "병", "정"]
+
+
+def test_registered_provider_reuses_preparsed_source_pages(tmp_path):
+    from src.database.staging import _registered_parser_from_cache
+
+    source = tmp_path / "questions.pdf"
+    cached = object()
+    calls = []
+
+    def fallback(path, metadata):
+        calls.append((path, metadata))
+        return object()
+
+    parser = _registered_parser_from_cache(
+        {str(source.resolve()): cached}, fallback
+    )
+
+    assert parser(source, {"subject_name": "해사영어"}) is cached
+    assert calls == []
+
+
 def test_build_inventories_documents_writes_reports_schema_and_provenance(tmp_path, monkeypatch):
     from src.database import staging
 
@@ -96,6 +161,14 @@ def test_build_inventories_documents_writes_reports_schema_and_provenance(tmp_pa
     notice_pdf = root / "2024_해양경찰_채용시험_공고.pdf"
     for path in (question_pdf, answer_pdf, notice_pdf):
         path.write_bytes(path.name.encode("utf-8"))
+    auxiliary_pdfs = (
+        root / "tmp" / "reference.pdf",
+        root / "output" / "pdf" / "generated-study-guide.pdf",
+        root / "references" / "source_pdfs" / "supporting-reference.pdf",
+    )
+    for auxiliary_pdf in auxiliary_pdfs:
+        auxiliary_pdf.parent.mkdir(parents=True, exist_ok=True)
+        auxiliary_pdf.write_bytes(b"not part of the registered corpus")
 
     candidates = tuple(
         ParsedOfflineQuestion(

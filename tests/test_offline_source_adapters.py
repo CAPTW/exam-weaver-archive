@@ -111,6 +111,151 @@ def test_engineering_truncated_source_is_marked_unavailable_without_hallucinatio
     assert validate_offline_question(repaired).importable is True
 
 
+def test_audited_source_repair_replaces_exact_stem_and_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.offline_quality import validate_offline_question
+
+    damaged = ParsedOfflineQuestion(
+        9,
+        "깨진 발문",
+        ["오염된 선지"],
+        12,
+        0.91,
+        ("invalid_choice_count",),
+    )
+    repairs = {
+        ("questions.pdf", 12, 9): {
+            "repaired_stem": "원문에서 확인한 발문은?",
+            "repaired_choices": ["선지 1", "선지 2", "선지 3", "선지 4"],
+            "confidence": "exact_source",
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        damaged, Path("questions.pdf"), repairs=repairs
+    )
+
+    assert repaired.stem == "원문에서 확인한 발문은?"
+    assert repaired.choices == ["선지 1", "선지 2", "선지 3", "선지 4"]
+    assert "source_text_repair" in repaired.diagnostics
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_exact_source_choices_can_preserve_intentional_slash_separated_values():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.offline_quality import validate_offline_question
+
+    candidate = ParsedOfflineQuestion(
+        16,
+        "선회권 값은?",
+        ["깨진 선지"],
+        28,
+        0.95,
+        ("invalid_choice_count",),
+    )
+    repairs = {
+        ("navigation.pdf", 28, 16): {
+            "repaired_stem": None,
+            "repaired_choices": [
+                "90 / 5 / 90 / 180 / 4.5",
+                "90 / 4.5 / 180 / 90 / 5",
+                "90 / 5 / 180 / 90 / 4.5",
+                "90 / 4.5 / 90 / 180 / 5",
+            ],
+            "confidence": "exact_source",
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        candidate, Path("navigation.pdf"), repairs=repairs
+    )
+
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_bundled_audit_repairs_reported_engineering_screenshot_stem():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        9,
+        "다음 중 내연기관 윤활유의 기능으로 가장 옳지\n0 V으 거 으7",
+        ["산화작용", "냉각작용", "기밀작용", "방청작용"],
+        12,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf"),
+    )
+
+    assert repaired.stem == "다음 중 내연기관 윤활유의 기능으로 가장 옳지 않은 것은?"
+
+
+def test_bundled_audit_repairs_structurally_broken_english_table_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.offline_quality import validate_offline_question
+
+    damaged = ParsedOfflineQuestion(
+        9,
+        "깨진 SMCP 발문",
+        ["Windward", "Backing", "Variable"],
+        16,
+        0.91,
+        ("invalid_choice_count",),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]해사영어(24년 하반기-25년 하반기).pdf"),
+    )
+
+    assert len(repaired.choices) == 4
+    assert repaired.choices[0].startswith("㉠ Windward ㉡ Veering")
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_registered_group_applies_audited_repair_before_quality_gate(monkeypatch):
+    from dataclasses import replace
+
+    from src.parser import offline_sources as sources
+
+    page = _page_with_question(choice_count=1)
+    parsed = sources.OfflineParseResult(
+        Path("questions.pdf"),
+        sources.DocumentRole.QUESTION,
+        {},
+        (),
+        (),
+        (page,),
+    )
+
+    def exact_repair(candidate, source_path):
+        assert source_path == Path("questions.pdf")
+        return replace(
+            candidate,
+            choices=["선지 1", "선지 2", "선지 3", "선지 4"],
+            diagnostics=("source_text_repair",),
+        )
+
+    monkeypatch.setattr(
+        sources, "apply_audited_source_repair", exact_repair, raising=False
+    )
+    group = {"pages": [{"page": 1, "source_path": "questions.pdf"}]}
+
+    selected, rejected_count = sources.select_group_questions(
+        group, lambda path, metadata: parsed, {}
+    )
+
+    assert selected[1].choices == ["선지 1", "선지 2", "선지 3", "선지 4"]
+    assert rejected_count == 0
+
+
 def test_classifies_exact_corpus_as_12_questions_15_answers_and_3_notices():
     from src.parser.offline_sources import DocumentRole, classify_offline_document
 

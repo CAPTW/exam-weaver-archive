@@ -287,6 +287,24 @@ def validate_rebuild_paths(
                 )
 
 
+def _is_auxiliary_rebuild_path(path: Path, root: Path) -> bool:
+    """Exclude conventional scratch, generated-output, and reference trees."""
+
+    scratch_names = {
+        "tmp",
+        "temp",
+        ".tmp",
+        "__pycache__",
+        "output",
+        "outputs",
+        "references",
+    }
+    return any(
+        part.casefold() in scratch_names
+        for part in path.relative_to(root).parts[:-1]
+    )
+
+
 def build_staging_database(
     root: str | Path,
     staging_db: str | Path,
@@ -309,7 +327,13 @@ def build_staging_database(
     inventory: list[dict[str, object]] = []
     counts: Counter[str] = Counter()
     pdf_paths = sorted(
-        (path for path in source_root.rglob("*") if path.is_file() and path.suffix.casefold() == ".pdf"),
+        (
+            path
+            for path in source_root.rglob("*")
+            if path.is_file()
+            and path.suffix.casefold() == ".pdf"
+            and not _is_auxiliary_rebuild_path(path, source_root)
+        ),
         key=lambda path: str(path.relative_to(source_root)).casefold(),
     )
     for path in pdf_paths:
@@ -1045,6 +1069,19 @@ def _persist_registered_set(
     )
 
 
+def _registered_parser_from_cache(
+    cache: Mapping[str, object],
+    fallback: Callable[[Path, Mapping[str, object] | None], object],
+) -> Callable[[Path, Mapping[str, object] | None], object]:
+    """Reuse the structured pages already extracted for provider discovery."""
+
+    def parse(path: Path, metadata: Mapping[str, object] | None = None) -> object:
+        cached = cache.get(str(Path(path).resolve()))
+        return cached if cached is not None else fallback(Path(path), metadata)
+
+    return parse
+
+
 def _build_registered_corpus_sets(
     root: Path,
     report_dir: Path,
@@ -1059,11 +1096,13 @@ def _build_registered_corpus_sets(
     ]
     page_records: list[dict[str, object]] = []
     native_paths: list[Path] = []
+    parsed_source_cache: dict[str, object] = {}
     for path in question_paths:
         if path.name in {"2023 2차 - 물리.pdf", "2023 2차 - 항해.pdf"}:
             native_paths.append(path)
             continue
         parsed = parse_offline_question_pdf(path, {"probe": {"role": "question"}})
+        parsed_source_cache[str(path.resolve())] = parsed
         for page in parsed.structured_pages:
             text_value = "\n".join(
                 " ".join(str(word.text) for word in line.words) for line in page.lines
@@ -1097,41 +1136,52 @@ def _build_registered_corpus_sets(
         input_dir = Path(os.path.commonpath([str(path.parent) for path in source_paths]))
         module_report = report_dir / f"provider_{module.__name__.split('.')[-1]}"
         module_report.mkdir(parents=True, exist_ok=True)
-        if module is police_engineering:
-            original_gate = module.require_complete_offline_set
+        original_parser = module.parse_subject_question_pdf
+        module.parse_subject_question_pdf = _registered_parser_from_cache(
+            parsed_source_cache, original_parser
+        )
+        try:
+            if module is police_engineering:
+                original_gate = module.require_complete_offline_set
 
-            def engineering_gate(
-                questions,
-                *,
-                expected_numbers,
-                answers,
-                rejected_count,
-                choice_counts,
-                unavailable_answer_numbers=(),
-            ):
-                if answers and all(int(answer) == 0 for answer in answers):
-                    expected_values = tuple(int(number) for number in expected_numbers)
-                    if set(questions) != set(expected_values) or rejected_count:
-                        raise ValueError("registered no-answer engineering set is incomplete")
-                    if any(int(choice_counts.get(number, 0)) not in (4, 5) for number in expected_values):
-                        raise ValueError("registered no-answer engineering set has invalid choices")
-                    return
-                original_gate(
+                def engineering_gate(
                     questions,
-                    expected_numbers=expected_numbers,
-                    answers=answers,
-                    rejected_count=rejected_count,
-                    choice_counts=choice_counts,
-                    unavailable_answer_numbers=unavailable_answer_numbers,
-                )
+                    *,
+                    expected_numbers,
+                    answers,
+                    rejected_count,
+                    choice_counts,
+                    unavailable_answer_numbers=(),
+                ):
+                    if answers and all(int(answer) == 0 for answer in answers):
+                        expected_values = tuple(int(number) for number in expected_numbers)
+                        if set(questions) != set(expected_values) or rejected_count:
+                            raise ValueError("registered no-answer engineering set is incomplete")
+                        if any(int(choice_counts.get(number, 0)) not in (4, 5) for number in expected_values):
+                            raise ValueError("registered no-answer engineering set has invalid choices")
+                        return
+                    original_gate(
+                        questions,
+                        expected_numbers=expected_numbers,
+                        answers=answers,
+                        rejected_count=rejected_count,
+                        choice_counts=choice_counts,
+                        unavailable_answer_numbers=unavailable_answer_numbers,
+                    )
 
-            module.require_complete_offline_set = engineering_gate
-            try:
-                parsed_items, _summary = module.build_questions(records, module_report, input_dir)
-            finally:
-                module.require_complete_offline_set = original_gate
-        else:
-            parsed_items, _summary = module.build_questions(records, module_report, input_dir)
+                module.require_complete_offline_set = engineering_gate
+                try:
+                    parsed_items, _summary = module.build_questions(
+                        records, module_report, input_dir
+                    )
+                finally:
+                    module.require_complete_offline_set = original_gate
+            else:
+                parsed_items, _summary = module.build_questions(
+                    records, module_report, input_dir
+                )
+        finally:
+            module.parse_subject_question_pdf = original_parser
         groups = module.build_groups(records)
         sessions = module.build_session_map(groups)
         items_by_group: dict[int, list[object]] = {}

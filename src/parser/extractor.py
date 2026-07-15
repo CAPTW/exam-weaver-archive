@@ -2,6 +2,7 @@
 """PDF(ZIP) 파일에서 텍스트 추출"""
 
 import zipfile
+import csv
 import json
 import os
 import io
@@ -10,6 +11,7 @@ import unicodedata
 import re
 import math
 import itertools
+from difflib import SequenceMatcher
 import queue
 import shutil
 import subprocess
@@ -638,6 +640,304 @@ class PDFExtractor:
             divider_x=scaled_divider,
         )
 
+    @staticmethod
+    def _ocr_page_plain_text(page: StructuredPage) -> str:
+        return "\n".join(
+            " ".join(str(word.text) for word in line.words)
+            for line in page.lines
+        )
+
+    @classmethod
+    def _ocr_page_has_english_body(cls, page: StructuredPage) -> bool:
+        value = cls._ocr_page_plain_text(page)
+        latin_count = len(re.findall(r"[A-Za-z]", value))
+        hangul_count = len(re.findall(r"[가-힣]", value))
+        return latin_count >= 80 and latin_count >= 0.45 * max(
+            1, latin_count + hangul_count
+        )
+
+    @classmethod
+    def _should_prefer_tesseract_ocr_page(
+        cls,
+        windows_page: StructuredPage,
+        tesseract_page: StructuredPage,
+    ) -> bool:
+        """Prefer a complete Tesseract result on English-heavy scan pages."""
+
+        def compact_length(value: str) -> int:
+            return len(re.sub(r"\s+", "", value))
+
+        def question_count(value: str) -> int:
+            return len(re.findall(r"(?m)^\s*\d{1,3}\s*[.)]", value))
+
+        def noise_score(value: str) -> int:
+            return len(
+                re.findall(
+                    r"[ⅰ-ⅹ]|(?<=[A-Za-z])[01](?=[A-Za-z])|"
+                    r"(?<=[A-Za-z])[가-힣]|(?<=[가-힣])[A-Za-z]",
+                    value,
+                    re.IGNORECASE,
+                )
+            )
+
+        windows_text = cls._ocr_page_plain_text(windows_page)
+        tesseract_text = cls._ocr_page_plain_text(tesseract_page)
+        if not cls._ocr_page_has_english_body(windows_page):
+            return False
+        if compact_length(tesseract_text) < 0.72 * compact_length(windows_text):
+            return False
+        windows_questions = question_count(windows_text)
+        if windows_questions >= 3 and question_count(tesseract_text) < 0.70 * windows_questions:
+            return False
+        return noise_score(tesseract_text) <= noise_score(windows_text)
+
+    @classmethod
+    def _select_preferred_ocr_page(
+        cls,
+        windows_page: StructuredPage,
+        tesseract_page: Optional[StructuredPage],
+    ) -> StructuredPage:
+        if (
+            tesseract_page is not None
+            and cls._should_prefer_tesseract_ocr_page(windows_page, tesseract_page)
+        ):
+            return cls._merge_tesseract_text_into_windows_layout(
+                windows_page, tesseract_page
+            )
+        return windows_page
+
+    @staticmethod
+    def _preserves_importable_question_coverage(
+        windows_page: StructuredPage,
+        candidate_page: StructuredPage,
+    ) -> bool:
+        """Reject prettier OCR when it loses a structurally valid question."""
+
+        from .offline_exam import OfflineExamParser
+        from .offline_quality import validate_offline_question
+
+        def importable_numbers(page: StructuredPage) -> set[int]:
+            return {
+                question.number
+                for question in OfflineExamParser().parse_pages([page])
+                if validate_offline_question(question).importable
+            }
+
+        return importable_numbers(windows_page) <= importable_numbers(candidate_page)
+
+    @staticmethod
+    def _merge_tesseract_text_into_windows_layout(
+        windows_page: StructuredPage,
+        tesseract_page: StructuredPage,
+    ) -> StructuredPage:
+        """Improve English lines without changing proven Windows page structure."""
+
+        marker = re.compile(r"^(?:\d{1,3}[.)]|[①-⑤㉦㉨㉩㉭@])$")
+        ocr_marker = re.compile(
+            r"^(?:\d{1,3}[.)]|[OQ@][.)]|[①-⑤㉦㉨㉩㉭@])$",
+            re.IGNORECASE,
+        )
+        unused = set(range(len(tesseract_page.lines)))
+        merged_lines = []
+        for windows_line in windows_page.lines:
+            windows_center = (windows_line.bbox[1] + windows_line.bbox[3]) / 2
+            candidates = []
+            for index in unused:
+                tesseract_line = tesseract_page.lines[index]
+                if tesseract_line.column != windows_line.column:
+                    continue
+                tesseract_center = (
+                    tesseract_line.bbox[1] + tesseract_line.bbox[3]
+                ) / 2
+                distance = abs(windows_center - tesseract_center)
+                tolerance = max(
+                    0.012,
+                    1.4
+                    * max(
+                        windows_line.bbox[3] - windows_line.bbox[1],
+                        tesseract_line.bbox[3] - tesseract_line.bbox[1],
+                    ),
+                )
+                if distance <= tolerance:
+                    candidates.append((distance, index, tesseract_line))
+            if not candidates:
+                merged_lines.append(windows_line)
+                continue
+            _distance, index, tesseract_line = min(candidates)
+            tesseract_text = tesseract_line.text
+            latin_count = len(re.findall(r"[A-Za-z]", tesseract_text))
+            hangul_count = len(re.findall(r"[가-힣]", tesseract_text))
+            windows_key = re.sub(r"[^0-9A-Za-z]", "", windows_line.text).casefold()
+            tesseract_key = re.sub(r"[^0-9A-Za-z]", "", tesseract_text).casefold()
+            if (
+                latin_count < 5
+                or hangul_count
+                or min(len(windows_key), len(tesseract_key)) < 4
+                or len(tesseract_key) < 0.55 * len(windows_key)
+                or SequenceMatcher(
+                    None, windows_key, tesseract_key, autojunk=False
+                ).ratio()
+                < 0.50
+            ):
+                merged_lines.append(windows_line)
+                continue
+
+            words = list(tesseract_line.words)
+            windows_first = windows_line.words[0] if windows_line.words else None
+            tesseract_first = words[0] if words else None
+            if windows_first is not None and marker.match(
+                str(windows_first.text).strip()
+            ):
+                if tesseract_first is not None and ocr_marker.match(
+                    str(tesseract_first.text).strip()
+                ):
+                    words.pop(0)
+                words.insert(0, windows_first)
+            if not words:
+                merged_lines.append(windows_line)
+                continue
+            words.sort(key=lambda word: word.bbox[0])
+            merged_lines.append(
+                LayoutLine(
+                    words=tuple(words),
+                    bbox=(
+                        min(word.bbox[0] for word in words),
+                        min(word.bbox[1] for word in words),
+                        max(word.bbox[2] for word in words),
+                        max(word.bbox[3] for word in words),
+                    ),
+                    page=windows_line.page,
+                    column=windows_line.column,
+                )
+            )
+            unused.remove(index)
+        return replace(windows_page, lines=tuple(merged_lines))
+
+    @staticmethod
+    def _extract_tesseract_structured_page(
+        image,
+        *,
+        page_number: int,
+        page_width: float,
+        page_height: float,
+        divider_x: Optional[float],
+    ) -> Optional[StructuredPage]:
+        """Run the optional local Tesseract engine and retain word geometry."""
+
+        executable = shutil.which("tesseract")
+        if executable is None:
+            fallback = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            executable = str(fallback) if fallback.exists() else None
+        tessdata = Path(__file__).resolve().parent / "tessdata"
+        if (
+            executable is None
+            or not (tessdata / "kor.traineddata").exists()
+            or not (tessdata / "eng.traineddata").exists()
+        ):
+            return None
+        try:
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="PNG")
+            completed = subprocess.run(
+                [
+                    executable,
+                    "stdin",
+                    "stdout",
+                    "--tessdata-dir",
+                    str(tessdata),
+                    "-l",
+                    "kor+eng",
+                    "--psm",
+                    "4",
+                    "-c",
+                    "tessedit_create_tsv=1",
+                ],
+                input=buffer.getvalue(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=90,
+                check=False,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW
+                    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW")
+                    else 0
+                ),
+            )
+            if completed.returncode != 0:
+                return None
+            tsv = completed.stdout.decode("utf-8", errors="ignore")
+            page = PDFExtractor._structured_page_from_tesseract_tsv(
+                tsv,
+                page_number=page_number,
+                page_width=page_width,
+                page_height=page_height,
+                image_width=image.width,
+                image_height=image.height,
+                divider_x=divider_x,
+            )
+            return page if page.lines else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _structured_page_from_tesseract_tsv(
+        tsv: str,
+        *,
+        page_number: int,
+        page_width: float,
+        page_height: float,
+        image_width: float,
+        image_height: float,
+        divider_x: Optional[float],
+    ) -> StructuredPage:
+        """Adapt Tesseract TSV pixel coordinates to the shared page model."""
+
+        safe_image_width = max(float(image_width), 1.0)
+        safe_image_height = max(float(image_height), 1.0)
+        page_width = float(page_width) if page_width > 0 else safe_image_width
+        page_height = float(page_height) if page_height > 0 else safe_image_height
+        scale_x = page_width / safe_image_width
+        scale_y = page_height / safe_image_height
+        items = []
+        for row in csv.DictReader(
+            io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE
+        ):
+            value = str(row.get("text") or "").strip()
+            if not value:
+                continue
+            try:
+                left = float(row["left"])
+                top = float(row["top"])
+                width = float(row["width"])
+                height = float(row["height"])
+                raw_confidence = float(row.get("conf") or -1)
+            except (KeyError, TypeError, ValueError):
+                continue
+            items.append(
+                {
+                    "text": value,
+                    "bbox": (
+                        left * scale_x,
+                        top * scale_y,
+                        (left + width) * scale_x,
+                        (top + height) * scale_y,
+                    ),
+                    "confidence": (
+                        raw_confidence / 100 if raw_confidence >= 0 else None
+                    ),
+                }
+            )
+        scaled_divider = float(divider_x) * scale_x if divider_x is not None else None
+        return build_structured_page(
+            items,
+            page_number=page_number,
+            width=page_width,
+            height=page_height,
+            source="ocr",
+            images=((0.0, 0.0, page_width, page_height),),
+            divider_x=scaled_divider,
+        )
+
     async def _extract_ocr_structured_page_async(self, page, page_number: int) -> StructuredPage:
         try:
             import fitz
@@ -681,7 +981,7 @@ class PDFExtractor:
         result = await engine.recognize_async(bitmap)
 
         detected_split = self._detect_vertical_column_split(image)
-        structured_page = self._structured_page_from_ocr_result(
+        windows_page = self._structured_page_from_ocr_result(
             result,
             page_number=page_number,
             page_width=page_width,
@@ -690,8 +990,37 @@ class PDFExtractor:
             image_height=image.height,
             divider_x=detected_split,
         )
+        # Recover the proven visual markers before replacing English text.  The
+        # raw OCR prefixes (for example ``0)``/``Q)``) are otherwise liable to
+        # overwrite circled choice markers during the Tesseract merge.
+        windows_page = self._restore_visual_choice_markers(windows_page, image)
+        tesseract_page = None
+        if self._ocr_page_has_english_body(windows_page):
+            tesseract_page = self._extract_tesseract_structured_page(
+                image,
+                page_number=page_number,
+                page_width=page_width,
+                page_height=page_height,
+                divider_x=detected_split,
+            )
+        structured_page = self._select_preferred_ocr_page(
+            windows_page, tesseract_page
+        )
+        used_tesseract = structured_page is not windows_page
         structured_page = self._merge_false_split_column_fragments(structured_page)
-        return self._restore_visual_choice_markers(structured_page, image)
+        structured_page = self._restore_visual_choice_markers(structured_page, image)
+        if used_tesseract:
+            windows_fallback = self._merge_false_split_column_fragments(
+                windows_page
+            )
+            windows_fallback = self._restore_visual_choice_markers(
+                windows_fallback, image
+            )
+            if not self._preserves_importable_question_coverage(
+                windows_fallback, structured_page
+            ):
+                return windows_fallback
+        return structured_page
 
     @staticmethod
     def _merge_false_split_column_fragments(page: StructuredPage) -> StructuredPage:

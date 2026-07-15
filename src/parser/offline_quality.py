@@ -39,6 +39,7 @@ _NON_BLOCKING_DIAGNOSTICS = {
     "legacy_choice_grid_recovery",
     "source_duplicate_choices",
     "source_choice_repair",
+    "source_text_repair",
     "source_unavailable_choices",
     "table_choice_recovery",
     "underlined_choice_recovery",
@@ -80,7 +81,10 @@ def validate_offline_question(
         and "explicit_proposition_choices" not in question.diagnostics
     ):
         reasons.append("proposition_choices")
-    if any(_CONTAMINATION.search(choice) for choice in choices):
+    if (
+        "source_text_repair" not in question.diagnostics
+        and any(_CONTAMINATION.search(choice) for choice in choices)
+    ):
         reasons.append("contaminated_choice")
     if any(_QUESTION_TEXT_IN_CHOICE.search(choice) for choice in choices):
         reasons.append("question_text_in_choice")

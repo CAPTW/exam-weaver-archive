@@ -13,6 +13,7 @@ from .extractor import PDFExtractor
 from .layout import StructuredPage
 from .offline_exam import OfflineExamParser, ParsedOfflineQuestion
 from .offline_quality import validate_offline_question
+from .offline_repairs import apply_audited_source_repair
 from .question import ALL_CHOICES_CORRECT
 
 
@@ -260,6 +261,9 @@ def select_group_questions(
             candidates = OfflineExamParser().parse_pages(list(scoped_pages))
             scoped_questions: list[ParsedOfflineQuestion] = []
             for candidate in candidates:
+                candidate = apply_audited_source_repair(
+                    candidate, Path(source_path)
+                )
                 if candidate_transform is not None:
                     candidate = candidate_transform(candidate, Path(source_path))
                 quality = validate_offline_question(candidate)
