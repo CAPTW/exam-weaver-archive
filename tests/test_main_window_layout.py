@@ -84,6 +84,16 @@ def test_opaque_background_fallback_disables_mica():
     assert window.enabled is False
 
 
+def test_main_window_settings_action_loads_saves_and_applies_menu_locale():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert "discover_menu_language_packs" in source
+    assert "load_menu_locale" in source
+    assert "save_menu_locale" in source
+    assert "onClick=self.open_settings" in source
+    assert "apply_menu_pack(self.navigationInterface" in source
+
+
 def test_main_window_applies_opaque_background_fallback_at_startup():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 

@@ -64,8 +64,36 @@ from .interface.practice import PracticeInterface
 from .interface.import_view import ImportInterface
 from .interface.db_mount import DbMountInterface
 from .interface.codex_panel import CodexInterface
+from .interface.settings import SettingsDialog
+from .menu_language import (
+    MenuLanguagePack,
+    discover_menu_language_packs,
+    load_menu_locale,
+    menu_text,
+    save_menu_locale,
+)
 from ..database.repository import ExamRepository
 from experiments.db_mount_prototype.mount_repo import MountedExamRepository
+
+
+MENU_ROUTE_KEYS = {
+    "HomeInterface": "menu.home",
+    "BrowserInterface": "menu.question_management",
+    "PracticeInterface": "menu.practice",
+    "ExportInterface": "menu.export",
+    "ImportInterface": "menu.import",
+    "DbMountInterface": "menu.question_bank_connections",
+    "CodexToggle": "menu.codex",
+    "Settings": "menu.settings",
+}
+
+
+def apply_menu_pack(navigation_interface, pack: MenuLanguagePack) -> None:
+    """Update existing navigation text without rebuilding any interface."""
+    for route_key, text_key in MENU_ROUTE_KEYS.items():
+        widget = navigation_interface.widget(route_key)
+        if widget is not None:
+            widget.setText(menu_text(pack, text_key))
 
 
 def build_question_repository(db_path, manifest_path):
@@ -128,6 +156,13 @@ class MainWindow(FluentWindow):
         apply_opaque_background_fallback(self)
         self._disable_frameless_screen_refresh()
         self.init_window()
+        self.menu_language_packs, self.menu_pack_warnings = (
+            discover_menu_language_packs(BASE_DIR)
+        )
+        self.menu_locale = load_menu_locale(
+            BASE_DIR,
+            self.menu_language_packs,
+        )
 
         # Use the writable user DB. Packaged builds create it from seed_exam_bank.db
         # when exam_bank.db is absent.
@@ -153,6 +188,7 @@ class MainWindow(FluentWindow):
 
         # Navigation
         self.init_navigation()
+        self.apply_menu_locale(self.menu_locale)
         self.init_codex_sidecar()
         if self.question_repository_error:
             QTimer.singleShot(0, self._show_question_repository_error)
@@ -173,9 +209,44 @@ class MainWindow(FluentWindow):
         if not self.question_repository_error:
             return
         InfoBar.error(
-            title="Mount 로드 실패",
+            title="문제은행 연결 실패",
             content=self.question_repository_error,
             parent=self,
+        )
+
+    def apply_menu_locale(self, locale: str) -> None:
+        pack = self.menu_language_packs.get(locale)
+        if pack is None:
+            locale = "ko"
+            pack = self.menu_language_packs[locale]
+        self.menu_locale = locale
+        apply_menu_pack(self.navigationInterface, pack)
+
+    def open_settings(self) -> None:
+        dialog = SettingsDialog(
+            packs=self.menu_language_packs,
+            current_locale=self.menu_locale,
+            warnings=self.menu_pack_warnings,
+            parent=self,
+        )
+        if dialog.exec_() != dialog.Accepted:
+            return
+        locale = dialog.selected_locale()
+        try:
+            save_menu_locale(BASE_DIR, locale, self.menu_language_packs)
+        except (OSError, ValueError) as exc:
+            InfoBar.error(
+                title="설정 저장 실패",
+                content=f"메뉴 언어를 저장하지 못했습니다. {exc}",
+                parent=self,
+            )
+            return
+        self.apply_menu_locale(locale)
+        InfoBar.success(
+            title="설정 적용 완료",
+            content="메뉴 언어를 변경했습니다.",
+            parent=self,
+            duration=2000,
         )
 
     def init_window(self):
@@ -226,7 +297,7 @@ class MainWindow(FluentWindow):
             NavigationItemPosition.TOP
         )
         self.addSubInterface(
-            self.db_mount_interface, FIF.FOLDER, "DB Mount",
+            self.db_mount_interface, FIF.FOLDER, "문제은행 연결 관리",
             NavigationItemPosition.TOP
         )
 
@@ -243,7 +314,7 @@ class MainWindow(FluentWindow):
             icon=FIF.SETTING,
             text='설정',
             position=NavigationItemPosition.BOTTOM,
-            onClick=lambda: print("Settings clicked")
+            onClick=self.open_settings
         )
 
     def init_codex_sidecar(self):
