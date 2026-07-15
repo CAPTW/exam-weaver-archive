@@ -5,8 +5,10 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
+
+from src.database.practice_attempts import PracticeAttemptStore
 
 
 NAMESPACE_SEPARATOR = "::"
@@ -76,6 +78,12 @@ class MountedDatabase:
             "enabled": self.enabled,
             "read_only": self.read_only,
         }
+
+
+@dataclass(frozen=True)
+class MountedPracticeAttempt:
+    workspace_path: Path
+    attempt_id: int
 
 
 def namespaced_value(mount_id: str, local_value: Any) -> Optional[str]:
@@ -239,6 +247,57 @@ class MountedExamRepository:
                         "domain": mount.domain,
                     })
         return subjects
+
+    def first_exam_code_with_questions(self) -> Optional[str]:
+        exams = self.get_filter_options().get("exams", [])
+        return exams[0]["code"] if exams else None
+
+    def create_practice_attempt(
+        self,
+        *,
+        exam_code: str,
+        exam_name: str,
+        questions: Sequence[Mapping[str, Any]],
+    ) -> MountedPracticeAttempt:
+        source_mount_id, local_exam_code = split_namespaced_value(exam_code)
+        if source_mount_id is None or not local_exam_code:
+            raise ValueError("Mounted 문제 풀이는 namespaced 시험 코드가 필요합니다.")
+        source_mount = self._mounts_by_id.get(source_mount_id)
+        if source_mount is None:
+            raise ValueError(f"unknown or disabled mount: {source_mount_id}")
+
+        for question in questions:
+            question_mount_id = question.get("mount_id")
+            question_id_mount, _local_question_id = split_namespaced_value(
+                question.get("id")
+            )
+            if question_mount_id != source_mount_id or question_id_mount != source_mount_id:
+                raise ValueError("시험과 문제의 Mount가 서로 다릅니다.")
+
+        workspace = self._practice_write_mount()
+        attempt_id = PracticeAttemptStore(workspace.path).create_attempt(
+            mount_id=source_mount.id,
+            mount_label=source_mount.label,
+            exam_code=exam_code,
+            exam_name=exam_name,
+            questions=questions,
+        )
+        return MountedPracticeAttempt(workspace.path, attempt_id)
+
+    def complete_practice_attempt(
+        self,
+        attempt: MountedPracticeAttempt,
+        *,
+        result: Mapping[str, Any],
+        duration_seconds: int,
+    ) -> None:
+        if not isinstance(attempt, MountedPracticeAttempt):
+            raise TypeError("MountedPracticeAttempt token is required")
+        PracticeAttemptStore(attempt.workspace_path).complete_attempt(
+            attempt.attempt_id,
+            result=result,
+            duration_seconds=duration_seconds,
+        )
 
     def search_questions(
         self,
@@ -701,6 +760,18 @@ class MountedExamRepository:
             return writable_mounts[0]
         raise ValueError(
             "수동 문제를 저장할 writable user_workspace Mount가 필요합니다."
+        )
+
+    def _practice_write_mount(self) -> MountedDatabase:
+        writable_mounts = [mount for mount in self.mounts if not mount.read_only]
+        for mount in writable_mounts:
+            if mount.id == "user_workspace":
+                return mount
+        for mount in writable_mounts:
+            if mount.domain.lower() == "user":
+                return mount
+        raise ValueError(
+            "풀이 기록을 저장할 writable user_workspace Mount가 필요합니다."
         )
 
     def _clone_source_target(self, question_id: Any) -> Tuple[MountedDatabase, int]:

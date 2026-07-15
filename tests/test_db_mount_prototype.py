@@ -106,6 +106,93 @@ def _manual_choices():
     ]
 
 
+def _correct_practice_result(question):
+    subject_id = question.get("mounted_subject_code") or question.get("exam_subject_id")
+    return {
+        "total": 1,
+        "correct": 1,
+        "score": 100.0,
+        "details": [
+            {
+                "question": question,
+                "selected": question["correct_answer"],
+                "correct_answer": question["correct_answer"],
+                "is_correct": True,
+            }
+        ],
+        "subject_stats": {
+            subject_id: {
+                "subject": question["subject_name"],
+                "total": 1,
+                "correct": 1,
+            }
+        },
+    }
+
+
+def test_mounted_practice_attempt_is_saved_only_in_user_workspace(tmp_path):
+    mounted, source_db, workspace_db = _make_mounted_repository_with_user_workspace(tmp_path)
+    question = mounted.get_questions_with_choices(
+        exam_code="maritime_all::3급기관사",
+        limit=1,
+    )[0]
+    source_before = source_db.read_bytes()
+
+    attempt = mounted.create_practice_attempt(
+        exam_code="maritime_all::3급기관사",
+        exam_name="3급 기관사",
+        questions=[question],
+    )
+    mounted.complete_practice_attempt(
+        attempt,
+        result=_correct_practice_result(question),
+        duration_seconds=5,
+    )
+
+    assert source_db.read_bytes() == source_before
+    with sqlite3.connect(source_db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM mock_exams").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM exam_results").fetchone()[0] == 0
+    with sqlite3.connect(workspace_db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM practice_attempts").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT source_question_id FROM practice_attempt_questions"
+        ).fetchone()[0].startswith("maritime_all::")
+
+
+def test_mounted_practice_requires_user_workspace_without_writing_source(tmp_path):
+    source_db = tmp_path / "source.db"
+    _make_db(source_db, "원본 문제")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(
+                id="source",
+                label="원본 DB",
+                domain="maritime",
+                path=source_db,
+                read_only=False,
+            )
+        ],
+    )
+    mounted = MountedExamRepository(manifest)
+    question = mounted.get_questions_with_choices(
+        exam_code="source::3급기관사",
+        limit=1,
+    )[0]
+    source_before = source_db.read_bytes()
+
+    with pytest.raises(ValueError, match="user_workspace"):
+        mounted.create_practice_attempt(
+            exam_code="source::3급기관사",
+            exam_name="3급 기관사",
+            questions=[question],
+        )
+
+    assert source_db.read_bytes() == source_before
+
+
 def test_mounted_repository_creates_manual_question_in_user_workspace(tmp_path):
     mounted, source_db, workspace_db = _make_mounted_repository_with_user_workspace(tmp_path)
 
