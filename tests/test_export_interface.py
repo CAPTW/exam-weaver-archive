@@ -457,6 +457,65 @@ def test_apply_all_subject_count_uses_spin_value_when_called_from_button_signal(
     assert [request['count'] for request in interface._selected_random_subject_requests()[0]] == [12, 12]
 
 
+def test_apply_selected_subject_count_changes_checked_rows_only():
+    interface = ExportInterface.__new__(ExportInterface)
+    interface.subjectSelectionRows = [
+        _subject_request('engine1', '기관1', 1, checked=True),
+        _subject_request('engine2', '기관2', 2, checked=False),
+        _subject_request('engine3', '기관3', 3, checked=True),
+    ]
+
+    applied = interface._apply_selected_subject_count(25)
+
+    assert applied == 2
+    assert [
+        row['checkbox'].isChecked()
+        for row in interface.subjectSelectionRows
+    ] == [True, False, True]
+    assert [
+        row['count_spin'].value()
+        for row in interface.subjectSelectionRows
+    ] == [25, 2, 25]
+
+
+def test_apply_selected_subject_count_uses_spin_value_from_button_signal():
+    interface = ExportInterface.__new__(ExportInterface)
+    interface.allSubjectCountSpin = _Spin(12)
+    interface.subjectSelectionRows = [
+        _subject_request('engine1', '기관1', 1, checked=True),
+        _subject_request('engine2', '기관2', 2, checked=False),
+    ]
+
+    assert interface._apply_selected_subject_count(False) == 1
+    assert [
+        row['count_spin'].value()
+        for row in interface.subjectSelectionRows
+    ] == [12, 2]
+
+
+def test_selected_subject_apply_button_tracks_checkbox_state(repo):
+    interface = ExportInterface(repo.db_path)
+
+    assert interface.btnApplySelectedSubjects.text() == "선택한 과목에만 적용"
+    assert interface.btnApplySelectedSubjects.isEnabled() is False
+
+    interface._add_subject_selection_row(
+        {'code': 'engine1', 'name_ko': '기관1'},
+        {'code': '3급기관사', 'name': '3급기관사'},
+        False,
+    )
+    interface.subjectSelectionRows[0]['checkbox'].setChecked(True)
+    APP.processEvents()
+    assert interface.btnApplySelectedSubjects.isEnabled() is True
+
+    interface.subjectSelectionRows[0]['checkbox'].setChecked(False)
+    APP.processEvents()
+    assert interface.btnApplySelectedSubjects.isEnabled() is False
+
+    interface.deleteLater()
+    APP.processEvents()
+
+
 def test_export_docx_filters_selected_year_range_before_deduping(monkeypatch):
     interface = ExportInterface.__new__(ExportInterface)
     interface.examFilter = _Combo('3급기관사', '3급기관사 (3급기관사)')

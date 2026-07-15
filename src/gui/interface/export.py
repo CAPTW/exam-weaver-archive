@@ -137,9 +137,17 @@ class ExportInterface(QScrollArea):
         self._apply_input_height(self.btnApplyAllSubjects)
         self.btnApplyAllSubjects.setFixedWidth(170)
         self.btnApplyAllSubjects.clicked.connect(self._apply_all_subject_count)
+        self.btnApplySelectedSubjects = PushButton("선택한 과목에만 적용", self)
+        self._apply_input_height(self.btnApplySelectedSubjects)
+        self.btnApplySelectedSubjects.setFixedWidth(190)
+        self.btnApplySelectedSubjects.setEnabled(False)
+        self.btnApplySelectedSubjects.clicked.connect(
+            self._apply_selected_subject_count
+        )
         self.randomSubjectBulkLayout.addWidget(self.allSubjectCountLabel)
         self.randomSubjectBulkLayout.addWidget(self.allSubjectCountSpin)
         self.randomSubjectBulkLayout.addWidget(self.btnApplyAllSubjects)
+        self.randomSubjectBulkLayout.addWidget(self.btnApplySelectedSubjects)
         self.randomSubjectBulkLayout.addStretch(1)
         self.subjectSelectionTable = QTableWidget(0, 3, self)
         self.subjectSelectionTable.setHorizontalHeaderLabels(["사용", "과목", "문항 수"])
@@ -366,6 +374,9 @@ class ExportInterface(QScrollArea):
         label.setText(
             f"선택 {selected}과목 · 예상 {total}문항"
         )
+        button = self.__dict__.get('btnApplySelectedSubjects')
+        if button is not None:
+            button.setEnabled(selected > 0)
 
     @staticmethod
     def _plain_exam_label(exam):
@@ -503,6 +514,20 @@ class ExportInterface(QScrollArea):
             if count_spin:
                 count_spin.setValue(count)
         self._update_selection_summary()
+
+    def _apply_selected_subject_count(self, count=None):
+        if count is None or isinstance(count, bool):
+            count = int(self.allSubjectCountSpin.value())
+        applied = 0
+        for row in self.__dict__.get('subjectSelectionRows', []):
+            checkbox = row.get('checkbox')
+            count_spin = row.get('count_spin')
+            if not checkbox or not checkbox.isChecked() or count_spin is None:
+                continue
+            count_spin.setValue(count)
+            applied += 1
+        self._update_selection_summary()
+        return applied
 
     def _get_filtered_unique_questions(
         self,
