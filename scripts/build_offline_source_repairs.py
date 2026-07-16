@@ -42,21 +42,43 @@ def _validated_records(path: Path) -> list[dict[str, object]]:
         if confidence == "exact_source":
             stem = record.get("repaired_stem")
             choices = record.get("repaired_choices")
-            if stem is None and choices is None:
+            choice_overrides = record.get("repaired_choice_overrides")
+            question_image = record.get("repaired_question_image_path")
+            if (
+                stem is None
+                and choices is None
+                and choice_overrides is None
+                and question_image is None
+            ):
                 raise ValueError(f"empty exact repair: {path}: {record!r}")
+            if question_image is not None and not str(question_image).strip():
+                raise ValueError(f"invalid exact question image: {path}: {record!r}")
+            if choices is not None and choice_overrides is not None:
+                raise ValueError(f"ambiguous audited choices: {path}: {record!r}")
             if choices is not None and (
                 not isinstance(choices, list)
                 or len(choices) not in (4, 5)
                 or any(not str(value).strip() for value in choices)
             ):
                 raise ValueError(f"invalid exact choices: {path}: {record!r}")
+            if choice_overrides is not None and (
+                not isinstance(choice_overrides, dict)
+                or not choice_overrides
+                or any(
+                    not str(number).isdigit()
+                    or int(number) not in range(1, 6)
+                    or not str(value).strip()
+                    for number, value in choice_overrides.items()
+                )
+            ):
+                raise ValueError(f"invalid exact choice overrides: {path}: {record!r}")
         records.append(record)
     return records
 
 
 def build_bundle(paths: list[Path], output: Path) -> dict[str, object]:
     repairs: list[dict[str, object]] = []
-    seen: set[tuple[str, int, int]] = set()
+    seen: dict[tuple[str, int, int], int] = {}
     for path in paths:
         for record in _validated_records(path):
             source = Path(
@@ -68,8 +90,27 @@ def build_bundle(paths: list[Path], output: Path) -> dict[str, object]:
                 int(record["question_number"]),
             )
             if key in seen:
-                raise ValueError(f"duplicate repair key across audits: {key!r}")
-            seen.add(key)
+                existing = repairs[seen[key]]
+                for field, value in record.items():
+                    if value is None:
+                        continue
+                    current = existing.get(field)
+                    if current in (None, ""):
+                        existing[field] = value
+                        continue
+                    if field == "source_pdf_relative_path":
+                        if Path(str(current).replace("\\", "/")).name.casefold() == source:
+                            continue
+                    if field == "evidence_note" and str(value) != str(current):
+                        existing[field] = f"{current} / {value}"
+                        continue
+                    if value != current:
+                        raise ValueError(
+                            f"conflicting duplicate repair field {field!r} "
+                            f"for {key!r}: {current!r} != {value!r}"
+                        )
+                continue
+            seen[key] = len(repairs)
             repairs.append(record)
     repairs.sort(
         key=lambda item: (
@@ -105,6 +146,13 @@ def main() -> int:
             DEFAULT_AUDIT_DIR / "navigation_repairs.json",
             DEFAULT_AUDIT_DIR / "navigation_2013_2019_assist.json",
             DEFAULT_AUDIT_DIR / "law_english_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "residual_maritime_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "recent_maritime_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "recent_maritime_repairs_2.json",
+            ROOT / "src" / "parser" / "audits" / "recent_maritime_repairs_3.json",
+            ROOT / "src" / "parser" / "audits" / "final_core_maritime_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "final_english_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "final_missing_image_repairs.json",
         ],
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)

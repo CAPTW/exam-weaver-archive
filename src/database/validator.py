@@ -24,8 +24,9 @@ class QuestionValidator:
     MAX_CHOICE_COUNT = 10
     VALID_ANSWERS = set(range(1, MAX_CHOICE_COUNT + 1))
     IMAGE_HINT_PATTERN = re.compile(
-        r'(그림|사진|그래프|(?<!해)도표|'
-        r'다음과\s*같은|다음\s*(?:그림|회로|선도|기호|도표|파형|진리표|타임차트)|'
+        r'(그림|(?<![가-힣])사진|그래프|'
+        r'다음과\s*같은\s*(?:그림|회로|선도|기호|도표|파형|진리표|타임차트)|'
+        r'다음\s*(?:그림|회로|선도|기호|도표|파형|진리표|타임차트)|'
         r'다음\s*중.{0,20}기호|'
         r'\bfig\.?\b|\bfigure\b|\bdiagram\b)',
         re.IGNORECASE,

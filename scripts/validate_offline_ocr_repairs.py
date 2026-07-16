@@ -6,6 +6,7 @@ import argparse
 import json
 import sqlite3
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,25 +27,40 @@ def validate_database(
     with sqlite3.connect(uri, uri=True) as connection:
         connection.row_factory = sqlite3.Row
         for repair in exact:
-            rows = connection.execute(
-                """
-                SELECT q.id, q.question_text
-                FROM questions q
-                JOIN exam_subjects es ON es.id = q.exam_subject_id
-                JOIN subjects s ON s.id = es.subject_id
-                WHERE s.name_ko = ? AND q.year = ? AND q.session = ?
-                  AND q.question_number = ?
-                """,
-                (
-                    repair["subject"],
+            has_exam_identity = repair.get("year") is not None and repair.get(
+                "session"
+            ) is not None
+            if has_exam_identity:
+                identity_filter = (
+                    "q.year = ? AND q.session = ? AND q.question_number = ?"
+                )
+                identity_params = (
                     int(repair["year"]),
                     int(repair["session"]),
                     int(repair["question_number"]),
-                ),
+                )
+            else:
+                identity_filter = "q.id = ? AND q.question_number = ?"
+                identity_params = (
+                    int(repair.get("question_id", 0) or 0),
+                    int(repair["question_number"]),
+                )
+            rows = connection.execute(
+                f"""
+                SELECT q.id, q.question_text, q.source_page, q.has_image,
+                       q.image_path, qs.source_url
+                FROM questions q
+                JOIN exam_subjects es ON es.id = q.exam_subject_id
+                JOIN subjects s ON s.id = es.subject_id
+                LEFT JOIN question_sources qs ON qs.id = q.source_id
+                WHERE s.name_ko = ? AND {identity_filter}
+                """,
+                (repair["subject"], *identity_params),
             ).fetchall()
             identity = {
-                key: repair[key]
+                key: repair.get(key)
                 for key in (
+                    "question_id",
                     "subject",
                     "year",
                     "session",
@@ -58,6 +74,33 @@ def validate_database(
                 )
                 continue
             row = rows[0]
+            if int(row["source_page"] or 0) != int(repair["source_page"]):
+                mismatches.append(
+                    {
+                        **identity,
+                        "question_id": int(row["id"]),
+                        "field": "source_page",
+                        "expected": int(repair["source_page"]),
+                        "actual": row["source_page"],
+                    }
+                )
+            if not has_exam_identity:
+                database_source = Path(
+                    unquote(urlparse(str(row["source_url"] or "")).path)
+                ).name.casefold()
+                expected_source = Path(
+                    str(repair["source_pdf_relative_path"]).replace("\\", "/")
+                ).name.casefold()
+                if database_source != expected_source:
+                    mismatches.append(
+                        {
+                            **identity,
+                            "question_id": int(row["id"]),
+                            "field": "source_document",
+                            "expected": expected_source,
+                            "actual": database_source,
+                        }
+                    )
             expected_stem = repair.get("repaired_stem")
             if expected_stem is not None and row["question_text"] != expected_stem:
                 mismatches.append(
@@ -70,6 +113,7 @@ def validate_database(
                     }
                 )
             expected_choices = repair.get("repaired_choices")
+            expected_choice_overrides = repair.get("repaired_choice_overrides")
             if expected_choices is not None:
                 choices = [
                     str(choice[0])
@@ -89,6 +133,48 @@ def validate_database(
                             "field": "choices",
                             "expected": expected_choices,
                             "actual": choices,
+                        }
+                    )
+            elif expected_choice_overrides is not None:
+                choices = {
+                    str(choice[0]): str(choice[1])
+                    for choice in connection.execute(
+                        """
+                        SELECT choice_number, choice_text FROM question_choices
+                        WHERE question_id = ? ORDER BY choice_number
+                        """,
+                        (int(row["id"]),),
+                    )
+                }
+                for number, expected in expected_choice_overrides.items():
+                    actual = choices.get(str(number))
+                    if actual != str(expected):
+                        mismatches.append(
+                            {
+                                **identity,
+                                "question_id": int(row["id"]),
+                                "field": f"choice_{number}",
+                                "expected": str(expected),
+                                "actual": actual,
+                            }
+                        )
+            expected_question_image = repair.get("repaired_question_image_path")
+            if expected_question_image is not None:
+                expected_question_image = str(expected_question_image)
+                image_file = ROOT / expected_question_image
+                if (
+                    int(row["has_image"] or 0) != 1
+                    or row["image_path"] != expected_question_image
+                    or not image_file.is_file()
+                ):
+                    mismatches.append(
+                        {
+                            **identity,
+                            "question_id": int(row["id"]),
+                            "field": "question_image",
+                            "expected": expected_question_image,
+                            "actual": row["image_path"],
+                            "file_exists": image_file.is_file(),
                         }
                     )
     return {

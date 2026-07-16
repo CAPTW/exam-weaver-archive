@@ -23,6 +23,8 @@ import pypdf
 import logging
 
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
+from src.parser.formatting import has_suspicious_text_artifact
+from src.parser.text_quality import text_quality_issue_codes
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
@@ -657,6 +659,101 @@ class PDFExtractor:
         )
 
     @classmethod
+    def _tesseract_languages_for_ocr_page(cls, page: StructuredPage) -> str:
+        """Use the English model alone for English-heavy bilingual exam pages.
+
+        Windows OCR remains the Korean/layout authority and the Tesseract result
+        is merged line-by-line. Loading the Korean Tesseract model for long
+        English passages substantially increases digit/letter confusions such
+        as ``of`` -> ``0f`` and ``collision`` -> ``C011ision``.
+        """
+
+        return "eng" if cls._ocr_page_has_english_body(page) else "kor+eng"
+
+    @staticmethod
+    def _ocr_line_noise_score(value: str) -> int:
+        """Score high-confidence OCR damage without penalizing valid formulas."""
+
+        text = str(value or "")
+        score = 0
+        codes = text_quality_issue_codes(text)
+        if "ocr_noise" in codes:
+            score += 20
+        if "broken_unit" in codes:
+            score += 4
+        if "unbalanced_delimiter" in codes:
+            score += 6
+        if has_suspicious_text_artifact(text):
+            score += 12
+        score += 4 * len(re.findall(r"[\ue000-\uf8ff\ufffd]", text))
+        score += 3 * len(re.findall(r"[ⅰ-ⅹ]", text, re.IGNORECASE))
+        score += 2 * len(re.findall(r"[{}|`^]", text))
+        score += 2 * len(
+            re.findall(
+                r"(?<=[A-Za-z가-힣0-9])[卜入人己呑喬粼飇恤訃]"
+                r"|[卜入人己呑喬粼飇恤訃](?=[A-Za-z가-힣0-9])",
+                text,
+            )
+        )
+        return score
+
+    @classmethod
+    def _ocr_page_has_repairable_noise(cls, page: StructuredPage) -> bool:
+        return any(cls._ocr_line_noise_score(line.text) > 0 for line in page.lines)
+
+    @staticmethod
+    def _ocr_similarity_key(value: str) -> str:
+        return re.sub(r"[^0-9A-Za-z가-힣]", "", str(value or "")).casefold()
+
+    @staticmethod
+    def _normalize_tesseract_korean_spacing(line: LayoutLine) -> str:
+        """Collapse syllable-level Tesseract tokens while retaining word gaps."""
+
+        words = list(line.words)
+        korean_tokens = [
+            word for word in words
+            if re.fullmatch(r"[가-힣]+[,.?]?", str(word.text).strip())
+        ]
+        single_ratio = sum(
+            len(re.sub(r"[^가-힣]", "", str(word.text))) == 1
+            for word in korean_tokens
+        ) / max(1, len(korean_tokens))
+        if len(korean_tokens) < 4 or single_ratio < 0.45:
+            return line.text
+
+        character_widths = [
+            (word.bbox[2] - word.bbox[0])
+            / max(1, len(re.sub(r"[^가-힣]", "", str(word.text))))
+            for word in korean_tokens
+        ]
+        typical_width = sorted(character_widths)[len(character_widths) // 2]
+        particles = set("은는이가을를의에로와과도만서며고")
+        output: list[str] = []
+        previous: LayoutWord | None = None
+        for word in words:
+            value = str(word.text).strip()
+            join = False
+            if previous is not None:
+                previous_text = str(previous.text).strip()
+                gap = max(0.0, word.bbox[0] - previous.bbox[2])
+                both_korean = bool(
+                    re.fullmatch(r"[가-힣]+[,.?]?", previous_text)
+                    and re.fullmatch(r"[가-힣]+[,.?]?", value)
+                )
+                join = both_korean and (
+                    gap <= 0.75 * typical_width
+                    or (
+                        value[0] in particles
+                        and gap <= 1.05 * typical_width
+                    )
+                )
+            if output and not join:
+                output.append(" ")
+            output.append(value)
+            previous = word
+        return "".join(output)
+
+    @classmethod
     def _should_prefer_tesseract_ocr_page(
         cls,
         windows_page: StructuredPage,
@@ -682,12 +779,24 @@ class PDFExtractor:
 
         windows_text = cls._ocr_page_plain_text(windows_page)
         tesseract_text = cls._ocr_page_plain_text(tesseract_page)
-        if not cls._ocr_page_has_english_body(windows_page):
-            return False
+        if cls._ocr_page_has_repairable_noise(windows_page):
+            # Tesseract is merged into the proven Windows line geometry.  A
+            # partial English pass therefore remains safe when it measurably
+            # repairs matching lines; it need not rediscover every Korean
+            # question number on the page.
+            merged = cls._merge_tesseract_text_into_windows_layout(
+                windows_page, tesseract_page
+            )
+            before = sum(cls._ocr_line_noise_score(line.text) for line in windows_page.lines)
+            after = sum(cls._ocr_line_noise_score(line.text) for line in merged.lines)
+            if after < before:
+                return True
         if compact_length(tesseract_text) < 0.72 * compact_length(windows_text):
             return False
         windows_questions = question_count(windows_text)
         if windows_questions >= 3 and question_count(tesseract_text) < 0.70 * windows_questions:
+            return False
+        if not cls._ocr_page_has_english_body(windows_page):
             return False
         return noise_score(tesseract_text) <= noise_score(windows_text)
 
@@ -725,8 +834,9 @@ class PDFExtractor:
 
         return importable_numbers(windows_page) <= importable_numbers(candidate_page)
 
-    @staticmethod
+    @classmethod
     def _merge_tesseract_text_into_windows_layout(
+        cls,
         windows_page: StructuredPage,
         tesseract_page: StructuredPage,
     ) -> StructuredPage:
@@ -738,8 +848,13 @@ class PDFExtractor:
             re.IGNORECASE,
         )
         unused = set(range(len(tesseract_page.lines)))
+        damaged_indexes = {
+            index
+            for index, line in enumerate(windows_page.lines)
+            if cls._ocr_line_noise_score(line.text) > 0
+        }
         merged_lines = []
-        for windows_line in windows_page.lines:
+        for windows_index, windows_line in enumerate(windows_page.lines):
             windows_center = (windows_line.bbox[1] + windows_line.bbox[3]) / 2
             candidates = []
             for index in unused:
@@ -764,21 +879,45 @@ class PDFExtractor:
                 merged_lines.append(windows_line)
                 continue
             _distance, index, tesseract_line = min(candidates)
-            tesseract_text = tesseract_line.text
+            tesseract_text = cls._normalize_tesseract_korean_spacing(tesseract_line)
             latin_count = len(re.findall(r"[A-Za-z]", tesseract_text))
             hangul_count = len(re.findall(r"[가-힣]", tesseract_text))
-            windows_key = re.sub(r"[^0-9A-Za-z]", "", windows_line.text).casefold()
-            tesseract_key = re.sub(r"[^0-9A-Za-z]", "", tesseract_text).casefold()
-            if (
+            windows_key = cls._ocr_similarity_key(windows_line.text)
+            tesseract_key = cls._ocr_similarity_key(tesseract_text)
+            similarity = SequenceMatcher(
+                None, windows_key, tesseract_key, autojunk=False
+            ).ratio()
+            windows_noise = cls._ocr_line_noise_score(windows_line.text)
+            tesseract_noise = cls._ocr_line_noise_score(tesseract_text)
+            adjacent_damage = any(
+                neighbor in damaged_indexes
+                and windows_page.lines[neighbor].column == windows_line.column
+                for neighbor in (windows_index - 1, windows_index + 1)
+                if 0 <= neighbor < len(windows_page.lines)
+            )
+            korean_repair = (
+                windows_noise > tesseract_noise and similarity >= 0.45
+            ) or (
+                windows_noise == 0
+                and tesseract_noise == 0
+                and adjacent_damage
+                and similarity >= 0.90
+            )
+            english_candidate = (
                 latin_count < 5
                 or hangul_count
                 or min(len(windows_key), len(tesseract_key)) < 4
                 or len(tesseract_key) < 0.55 * len(windows_key)
-                or SequenceMatcher(
-                    None, windows_key, tesseract_key, autojunk=False
-                ).ratio()
-                < 0.50
-            ):
+                or similarity < 0.50
+            ) is False
+            english_repair = (
+                english_candidate
+                and windows_noise == 0
+                and tesseract_noise == 0
+                and adjacent_damage
+                and similarity >= 0.90
+            )
+            if not korean_repair and not english_repair:
                 merged_lines.append(windows_line)
                 continue
 
@@ -796,6 +935,51 @@ class PDFExtractor:
             if not words:
                 merged_lines.append(windows_line)
                 continue
+            if korean_repair:
+                replacement_text = tesseract_text
+                if windows_first is not None and marker.match(
+                    str(windows_first.text).strip()
+                ):
+                    replacement_text = re.sub(
+                        r"^(?:\d{1,3}[.)]|[OQ@][.)]|[①-⑤㉦㉨㉩㉭@])\s*",
+                        "",
+                        replacement_text,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    content_words = words[1:] if tesseract_first is not None and ocr_marker.match(
+                        str(tesseract_first.text).strip()
+                    ) else words
+                    content_bbox = (
+                        min(word.bbox[0] for word in content_words),
+                        min(word.bbox[1] for word in content_words),
+                        max(word.bbox[2] for word in content_words),
+                        max(word.bbox[3] for word in content_words),
+                    ) if content_words else windows_first.bbox
+                    words = [
+                        windows_first,
+                        LayoutWord(
+                            text=replacement_text,
+                            bbox=content_bbox,
+                            confidence=min(
+                                (word.confidence for word in content_words if word.confidence is not None),
+                                default=None,
+                            ),
+                            column=windows_line.column,
+                        ),
+                    ]
+                else:
+                    words = [
+                        LayoutWord(
+                            text=replacement_text,
+                            bbox=tesseract_line.bbox,
+                            confidence=min(
+                                (word.confidence for word in words if word.confidence is not None),
+                                default=None,
+                            ),
+                            column=windows_line.column,
+                        )
+                    ]
             words.sort(key=lambda word: word.bbox[0])
             merged_lines.append(
                 LayoutLine(
@@ -821,6 +1005,7 @@ class PDFExtractor:
         page_width: float,
         page_height: float,
         divider_x: Optional[float],
+        languages: str = "kor+eng",
     ) -> Optional[StructuredPage]:
         """Run the optional local Tesseract engine and retain word geometry."""
 
@@ -846,9 +1031,9 @@ class PDFExtractor:
                     "--tessdata-dir",
                     str(tessdata),
                     "-l",
-                    "kor+eng",
+                    languages,
                     "--psm",
-                    "4",
+                    "3" if divider_x is not None else "4",
                     "-c",
                     "tessedit_create_tsv=1",
                 ],
@@ -956,9 +1141,13 @@ class PDFExtractor:
         rect = getattr(page, 'rect', None)
         page_width = float(getattr(rect, 'width', 0) or 0)
         page_height = float(getattr(rect, 'height', 0) or 0)
-        zoom = 3.0
+        # The legacy maritime PDFs contain small serif English passages.  At
+        # the previous 3x render (roughly 216 dpi on A4) Tesseract routinely
+        # confused o/0 and l/1.  A 4.2x render is close to 300 dpi while the
+        # caps keep memory bounded for unusually large pages.
+        zoom = 4.2
         if page_width > 0 and page_height > 0:
-            zoom = min(zoom, 2200 / page_width, 3000 / page_height)
+            zoom = min(zoom, 3000 / page_width, 4200 / page_height)
             zoom = max(0.5, zoom)
 
         pix = self._render_page_pixmap(
@@ -995,13 +1184,17 @@ class PDFExtractor:
         # overwrite circled choice markers during the Tesseract merge.
         windows_page = self._restore_visual_choice_markers(windows_page, image)
         tesseract_page = None
-        if self._ocr_page_has_english_body(windows_page):
+        if (
+            self._ocr_page_has_english_body(windows_page)
+            or self._ocr_page_has_repairable_noise(windows_page)
+        ):
             tesseract_page = self._extract_tesseract_structured_page(
                 image,
                 page_number=page_number,
                 page_width=page_width,
                 page_height=page_height,
                 divider_x=detected_split,
+                languages=self._tesseract_languages_for_ocr_page(windows_page),
             )
         structured_page = self._select_preferred_ocr_page(
             windows_page, tesseract_page

@@ -1,0 +1,1073 @@
+{
+  "schema_version": 1,
+  "generated_from": [
+    "whole-database quality scan, high-resolution source re-OCR, and repeated-question cross-check"
+  ],
+  "repairs": [
+    {
+      "question_id": 16,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 1,
+      "question_number": 16,
+      "source_page": 4,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 4쪽 16번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "선장은 선박에 긴박한 위험이 있을 때에는 인명, 선박 및 화물을 구조하는 데 필요한 조치를 다 해야 하며, 선장은 인명구조 조치를 다하기 전에 선박을 떠나도 된다."
+      }
+    },
+    {
+      "question_id": 28,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 1,
+      "question_number": 28,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 5쪽을 대조했다.",
+      "repaired_stem": "다음 중 「수상에서의 수색•구조 등에 관한 법률」 상 ( )안에 들어갈 숫자의 합으로 가장 옳은 것은? ㉠ 최초 수상구조사 자격을 취득한 경우 자격증을 발급 받은 날부터 기산하여 ( )년이 되는 날부터 ( )개월 이내 해양경찰청장이 실시하는 보수교육을 받아야 한다. ㉡ 수상구조사 자격시험에 응시하려는 사람은 해양경찰청장이 지정하는 관련 단체 또는 기관에서 ( )시간 이상의 교육과정을 이수하여야 한다. ㉢ 폐기물•기름 또는 유해액체물질의 산적운반에 전용되지 아니하는 선박으로서 총톤수 ( )톤 미만의 선박을 구난하려는 경우에는 선박의 구난작업 신고를 하지 않아도 된다."
+    },
+    {
+      "question_id": 35,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 1,
+      "question_number": 35,
+      "source_page": 7,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 7쪽 35번을 재판독했다.",
+      "repaired_stem": "다음 중 「해양사고의 조사 및 심판에 관한 법률」 상 지방해양안전심판원(이하 ‘지방심판원’이라고 한다)의 조직 등에 관한 설명으로 가장 옳지 않은 것은?"
+    },
+    {
+      "question_id": 57,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 2,
+      "question_number": 17,
+      "source_page": 10,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 10쪽을 대조했다.",
+      "repaired_stem": "다음 중 「선박안전법(시행령•시행규칙 포함)」 상 만재흘수선의 표시를 생략할 수 있는 선박에 대한 설명으로 가장 옳지 않은 것은?"
+    },
+    {
+      "question_id": 101,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 1,
+      "question_number": 21,
+      "source_page": 18,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 18쪽 21번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "시장•군수•자치구청장 또는 해양경찰서장"
+      }
+    },
+    {
+      "question_id": 106,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 1,
+      "question_number": 26,
+      "source_page": 18,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 18쪽을 대조했다.",
+      "repaired_choice_overrides": {
+        "1": "인공섬•시설 및 구조물의 설치•사용"
+      }
+    },
+    {
+      "question_id": 134,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 2,
+      "question_number": 14,
+      "source_page": 22,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 22쪽 14번을 재판독했다.",
+      "repaired_stem": "「유선 및 도선사업법」에 따라 유•도선 사업자는 승선하는 선원 및 그 밖의 종사자에 대해 비상상황 대비 훈련을 실시하여야 한다. 다음 중 매월 실시하는 훈련과 6개월마다 실시하는 훈련으로 가장 옳지 않은 것은? <매월> <6개월>"
+    },
+    {
+      "question_id": 165,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 5,
+      "source_page": 28,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 28쪽 5번을 고해상도로 재판독했다.",
+      "repaired_stem": "다음 중 「해사안전법」 상 선박이 좁은 수로 등에서 서로 상대의 시계 안에 있는 경우에 행하는 기적신호로 가장 옳은 것은? (다른 예외적인 사정은 고려하지 아니한다.) 다른 선박을 본선의 우현에 두고 추월하려는 경우: (㉠)의 순서로 의사를 표시 다른 선박을 본선의 좌현에 두고 추월하려는 경우: (㉡)의 순서로 의사를 표시 추월당하는 선박이 다른 선박의 추월에 동의할 경우: (㉢)의 순서로 2회에 걸쳐 동의 의사를 표시"
+    },
+    {
+      "question_id": 166,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 6,
+      "source_page": 28,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 28쪽을 대조했다.",
+      "repaired_choice_overrides": {
+        "3": "면허취소 또는 업무정지처분의 통지를 받은 해기사는 통지를 받은 날부터 14일 이내에 면허증을 해양수산부장관에게 제출하여야 한다. 이 경우 업무정지기간이 끝나면 그 해기사에게 면허증을 되돌려 주어야 한다."
+      }
+    },
+    {
+      "question_id": 167,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 7,
+      "source_page": 28,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 28쪽 7번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "「수산업법」 제3조제3호에 따른 어업을 목적으로 하여 인공적으로 조성된 육상의 해수면",
+        "3": "「내수면어업법」 제2조제2호에 따른 공공용 수면"
+      }
+    },
+    {
+      "question_id": 170,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 10,
+      "source_page": 29,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 29쪽 10번을 고해상도로 재판독했다.",
+      "repaired_stem": "다음 중 「어선법」(시행규칙 포함)에 대한 설명으로 옳은 것은 모두 몇 개인가? (다른 예외적인 사정은 고려하지 아니한다.) ㉠ 배의 길이가 24미터 이상인 어선이나, 낚시어선으로서 어선검사증서에 기재된 최대승선인원이 13명 이상인 어선의 소유자는 해양수산부장관이 정하여 고시하는 복원성 기준에 적합한지에 대하여 복원성 승인을 받아야 한다. ㉡ 시장•군수•구청장은 어선원부에 등록한 총톤수 20톤 이상인 어선에 대하여 선적증서를 발급하여야 한다. ㉢ 시장•군수•구청장은 어선의 소유자가 속임수나 그 밖의 부정한 방법으로 등록을 한 경우에는 30일 이내의 기간을 정하여 등록의 말소를 신청할 것을 최고하여야 한다. ㉣ 등록이 말소된 어선의 소유자는 지체 없이 그 어선에 붙어 있는 어선번호판을 제거하고 14일 이내에 그 어선번호판과 선박국적증서 등을 선적항을 관할하는 시장•군수•구청장에게 반납하여야 한다. ㉤ 시장•군수•구청장은 어선의 등록을 말소한 때에는 해당 어선의 어선원부에 ‘말소’의 표시를 한 후 1년간 따로 보관하여야 한다."
+    },
+    {
+      "question_id": 176,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 16,
+      "source_page": 30,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 30쪽 16번을 재판독했다.",
+      "repaired_stem": "다음 중 「낚시 관리 및 육성법」(시행령 포함)에 대한 설명 중 가장 옳지 않은 것은? (다른 예외적인 사정은 고려하지 아니한다.)"
+    },
+    {
+      "question_id": 178,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 3,
+      "question_number": 18,
+      "source_page": 31,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 31쪽 18번을 고해상도로 재판독했다.",
+      "repaired_stem": "다음 중 「선원법」 상 재해보상에 대한 설명으로 옳지 않은 것은 모두 몇 개인가? ㉠ 선박소유자는 선원이 직무상 부상을 당하거나 질병에 걸려 요양 중인 선원에게 4개월의 범위에서 그 부상이나 질병이 치유될 때까지 매월 1회 승선평균임금에 상당하는 금액의 상병보상을 하여야 하며, 4개월이 지나도 치유되지 아니하는 경우에는 매월 1회 승선평균임금의 100분의 70에 상당하는 금액의 상병보상을 하여야 한다. ㉡ 선박소유자는 선원이 직무상 사망(직무상 부상 또는 질병으로 인한 요양 중의 사망을 포함한다)하였을 때에는 지체 없이 대통령령으로 정하는 유족에게 승선평균임금의 1천300일분에 상당하는 금액의 유족보상을 하여야 한다. ㉢ 선박소유자는 선원이 사망하였을 때에는 지체 없이 대통령령으로 정하는 유족에게 승선평균임금의 120일분에 상당하는 금액을 장제비로 지급하여야 한다. ㉣ 선박소유자는 선원이 해상에서 행방불명된 경우에는 대통령령으로 정하는 피부양자에게 1개월분의 통상임금과 승선평균임금의 3개월분에 상당하는 금액의 행방불명보상을 하여야 한다. ㉤ 선박소유자는 선원이 승선하고 있는 동안 해양사고로 소지품을 잃어버린 경우에는 통상임금의 2개월분의 범위에서 그 잃어버린 소지품의 가액에 상당하는 금액을 보상하여야 한다."
+    },
+    {
+      "question_id": 189,
+      "subject": "해사법규",
+      "year": 2020,
+      "session": 4,
+      "question_number": 9,
+      "source_page": 33,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 33쪽 9번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "지방해양경찰청장•시•도지사"
+      }
+    },
+    {
+      "question_id": 213,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 1,
+      "question_number": 13,
+      "source_page": 36,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 사본과 원문 PDF 36쪽을 대조했다.",
+      "repaired_choice_overrides": {
+        "4": "해양수산부장관은 긴급히 도서민을 수송하는 경우 선박직원의 승무기준을 완화하여 승무를 허가할 수 있다."
+      }
+    },
+    {
+      "question_id": 218,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 1,
+      "question_number": 18,
+      "source_page": 37,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 37쪽을 대조했다.",
+      "repaired_stem": "「해사안전법」 상 도선업무에 종사하고 있는 선박은 마스트의 꼭대기나 그 부근에 수직으로 (㉠)도를 비추는 등화를 상부의 것은 (㉡), 하부의 것은 (㉢)으로 각 1개를 달아야 한다. 다음 중 가장 옳은 것은?"
+    },
+    {
+      "question_id": 224,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 1,
+      "question_number": 24,
+      "source_page": 38,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 38쪽 24번을 재판독했다.",
+      "repaired_stem": "「수상레저안전법(시행령, 시행규칙 포함)」 상 안전검사 대상 동력수상레저기구 중 수상레저사업에 이용되는 수상레저기구는 (㉠)마다, 그 외 수상레저기구는 (㉡)마다 정기검사를 받아야 한다. 다음 중 ( ) 안에 들어갈 말로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 243,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 2,
+      "question_number": 3,
+      "source_page": 40,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 40쪽을 대조했다.",
+      "repaired_stem": "「해양환경관리법」상 기름 및 유해액체물질을 사용•저장 또는 처리하는 해양시설의 소유자는 해양시설오염비상계획서를 작성하여 ( )의 검인을 받은 후 그 해양시설에 비치하여야 하고, 해양시설오염비상계획서에 따른 조치 등을 이행하여야 한다. ( )안에 들어갈 말로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 249,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 2,
+      "question_number": 9,
+      "source_page": 41,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 41쪽 9번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "1": "외국선박에 대한 해상검문검색은 대한민국이 체결•비준한 조약 또는 일반적으로 승인된 국제법규에 따라 실시한다."
+      }
+    },
+    {
+      "question_id": 256,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 2,
+      "question_number": 16,
+      "source_page": 41,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 41쪽 16번을 재판독했다.",
+      "repaired_stem": "「수상레저안전법(시행령, 시행규칙 포함)」 상 안전검사 대상 동력수상레저기구 중 수상레저사업에 이용되는 수상레저기구는 (㉠)마다, 그 외 수상레저기구는 (㉡)마다 정기검사를 받아야 한다. 다음 중 ( ) 안에 들어갈 단어로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 276,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 2,
+      "question_number": 36,
+      "source_page": 44,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 44쪽 36번의 선지 종결부를 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "국제해사기구의 국제신호서에 규정된 사이렌•뱃고동 또는 그 밖의 음향신호에 의한 엘(L)의 신호(단음 1회, 장음 1회, 단음 2회)를 7초의 간격으로 계속한다.",
+        "3": "국제해사기구의 국제신호서에 규정된 투광기에 의한 엘(L)의 신호(단광 1회, 장광 1회, 단광 2회)를 7초의 간격으로 계속한다."
+      }
+    },
+    {
+      "question_id": 277,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 2,
+      "question_number": 37,
+      "source_page": 44,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 44쪽을 대조했다.",
+      "repaired_stem": "해양경찰청 경비함정이 대한민국 선박이 아니면서 국적을 사칭할 목적으로 한국선박의 선박국적증서로 항해 중인 선박을 발견하였다. 이러한 경우 해양경찰관은 선박의 선장에게 어떤 법률을 적용하여 처벌할 수 있는가?"
+    },
+    {
+      "question_id": 282,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 3,
+      "question_number": 2,
+      "source_page": 45,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 사본과 원문 PDF 45쪽을 대조했다.",
+      "repaired_choice_overrides": {
+        "4": "외국 또는 외국인은 대한민국의 배타적 경제수역과 대륙붕에서 항행 또는 상공비행, 해저 전선 또는 관선 부설을 하기 위해서는 대한민국의 허가를 얻어야 한다."
+      }
+    },
+    {
+      "question_id": 308,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 4,
+      "question_number": 8,
+      "source_page": 49,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 49쪽 8번을 재판독했다.",
+      "repaired_stem": "「수상레저안전법」과 관련된 다음 설명 중 옳지 않은 것을 모두 고르시오. ㉠ 유•도선사업, 체육시설업, 낚시어선업은 「수상레저안전법」의 적용이 배제된다. ㉡ 등록 동력수상레저기구의 안전검사를 받아야 하는 기간은 검사유효기간 만료일을 기준으로 하여 전후 3개월 이내이다. ㉢ 수상레저사업의 변경등록 신청을 받은 해양경찰서장 또는 시장•군수•구청장은 그 등록 전에 해당 영업구역을 관할하는 지방해양경찰청장 또는 시•도지사와 협의하여야 한다. ㉣ 소유자는 등록된 동력수상레저기구의 존재 여부가 3개월간 분명하지 않은 경우에는 말소등록 신청을 하여야 한다."
+    },
+    {
+      "question_id": 316,
+      "subject": "해사법규",
+      "year": 2019,
+      "session": 4,
+      "question_number": 16,
+      "source_page": 50,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 50쪽 16번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "해양경찰청장•국무회의•국무총리"
+      }
+    },
+    {
+      "question_id": 322,
+      "subject": "해사법규",
+      "year": 2018,
+      "session": 1,
+      "question_number": 2,
+      "source_page": 51,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 51쪽 2번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "수상레저활동에 이용하거나 이용하려는 것으로서 총톤수(「선박법」 제3조제1항제2호에 따른 총톤수를 말한다) 20톤 이상의 모터보트는 등록 대상이다."
+      }
+    },
+    {
+      "question_id": 334,
+      "subject": "해사법규",
+      "year": 2018,
+      "session": 1,
+      "question_number": 14,
+      "source_page": 52,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 52쪽 14번의 선지 종결부를 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "국제해사기구의 국제신호서에 규정된 사이렌에 의한 엘(L)의 신호(단음 1회, 장음 2회, 단음 2회)를 7초의 간격으로 계속한다.",
+        "3": "국제해사기구의 국제신호서에 규정된 투광기에 의한 엘(L)의 신호(단광 1회, 장광 1회, 단광 2회)를 7초의 간격으로 계속한다."
+      }
+    },
+    {
+      "question_id": 342,
+      "subject": "해사법규",
+      "year": 2018,
+      "session": 1,
+      "question_number": 22,
+      "source_page": 53,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 53쪽 22번을 재판독했다.",
+      "repaired_stem": "「해양경비법」 상 해양경비활동을 효율적으로 수행하기 위하여 5년마다 수립하고 추진하여야 하는 해양경비기본계획 수립 사항으로 가장 맞지 않는 것은?"
+    },
+    {
+      "question_id": 397,
+      "subject": "해사법규",
+      "year": 2018,
+      "session": 2,
+      "question_number": 37,
+      "source_page": 61,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 61쪽 37번을 재판독했다.",
+      "repaired_stem": "다음 지문의 행위에 대해 「해양경비법」에 따른 조치 중 가장 옳지 않은 것은? ㉠ 선박 등이 본래의 목적을 벗어나 다른 선박 등의 항행 또는 입항•출항 등에 현저히 지장을 주는 행위 ㉡ 선박 등이 항구•포구 내외의 수역과 지정된 항로에서 무리를 지어 장시간 점거하거나 항법상 정상적인 횡단방법을 일탈하여 다른 선박 등의 항행에 지장을 주는 행위"
+    },
+    {
+      "question_id": 430,
+      "subject": "해사법규",
+      "year": 2018,
+      "session": 4,
+      "question_number": 10,
+      "source_page": 67,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 67쪽 10번을 재판독했다.",
+      "repaired_stem": "다음 중 「배타적 경제수역에서의 외국인어업 등에 대한 주권적 권리의 행사에 관한 법률」 상 외국인이나 외국 어선의 선장이 배타적 경제수역에서 어획물 또는 그 제품을 다른 선박에 옮겨 싣거나 다른 선박으로부터 받아 실을 수 있는 경우에 해당하는 것은 모두 몇 개인가? 가. 해양사고가 발생한 경우 나. 어업활동 허가를 받은 어선에 옮겨 싣는 경우 다. 어업활동 승인을 받은 부속선에 옮겨 싣는 경우 라. 어획물 운반을 목적으로 허가를 받은 선박에 옮겨 싣는 경우"
+    },
+    {
+      "question_id": 475,
+      "subject": "해사법규",
+      "year": 2017,
+      "session": 1,
+      "question_number": 15,
+      "source_page": 79,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 79쪽 15번을 재판독했다.",
+      "repaired_stem": "수상레저활동을 하는 자가 수상레저기구를 조종하여 운항할 때 준수하여야 하는 운항규칙에 관한 설명 중 옳지 않은 것은 몇 개인가? ㉠ 다른 수상레저기구와 정면으로 충돌할 위험이 있을 때에는 음성신호•수신호 등 적당한 방법으로 상대에게 이를 알리고 우현 쪽으로 진로를 피하여야 한다. ㉡ 다른 수상레저기구의 진로를 횡단하는 경우에 충돌의 위험이 있을 때에는 다른 수상레저기구를 오른쪽에 두고 있는 수상레저기구가 진로를 피하여야 한다. ㉢ 다른 수상레저기구와 같은 방향으로 운항하는 경우에는 5미터 이내로 근접하여 운항하여서는 아니 된다. ㉣ 다이빙대•계류장 및 교량으로부터 20미터 이내의 구역에서는 15노트 이하의 속력으로 운항하여야 한다."
+    },
+    {
+      "question_id": 484,
+      "subject": "해사법규",
+      "year": 2017,
+      "session": 2,
+      "question_number": 4,
+      "source_page": 81,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 81쪽 4번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "‘수난구호’란 수상에서 조난된 사람 및 선박, 항공기, 수상레저기구 등의 수색•구조•구난과 구조된 사람•선박 등 및 물건의 보호•관리•사후처리에 관한 업무를 말한다."
+      }
+    },
+    {
+      "question_id": 485,
+      "subject": "해사법규",
+      "year": 2017,
+      "session": 2,
+      "question_number": 5,
+      "source_page": 81,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 81쪽 5번을 재판독했다.",
+      "repaired_stem": "여수해양경비안전서 상황실로 甲선장의 선상 쟁의행위 신고가 접수되었다. 당시 상황실장은 동 신고 사항이 위법인지를 확인하였으나 결과적으로 「선원법」 상 쟁의행위가 제한되지 않는 사항으로 판단하였다. 다음 중 선원근로관계에 관한 쟁의행위가 가능한 경우로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 488,
+      "subject": "해사법규",
+      "year": 2017,
+      "session": 2,
+      "question_number": 8,
+      "source_page": 81,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 81쪽 8번을 재판독했다.",
+      "repaired_stem": "「선박직원법」 상 해기사면허 갱신을 위하여 함정에서 선박직원이 아닌 자격으로 승선하는 甲경장은 면허 갱신 신청일 전날부터 5년 이내에 최소한 몇 년 이상 승무한 경력이 있어야 면허 갱신이 가능한가?"
+    },
+    {
+      "question_id": 502,
+      "subject": "해사법규",
+      "year": 2016,
+      "session": 1,
+      "question_number": 2,
+      "source_page": 84,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 84쪽 2번을 재판독했다.",
+      "repaired_stem": "다음은 「낚시 관리 및 육성법」에 따른 낚시어선이 갖추어야 할 설비에 관한 설명이다. ( )안에 들어가야 할 것으로 옳은 것은? ㉠ 구명조끼는 최대승선인원의 120% 이상에 해당하는 수를 갖추고, 이 중 ( ) 이상은 어린이용으로 갖추어야 한다. ㉡ 구명부환은 최대승선인원의 ( ) 이상에 해당하는 수를 갖추어야 한다. ㉢ 총톤수 5톤 미만 낚시어선의 경우 2개 이상의 소화기를 갖추어야 한다."
+    },
+    {
+      "question_id": 516,
+      "subject": "해사법규",
+      "year": 2016,
+      "session": 1,
+      "question_number": 16,
+      "source_page": 86,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 86쪽 16번을 재판독했다.",
+      "repaired_stem": "다음 중 「선박의 입항 및 출항 등에 관한 법률」 상 빈칸에 들어갈 내용으로 가장 옳은 것은? ㉠ ( )란 선박이 해상에서 일시적으로 운항을 멈추는 것을 말한다. ㉡ 예인선은 한꺼번에 최대 ( )척의 피예인선을 끌 수 있다. ㉢ 총톤수 ( )톤 이상의 선박을 무역항의 수상구역 등에 계선하려는 자는 해양수산부령으로 정하는 바에 따라 해양수산부장관에게 신고하여야 한다."
+    },
+    {
+      "question_id": 533,
+      "subject": "해사법규",
+      "year": 2016,
+      "session": 2,
+      "question_number": 13,
+      "source_page": 88,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 88쪽 13번을 재판독했다.",
+      "repaired_stem": "다음은 「해양환경관리법」에 대한 내용이다. ( ) 안의 A, B, C에 들어갈 내용을 순서대로 나열한 것으로 옳은 것은? ㉠ 기름기록부는 (A) 기재를 한 날로부터 (B)년 동안 보존한다. ㉡ 폐기물기록부는 (A) 기재를 한 날로부터 (C)년 동안 보존한다."
+    },
+    {
+      "question_id": 546,
+      "subject": "해사법규",
+      "year": 2015,
+      "session": 1,
+      "question_number": 6,
+      "source_page": 90,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 90쪽 6번의 한자 병기를 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "외국선박은 대한민국의 평화•공공질서 또는 안전보장을 해치지 아니하는 범위에서 대한민국의 영해를 무해통항(無害通航)할 수 있다."
+      }
+    },
+    {
+      "question_id": 555,
+      "subject": "해사법규",
+      "year": 2015,
+      "session": 1,
+      "question_number": 15,
+      "source_page": 91,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 91쪽 15번을 재판독했다.",
+      "repaired_stem": "「유선 및 도선 사업법」 상 유선사업의 면허 또는 신고의 유효기간은 (가)으로 하되, 연중 한시적으로 영업하는 경우에는 해당 연도로만 하며, 도선사업의 면허 또는 신고의 유효기간은 (나)으로 하되, 연중 한시적으로 영업하는 경우에는 (다)으로 한다. 빈칸에 알맞은 것은? (가) (나) (다)"
+    },
+    {
+      "question_id": 567,
+      "subject": "해사법규",
+      "year": 2015,
+      "session": 2,
+      "question_number": 7,
+      "source_page": 93,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 93쪽 7번을 재판독했다.",
+      "repaired_stem": "다음은 「수상레저안전법」에서 수상레저활동자가 수상레저기구를 조종하여 운항할 때에 지켜야 할 운항규칙의 내용이다. 가장 틀린 것은?",
+      "repaired_choice_overrides": {
+        "4": "안개 등으로 인하여 가시거리가 1킬로미터 이내로 제한되는 경우에는 레이더 및 초단파(VHF) 통신설비를 갖추지 아니한 수상레저기구를 운항해서는 아니 된다."
+      }
+    },
+    {
+      "question_id": 608,
+      "subject": "해사법규",
+      "year": 2014,
+      "session": 2,
+      "question_number": 8,
+      "source_page": 100,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 100쪽 8번을 재판독했다.",
+      "repaired_stem": "「유선 및 도선사업법」(시행규칙, 시행령 포함)에 관한 설명이다. ( )안에 들어가야 할 (A), (B), (C)의 합은? 가. 승객 및 선원이 안전하게 탑승할 수 있는 장소의 면적이 21.0제곱미터일 때 유선의 승선정원은 (A)명이다. 나. 목선 및 합성수지선의 경우 유•도선의 선령기준은 (B)년 이하여야 한다. 다. 도선에 사람과 화물을 함께 승선•적재시키는 경우 승선 1명으로 계산하는 화물의 무게는 (C)킬로그램이다."
+    },
+    {
+      "question_id": 649,
+      "subject": "해사법규",
+      "year": 2013,
+      "session": 2,
+      "question_number": 9,
+      "source_page": 104,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 104쪽 9번을 재판독했다.",
+      "repaired_stem": "다음은 「수난구호법」의 내용에 대한 설명이다. 맞는 것은 모두 몇 개인가? 가. 해양경찰청장은 수난대비집행계획을 5년 단위로 수립•시행한다. 나. 구난이란 조난을 당한 사람을 구출하여 응급조치 또는 그 밖의 필요한 것을 제공하고 안전한 장소로 인도하기 위한 활동을 말한다. 다. 표류물이란 점유를 이탈하여 해수면 또는 내수면에 가라앉은 물건을 말한다. 라. 해수면 또는 내수면에서 발생한 모든 조난사고에 대해 다른 법률에서 따로 정한 경우에도 수난구호법의 규정이 우선 적용된다. 마. 수난구호법을 위반한 자에 대한 과태료 부과•징수 권자는 시장•군수 또는 구청장이다."
+    },
+    {
+      "question_id": 749,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 4,
+      "question_number": 9,
+      "source_page": 19,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 19쪽 9번을 재판독했다.",
+      "repaired_stem": "다음 <보기> 중 「항만법(시행령 및 시행규칙 포함)」상 항만을 구분할 때, 국가안보 또는 영해관리에 중요하거나 기상악화 등 유사시 선박의 대피를 주목적으로 하는 항만은 모두 몇 개인가? <보기> ㉠ 추자항 ㉡ 후포항 ㉢ 상왕등도항 ㉣ 완도항 ㉤ 국도항 ㉥ 격렬비열도항 ㉦ 용기포항"
+    },
+    {
+      "question_id": 781,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 1,
+      "source_page": 26,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 26쪽 1번을 재판독했다.",
+      "repaired_stem": "다음 중 「어선안전조업 및 어선원의 안전•보건 증진 등에 관한 법률(시행령 및 시행규칙 포함)」상 특정해역에서의 조업 또는 항행의 제한에 관한 설명으로 가장 옳지 않은 것은?"
+    },
+    {
+      "question_id": 790,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 10,
+      "source_page": 27,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 27쪽 10번을 재판독했다.",
+      "repaired_stem": "「선박안전법(시행령 및 시행규칙 포함)」상 해양수산부장관은 외국선박의 구조•설비•화물운송방법 및 선원의 선박운항지식 등이 선박안전에 관한 국제협약에 적합한지 여부를 확인하고 그에 필요한 조치를 할 수 있다. 다음 <보기> 중 선박안전에 관한 국제협약에 포함되지 않은 것은 모두 몇 개인가? <보기> ㉠ 해상에서의 인명안전을 위한 국제협약 ㉡ 만재흘수선에 관한 국제협약 ㉢ 상선의 최저기준에 관한 국제협약 ㉣ 선박으로부터의 오염방지를 위한 국제협약 ㉤ 국제 해상충돌 예방규칙 협약 ㉥ 선원의 훈련•자격증명 및 당직근무에 관한 국제협약 ㉦ 선박톤수 측정에 관한 국제협약"
+    },
+    {
+      "question_id": 806,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 26,
+      "source_page": 31,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 31쪽을 대조했다.",
+      "repaired_stem": "다음 <보기> 중 「해양사고의 조사 및 심판에 관한 법률(시행령 및 시행규칙 포함)」상 ‘해양사고(해양 및 내수면에서 발생한)’에 해당하는 것을 모두 고른 것은? <보기> ㉠ 선박의 운용과 관련하여 해양오염 피해가 발생한 사고 ㉡ 선박의 운용과 관련하여 육상시설이 손상된 사고 ㉢ 선박이 멸실•유기되거나 행방불명된 사고 ㉣ 선박이 충돌•좌초•전복•침몰되거나 선박을 조종할 수 없게 된 사고"
+    },
+    {
+      "question_id": 828,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 1,
+      "question_number": 8,
+      "source_page": 35,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 35쪽 8번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "선장은 어선위치발신장치가 고장난 경우 지체 없이 그 사실을 해양경찰청장에게 신고한 후 부득이한 사유가 없는 한 15일 이내에 수리 조치를 하여야 한다."
+      }
+    },
+    {
+      "question_id": 853,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 2,
+      "question_number": 13,
+      "source_page": 40,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 40쪽 13번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "배출된 오염물질을 적재한 선박의 선장이 방제 조치를 하지 않은 경우"
+      }
+    },
+    {
+      "question_id": 867,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 2,
+      "question_number": 27,
+      "source_page": 42,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 42쪽 27번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "선박에서 사용하는 물을 공급하는 사업은 항만급수업이다."
+      }
+    },
+    {
+      "question_id": 893,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 3,
+      "question_number": 13,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 3쪽을 대조했다.",
+      "repaired_choice_overrides": {
+        "4": "일반조종면허와 요트조종면허를 소지한 사람이 조종면허의 취소 또는 효력정지처분을 받은 경우에는 위반행위 시 사용한 동력수상레저기구의 조종 또는 운항에 필요한 면허에 대해서만 취소하거나 효력정지처분을 해야 한다."
+      }
+    },
+    {
+      "question_id": 937,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 4,
+      "question_number": 17,
+      "source_page": 12,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 12쪽 17번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "「배타적 경제수역 및 대륙붕에 관한 법률」상 대한민국은 협약에 따라 배타적 경제수역에서 해저의 상부수역, 해저 및 그 하층토에 있는 생물이나 무생물 등 천연자원의 탐사•개발•보존 및 관리를 목적으로 하는 주권적 권리와 인공섬•시설 및 구조물의 설치•사용, 해양과학 조사 등에 관한 관할권을 갖는다."
+      }
+    },
+    {
+      "question_id": 967,
+      "subject": "해사법규",
+      "year": 2023,
+      "session": 1,
+      "question_number": 7,
+      "source_page": 18,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 18쪽 7번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "법 제64조제1항 또는 제3항의 규정에 따른 방제 조치를 하지 아니하거나 조치명령을 위반한 자"
+      }
+    },
+    {
+      "question_id": 969,
+      "subject": "해사법규",
+      "year": 2023,
+      "session": 1,
+      "question_number": 9,
+      "source_page": 18,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 18쪽 9번을 재판독했다.",
+      "repaired_stem": "다음 <보기> 중 「해사안전법(시행령 및 시행규칙 포함)」상 항해 중인 동력선이 서로 상대의 시계 안에 있는 경우에 행하는 기적신호로 가장 옳게 나열한 것은? <보기> ㉠ 침로를 오른쪽으로 변경하고 있는 경우 ( ) ㉡ 침로를 왼쪽으로 변경하고 있는 경우 ( )"
+    },
+    {
+      "question_id": 990,
+      "subject": "해사법규",
+      "year": 2023,
+      "session": 1,
+      "question_number": 30,
+      "source_page": 21,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 21쪽 30번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "1": "고체상태의 위험물을 산적하여 운송할 수 있는 구조로 된 선박을 위험물산적운송선이라 한다."
+      }
+    },
+    {
+      "question_id": 1056,
+      "subject": "해사법규",
+      "year": 2023,
+      "session": 3,
+      "question_number": 16,
+      "source_page": 33,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 33쪽 16번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "‘어획물운반업’이란 어업현장에서 양륙지(揚陸地)까지 어획물이나 그 제품을 운반하는 사업을 말한다."
+      }
+    },
+    {
+      "question_id": 1118,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 1,
+      "question_number": 18,
+      "source_page": 43,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 43쪽 18번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "‘선박’이라 함은 수상 또는 수중에서 항해용으로 사용하거나 사용될 수 있는 것(선외기를 장착한 것을 포함한다) 및 해양수산부령이 정하는 고정식•부유식 시추선 및 플랫폼을 말한다."
+      }
+    },
+    {
+      "question_id": 1125,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 1,
+      "question_number": 25,
+      "source_page": 44,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 44쪽 25번을 재판독했다.",
+      "repaired_stem": "다음 중 「배타적 경제수역에서의 외국인어업 등에 대한 주권적 권리의 행사에 관한 법률(시행령 및 시행규칙 포함)」상 검사나 사법경찰관이 외국선박을 정선시키려는 경우에 사용하는 방법으로 가장 옳지 않은 것은?"
+    },
+    {
+      "question_id": 1126,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 1,
+      "question_number": 26,
+      "source_page": 44,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 44쪽 26번을 재판독했다.",
+      "repaired_stem": "다음 <보기> 중 「항만운송사업법(시행령 및 시행규칙 포함)」상 ( ) 안에 가장 옳게 나열한 것은? <보기> ㉠ (가): 선적화물(船積貨物)을 싣거나 내릴 때 그 화물의 개수를 계산하거나 그 화물의 인도•인수를 증명하는 일 ㉡ (나): 선적화물 및 선박(부선을 포함)에 관련된 증명•조사•감정을 하는 일 ㉢ (다): 선적화물을 싣거나 내릴 때 그 화물의 용적 또는 중량을 계산하거나 증명하는 일 (가) (나) (다)"
+    },
+    {
+      "question_id": 1163,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 2,
+      "question_number": 23,
+      "source_page": 50,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 50쪽을 대조했다.",
+      "repaired_stem": "다음 <보기> 중 「해사안전법(시행령 및 시행규칙 포함)」상 ( ) 안에 들어갈 숫자의 합으로 가장 옳은 것은? <보기> ㉠ 누구든지 수역등 또는 수역등의 밖으로부터 ( )킬로미터 이내의 수역에서 선박 등을 이용하여 수역등이나 항로를 점거하거나 차단하는 행위를 함으로써 선박 통항을 방해하여서는 아니 된다. ㉡ 길이 ( )미터 이상의 선박은 기적 1개를, 길이 ( )미터 이상의 선박은 기적 1개 및 호종 1개를 갖추어 두어야 한다. ㉢ 항행 중인 동력선이 서로 상대의 시계 안에 있는 경우에 침로를 오른쪽으로 변경 시 기적신호 단음 ( )회를 행하여야 한다. ㉣ 좁은 수로 등의 굽은 부분이나 장애물 때문에 다른 선박을 볼 수 없는 수역에 접근하는 선박은 장음 ( )회의 기적신호를 울려야 한다."
+    },
+    {
+      "question_id": 1221,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 4,
+      "question_number": 21,
+      "source_page": 61,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 61쪽 21번을 재판독했다.",
+      "repaired_stem": "다음 <보기> 중 「어선안전조업법(시행령 및 시행규칙 포함)」상 용어의 정의를 가장 옳은 순서로 나열한 것은? <보기> ㉠ ( )이란 조업자제해역의 동해 및 서해의 북쪽한계선으로서 대통령령으로 정하는 선을 말한다. ㉡ ( )이란 동해 및 서해의 조업한계선 이남(以南) 해역 중 어선의 조업과 항행이 제한된 해역으로서 대통령령으로 정하는 범위의 해역을 말한다. ㉢ ( )이란 조업을 할 수 있는 동해 및 서해의 북쪽한계선으로서 대통령령으로 정하는 선을 말한다. ㉣ ( )이란 북한 및 러시아 등의 배타적 경제수역(EEZ)과 인접한 동해특정해역의 이동(以東) 해역 및 서해특정해역의 이서(以西) 해역 중 어선의 조업과 항행이 제한된 해역으로서 대통령령으로 정하는 범위의 해역을 말한다."
+    },
+    {
+      "question_id": 1278,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 5,
+      "question_number": 18,
+      "source_page": 72,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 72쪽을 대조했다.",
+      "repaired_stem": "다음 중 「배타적경제수역 및 대륙붕에 관한 법률」 상 배타적 경제수역에서 가지는 주권적 권리는 모두 몇 개인가? ㉠ 인공섬•시설 및 구조물의 설치•사용 ㉡ 천연자원의 탐사•개발•보존 및 관리를 목적으로 하는 활동 ㉢ 해양환경의 보호 및 보전 ㉣ 경제적 개발 및 탐사를 위한 활동 ㉤ 해양과학 조사"
+    },
+    {
+      "question_id": 2637,
+      "subject": "기관학",
+      "year": 2023,
+      "session": 1,
+      "question_number": 17,
+      "source_page": 7,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 7쪽 17번의 논리식을 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "1+A=A",
+        "4": "A+A•B=A"
+      }
+    },
+    {
+      "question_id": 2700,
+      "subject": "기관학",
+      "year": 2023,
+      "session": 3,
+      "question_number": 20,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 16쪽 20번의 단위를 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "메거(Megger)는 기기나 전로의 절연저항을 측정하는 계측기로서, 정상 작동을 확인하기 위하여 두 리드선을 서로 단락시켜 지시값이 0[MΩ]이 되는지 확인한다."
+      }
+    },
+    {
+      "question_id": 2725,
+      "subject": "기관학",
+      "year": 2022,
+      "session": 2,
+      "question_number": 5,
+      "source_page": 20,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 20쪽 5번의 단위를 재판독했다.",
+      "repaired_stem": "다음 중 100[Ω]인 동선의 길이를 5등분해서 병렬로 연결할 때 합성저항으로 가장 옳은 것은?",
+      "repaired_choice_overrides": {
+        "1": "3[Ω]",
+        "2": "4[Ω]",
+        "3": "5[Ω]",
+        "4": "6[Ω]"
+      }
+    },
+    {
+      "question_id": 2730,
+      "subject": "기관학",
+      "year": 2022,
+      "session": 2,
+      "question_number": 10,
+      "source_page": 20,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "동일 문항 정상 사본과 원문 PDF 20쪽을 대조했다.",
+      "repaired_stem": "다음 <보기> 중 발전기의 병렬운전 과정을 가장 옳은 순서로 나열한 것은? <보기> ㉠ 조속기를 이용해 부하를 균등하게 분담시킨다. ㉡ 예비 발전기를 기동하여 동기속도까지 올린다. ㉢ 조속기로 원동기 속도를 조정하고, 전압은 계자저항조정기로 조정한다. ㉣ 동기검정기 바늘이 서서히 시계방향으로 회전하면서 12시 5분 전에 왔을 때 ACB를 투입한다. ㉤ 동기검정기 스위치를 켠다.",
+      "repaired_choice_overrides": {
+        "1": "㉤ - ㉡ - ㉣ - ㉢ - ㉠",
+        "2": "㉤ - ㉡ - ㉢ - ㉣ - ㉠",
+        "3": "㉡ - ㉤ - ㉢ - ㉣ - ㉠",
+        "4": "㉡ - ㉢ - ㉤ - ㉣ - ㉠"
+      }
+    },
+    {
+      "question_id": 2753,
+      "subject": "기관학",
+      "year": 2022,
+      "session": 3,
+      "question_number": 13,
+      "source_page": 23,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 23쪽 13번의 단위를 재판독했다.",
+      "repaired_stem": "다음 중 200[Ω]인 저항 10개를 이용하여 합성저항값이 가장 크도록 연결한 경우의 값은 합성저항값이 가장 작도록 연결한 경우의 값보다 몇 배 더 큰가?"
+    },
+    {
+      "question_id": 2760,
+      "subject": "기관학",
+      "year": 2022,
+      "session": 3,
+      "question_number": 20,
+      "source_page": 24,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 24쪽 20번의 전압 단위를 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "12[V], 100[Ah]인 축전지 2개를 연결하여 24[V] 전원을 만들었을 때 용량은 100[Ah]이다."
+      }
+    },
+    {
+      "question_id": 2772,
+      "subject": "기관학",
+      "year": 2022,
+      "session": 3,
+      "question_number": 32,
+      "source_page": 26,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 26쪽 32번을 재판독했다.",
+      "repaired_stem": "다음 <보기>는 펌프에 관한 설명이다. ( )에 들어가는 내용을 가장 옳은 순서로 나열한 것은? <보기> 이론상으로 펌프가 흡입할 수 있는 물의 높이는 (㉠)이지만 실제로는 관내의 저항, 기압 및 순수한 물이 아니기 때문에 (㉡) 정도 흡입할 수 있으며 펌프의 원리는 (㉢)의 실험을 이용한 것이다. ㉠ ㉡ ㉢",
+      "repaired_choice_overrides": {
+        "4": "12.33[m] 10.33[m] 파스칼"
+      }
+    },
+    {
+      "question_id": 2797,
+      "subject": "기관학",
+      "year": 2021,
+      "session": 1,
+      "question_number": 17,
+      "source_page": 29,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 29쪽 17번을 재판독했다.",
+      "repaired_stem": "다음 <보기>에서 옳은 것은 모두 몇 개인가? <보기> ㉠ 종류가 다른 두 금속을 접속하고 접속점을 서로 다른 온도로 유지하면 기전력이 생겨 일정한 방향으로 열전류가 흐르는 현상 - 제베크 효과(Seebeck's effect) ㉡ 종류가 다른 두 금속을 접속하고 한쪽 금속에서 다른 쪽 금속으로 전류를 흘리면 열의 발생 또는 흡수가 일어나는 현상 - 펠티에 효과(Peltier effect) ㉢ 코일을 관통하는 자속이 변화할 때 발생하는 유도기전력은 코일을 관통하는 자속이 매초 변화하는 양과 코일의 감은 횟수의 곱에 비례한다. - 패러데이의 법칙(Faraday's law) ㉣ 코일 속을 지나는 자속이 증가될 때는 이를 감소시키는 방향으로 유도기전력이 발생하고, 반대로 코일 속을 지나는 자속이 감소될 때는 증가시키는 방향으로 유도기전력이 발생한다. - 렌츠의 법칙(Lenz's law)"
+    },
+    {
+      "question_id": 2846,
+      "subject": "기관학",
+      "year": 2020,
+      "session": 2,
+      "question_number": 6,
+      "source_page": 36,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 36쪽 6번의 순서 기호를 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "이중저탱크 → 여과기 → 침전탱크 → 청정기 → 분사펌프 → 서비스탱크 → 기관"
+      }
+    },
+    {
+      "question_id": 2850,
+      "subject": "기관학",
+      "year": 2020,
+      "session": 2,
+      "question_number": 10,
+      "source_page": 37,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 37쪽 10번의 출력 기호를 재판독했다.",
+      "repaired_stem": "다음 중 입력 A, B와 출력 X의 진리표에 해당하는 것은? 0 0 1 0 1 1 1 0 1 1 1 0"
+    },
+    {
+      "question_id": 2879,
+      "subject": "기관학",
+      "year": 2019,
+      "session": 1,
+      "question_number": 19,
+      "source_page": 41,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 41쪽 19번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "3": "발화늦음 - 정적연소(폭발적연소) - 제어연소 - 후연소"
+      }
+    },
+    {
+      "question_id": 2919,
+      "subject": "기관학",
+      "year": 2018,
+      "session": 1,
+      "question_number": 19,
+      "source_page": 46,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 46쪽 19번을 재판독했다.",
+      "repaired_stem": "다음 중 4행정 사이클 기관에서 실린더 밖으로 배출되는 배기온도가 상승하는 원인으로 옳은 것은 모두 몇 개인가? ㉠ 과부하로 운전할 경우 ㉡ 연료분사 시기가 늦어져 후연소 기간이 길 때 ㉢ 배기밸브가 빨리 열린 경우 ㉣ 배기통로의 오손으로 배압이 높은 경우"
+    },
+    {
+      "question_id": 2969,
+      "subject": "기관학",
+      "year": 2017,
+      "session": 2,
+      "question_number": 9,
+      "source_page": 51,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 51쪽 9번을 재판독했다.",
+      "repaired_stem": "다음 괄호 안에 들어갈 것으로 가장 알맞게 짝지어진 것은? 교류발전기의 자극수가 10극이고, 발생하는 기전력의 주파수는 60Hz로 하고 싶을 때 원동기의 회전수(회전속도)는 매분 (가)회전으로 운전한다. 이와 같이 발전기의 극수와 기전력의 주파수에 의해서 정해지는 일정한 회전수를 (나)속도라 한다. (가) (나)"
+    },
+    {
+      "question_id": 2980,
+      "subject": "기관학",
+      "year": 2017,
+      "session": 2,
+      "question_number": 20,
+      "source_page": 52,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 52쪽 20번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "2": "B종 절연"
+      }
+    },
+    {
+      "question_id": 2999,
+      "subject": "기관학",
+      "year": 2016,
+      "session": 1,
+      "question_number": 19,
+      "source_page": 55,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 55쪽 19번을 재판독했다.",
+      "repaired_stem": "변압기에서 무부하손의 대부분을 차지하는 것은 무엇인가?"
+    },
+    {
+      "question_id": 3039,
+      "subject": "기관학",
+      "year": 2014,
+      "session": 1,
+      "question_number": 19,
+      "source_page": 61,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 61쪽 19번의 선지 표식을 재판독했다.",
+      "repaired_choice_overrides": {
+        "4": "배기행정"
+      }
+    },
+    {
+      "question_id": 3060,
+      "subject": "기관학",
+      "year": 2014,
+      "session": 2,
+      "question_number": 20,
+      "source_page": 63,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 63쪽 20번에서 광고 워터마크를 제외하고 판독했다.",
+      "repaired_choice_overrides": {
+        "4": "원심펌프를 정지할 때 출구 밸브를 빨리 닫아야 수격현상이 줄어든다."
+      }
+    },
+    {
+      "question_id": 3077,
+      "subject": "기관학",
+      "year": 2013,
+      "session": 1,
+      "question_number": 17,
+      "source_page": 65,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 65쪽 17번을 재판독했다.",
+      "repaired_choice_overrides": {
+        "1": "원심식 펌프",
+        "2": "회전식 펌프",
+        "3": "사류식 펌프",
+        "4": "축류식 펌프"
+      }
+    },
+    {
+      "question_id": 3080,
+      "subject": "기관학",
+      "year": 2013,
+      "session": 1,
+      "question_number": 20,
+      "source_page": 65,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 65쪽 20번에서 광고 워터마크를 제외하고 판독했다.",
+      "repaired_choice_overrides": {
+        "4": "윤활유의 공급은 캡 상부의 주유구를 통해 강압 주유된다."
+      }
+    },
+    {
+      "question_id": 3134,
+      "subject": "기관학",
+      "year": 2025,
+      "session": 2,
+      "question_number": 14,
+      "source_page": 7,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 7쪽 14번의 수식과 단위를 재판독했다.",
+      "repaired_stem": "다음 <보기> 중 열역학 관련 기본 용어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가? <보기> ㉠ 동력이란 단위 시간 동안에 하는 일량으로 J로 나타낸다. ㉡ 잠열은 물질의 상태를 그대로 유지하면서 온도만 변화시킨다. ㉢ 1N이란 질량 1kg의 물체에 1m/s²의 가속도를 발생시키는 힘을 말한다. ㉣ 복사는 열이 중간에 다른 물질을 통하여 이동하는 현상이다. ㉤ 전도는 온도가 동일한 두 물체를 접촉시켰을 때 열이 이동하는 현상이다. ㉥ 화씨온도는 표준 대기압에서 물의 어는점을 32°F, 끓는점을 212°F로 정하고 그 사이를 180등분하여 하나의 눈금을 1°F로 정한 것이다."
+    }
+  ]
+}

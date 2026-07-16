@@ -196,6 +196,58 @@ def test_bundled_audit_repairs_reported_engineering_screenshot_stem():
     assert repaired.stem == "다음 중 내연기관 윤활유의 기능으로 가장 옳지 않은 것은?"
 
 
+def test_bundled_audit_repairs_reported_echo_sounder_stem_and_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        38,
+        "음향 측심기(Echo sounder)에 대한 설명으로 가장 옳은 것은?",
+        ["파가 해저에서 되 도 근 }~= 0 느 시간을 측정한다.", "?으로 계산", "정상", "깨짐"],
+        11,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf"),
+    )
+
+    assert repaired.stem == "음향 측심기(Echo sounder)에 대한 설명으로 가장 옳은 것은?"
+    assert repaired.choices == [
+        "음향 측심기는 지속파의 초음파를 해저로 발사한 후, 발사한 초음파가 해저에서 되돌아오는 시간을 측정하여 수심을 측정한다.",
+        "수심의 측정은 음파의 속도와 해저에 반사되어 돌아오는 시간의 곱으로 계산되므로, 수신시간이 0.1초였다면 수심은 약 150m가 된다.",
+        "음향 측심기는 측심 범위에 따라 사용 주파수가 달라진다.",
+        "해수에서 수심, 온도, 염도 등에 따른 음파 속도의 변화는 거의 없기 때문에 1,500m/s를 사용한다.",
+    ]
+
+
+def test_bundled_audit_repairs_residual_ohm_unit_corruption():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.text_quality import text_quality_issue_codes
+
+    damaged = ParsedOfflineQuestion(
+        18,
+        "2 [이, 3 [이, 6 [이의 저항을 병렬로 연결했을 때 합성저항 값은 얼마인가?",
+        ["5 [Q]", "3 [0]", "2[Q]", "11[Q]"],
+        10,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]경찰직 기관술(학)(24-13년).pdf"),
+    )
+
+    assert repaired.stem == "2[Ω], 3[Ω], 6[Ω]의 저항을 병렬로 연결했을 때 합성저항 값은 얼마인가?"
+    assert repaired.choices == ["5[Ω]", "3[Ω]", "2[Ω]", "1[Ω]"]
+    assert text_quality_issue_codes(repaired.stem) == ()
+    assert all(text_quality_issue_codes(choice) == () for choice in repaired.choices)
+
+
 def test_bundled_audit_repairs_structurally_broken_english_table_choices():
     from src.parser.offline_exam import ParsedOfflineQuestion
     from src.parser.offline_repairs import apply_audited_source_repair
@@ -218,6 +270,116 @@ def test_bundled_audit_repairs_structurally_broken_english_table_choices():
     assert len(repaired.choices) == 4
     assert repaired.choices[0].startswith("㉠ Windward ㉡ Veering")
     assert validate_offline_question(repaired).importable is True
+
+
+def test_audited_source_repair_can_replace_only_confirmed_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        9,
+        "정상 발문",
+        ["정상 1", "깨진 2", "정상 3", "깨진 4"],
+        12,
+        0.91,
+        (),
+    )
+    repairs = {
+        ("questions.pdf", 12, 9): {
+            "repaired_choice_overrides": {"2": "원문 2", "4": "원문 4"},
+            "confidence": "exact_source",
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        damaged, Path("questions.pdf"), repairs=repairs
+    )
+
+    assert repaired.stem == "정상 발문"
+    assert repaired.choices == ["정상 1", "원문 2", "정상 3", "원문 4"]
+    assert "source_text_repair" in repaired.diagnostics
+
+
+def test_bundled_audit_repairs_recent_english_colregs_ocr_noise():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.text_quality import text_quality_issue_codes
+
+    damaged = ParsedOfflineQuestion(
+        13,
+        "다음 중 COLREGs상 C011isions 유지선의 동작은?",
+        ["Where 011e Of two vessels", "S0011 as", "gwe-way", "CC)Llrse"],
+        3,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]해사영어(24년 하반기-25년 하반기).pdf"),
+    )
+
+    assert "Collisions at Sea" in repaired.stem
+    assert repaired.choices[0].startswith("Where one of two vessels")
+    assert repaired.choices[2].startswith("When, from any cause")
+    assert all(text_quality_issue_codes(choice) == () for choice in repaired.choices)
+
+
+def test_bundled_audit_repairs_recent_english_choice_order_from_source_table():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        2,
+        "깨진 COLREG 정의 발문",
+        [
+            "vessel restricted in her ability to manoeuvre",
+            "vessel not under command",
+            "vessel constrained by her draught",
+            "vessel engaged in fishing",
+        ],
+        2,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]해사영어(24년-13년).pdf"),
+    )
+
+    assert repaired.choices == [
+        "vessel engaged in fishing",
+        "vessel restricted in her ability to manoeuvre",
+        "vessel not under command",
+        "vessel constrained by her draught",
+    ]
+
+
+def test_bundled_audit_repairs_recent_navigation_table_into_four_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        8,
+        "GM 선폭 표가 발문과 합쳐짐",
+        ["2", "15", "1", "14"],
+        13,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf"),
+    )
+
+    assert repaired.choices == [
+        "GM 2m / 선폭 14m",
+        "GM 1m / 선폭 15m",
+        "GM 2m / 선폭 15m",
+        "GM 1m / 선폭 14m",
+    ]
 
 
 def test_registered_group_applies_audited_repair_before_quality_gate(monkeypatch):
@@ -1014,3 +1176,61 @@ def test_shared_text_quality_allows_valid_korean_translation_and_common_words():
     assert text_quality_issue_codes(
         "연필을 쥐는 것처럼 주사기를 쥐고 피부를 누른다."
     ) == ()
+
+
+def test_shared_text_quality_flags_residual_korean_ocr_garble():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    assert "ocr_noise" in text_quality_issue_codes(
+        "발사한 초음파가 해저에서 되 도 근 }~= 0 느 시간을 측정한다."
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "수상(水上)의 정의로 가장 을d卜른 것은?"
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "다음 중 r선박직원법]의 내용으로 가장 옳지 않은 것은?"
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "해양수산부령O己 정呑는 전자적 수단"
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "다읔 <보기> 중 가장 오으 것은?"
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "디음 중 설명으로 옳은 것은?"
+    )
+
+
+def test_shared_text_quality_flags_english_zero_one_ocr_confusables():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    assert "ocr_noise" in text_quality_issue_codes(
+        "International Regulations for Preventing C011isions at Sea"
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "Where 011e of two vessels is t0 keep out 0f the way"
+    )
+    assert text_quality_issue_codes(
+        "International Regulations for Preventing Collisions at Sea"
+    ) == ()
+
+
+def test_shared_text_quality_flags_intrusive_cjk_ocr_but_allows_annotations():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    assert "ocr_noise" in text_quality_issue_codes(
+        "유·도선 사업자는 승선 亏는 선원에게 비상훈련을 실시한다."
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "무해통항(匁k害通航)에 관한 설명으로 옳은 것은?"
+    )
+    assert text_quality_issue_codes(
+        "수상(水上) 및 항적(航跡)에 관한 설명이다. 선장 甲은 이를 기록한다."
+    ) == ()
+
+
+def test_shared_text_quality_allows_party_hanja_attached_to_role_noun():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    assert text_quality_issue_codes("甲선장의 선상 쟁의행위 신고가 접수되었다.") == ()
+    assert text_quality_issue_codes("함정에 승선한 甲경장은 면허를 갱신하였다.") == ()

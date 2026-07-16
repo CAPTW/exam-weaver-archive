@@ -30,6 +30,15 @@ def test_suspicious_text_detector_ignores_subject_names_in_plain_text():
     assert not has_suspicious_text_artifact('대체 가능한 기관2 문제')
 
 
+def test_suspicious_text_detector_ignores_legal_article_paragraph_citations():
+    assert not has_suspicious_text_artifact('제11조의2 제1항에 따른 신고를 하여야 한다.')
+    assert not has_suspicious_text_artifact('법 제3조의2 제4항 각 호의 어느 하나에 해당한다.')
+
+
+def test_suspicious_text_detector_still_flags_displaced_korean_number():
+    assert has_suspicious_text_artifact('서로 시계 안에서 척의 동2 력선이 횡단한다.')
+
+
 def test_repair_extracted_text_artifacts_fixes_common_korean_spacing_joins():
     assert repair_extracted_text_artifacts('영향으로옳은 것은?') == '영향으로 옳은 것은?'
     assert repair_extracted_text_artifacts('관성력과 원심력에의해 작용한다.') == (
@@ -38,6 +47,41 @@ def test_repair_extracted_text_artifacts_fixes_common_korean_spacing_joins():
     assert repair_extracted_text_artifacts('충돌의 위험이 있을때 외에는그 선박의 진로') == (
         '충돌의 위험이 있을 때 외에는 그 선박의 진로'
     )
+
+
+def test_repair_extracted_text_artifacts_fixes_high_confidence_english_ocr_tokens():
+    assert repair_extracted_text_artifacts(
+        "The lnternational Regulations for Preventing C011isions require "
+        "011e vessel t0 keep 011t 0f the way."
+    ) == (
+        "The International Regulations for Preventing Collisions require "
+        "one vessel to keep out of the way."
+    )
+    assert repair_extracted_text_artifacts(
+        "This indicates that the f011()Ming message uses Digital Selective CaIIing."
+    ) == (
+        "This indicates that the following message uses Digital Selective Calling."
+    )
+    assert repair_extracted_text_artifacts(
+        "ThiS Convent10n is mportant tO persons whO are alSO comprising a watch."
+    ) == (
+        "This Convention is important to persons who are also comprising a watch."
+    )
+
+
+def test_repair_extracted_text_artifacts_fixes_high_confidence_korean_ocr_tokens():
+    assert repair_extracted_text_artifacts(
+        "디음 중 오으 것은? 5년口卜다 방제 云치를 하고 구조물의 설치以}용을 신고한다."
+    ) == "다음 중 옳은 것은? 5년마다 방제 조치를 하고 구조물의 설치·사용을 신고한다."
+    assert repair_extracted_text_artifacts("다읔 중 수리 八치를 하지 않은 것은?") == (
+        "다음 중 수리 조치를 하지 않은 것은?"
+    )
+
+
+def test_repair_extracted_text_artifacts_restores_broken_korean_law_quotes():
+    assert repair_extracted_text_artifacts(
+        "다음 중 r선박직원법] (시행령 포함)의 내용으로 가장 옳지 않은 것은?"
+    ) == "다음 중 「선박직원법」 (시행령 포함)의 내용으로 가장 옳지 않은 것은?"
 
 
 def test_repair_extracted_text_artifacts_joins_safe_korean_linewrap_fragments():

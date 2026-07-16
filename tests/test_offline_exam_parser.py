@@ -896,7 +896,7 @@ def test_mbt_mock_exam_footer_is_removed_before_margin_quality_check():
 def test_raster_underlined_phrases_are_recovered_as_four_choices():
     page = _page(
         _line(["15.", "밑줄의", "내용", "중", "옳지", "않은", "것은?"], y=0.12),
-        _line(["equal", "to", "at", "least", "㉦", "100/0", "of", "the", "number", "0f"], y=0.24,
+        _line(["equal", "to", "at", "least", "㉦", "100/0", "of", "the", "number", "of"], y=0.24,
               underlined_indexes={5, 6, 7, 8, 9}),
         _line(["passengers", "on", "board"], y=0.28, underlined_indexes={0}),
         _line(["such", "lesser", "number", "as", "required"], y=0.34,
@@ -1388,7 +1388,7 @@ def test_later_proposition_header_table_beats_false_definition_rings():
                        xs=[0.12, 0.30, 0.48, 0.66]))
     expected = []
     for row in range(1, 5):
-        values = [f"r{row}c{column}" for column in range(1, 5)]
+        values = [f"row-{row}-column-{column}" for column in range(1, 5)]
         expected.append(" ".join(values))
         lines.append(_line(values, y=0.32 + row * 0.04,
                            xs=[0.12, 0.30, 0.48, 0.66]))
@@ -2032,19 +2032,19 @@ def test_missing_third_proposition_header_is_inferred_from_payload_columns():
     page = _page(
         _line(["10.", "다음", "표의", "조합은?"], y=0.10),
         _line(["㉠", "㉡"], y=0.22, xs=[0.12, 0.25]),
-        _line(["r1a", "r1b", "r1c"], y=0.28, xs=[0.12, 0.25, 0.38]),
-        _line(["r2a", "r2b", "r2c"], y=0.34, xs=[0.12, 0.25, 0.38]),
-        _line(["r3a", "r3b", "r3c"], y=0.40, xs=[0.12, 0.25, 0.38]),
-        _line(["r4a", "r4b", "r4c"], y=0.46, xs=[0.12, 0.25, 0.38]),
+        _line(["row-one-a", "row-one-b", "row-one-c"], y=0.28, xs=[0.12, 0.25, 0.38]),
+        _line(["row-two-a", "row-two-b", "row-two-c"], y=0.34, xs=[0.12, 0.25, 0.38]),
+        _line(["row-three-a", "row-three-b", "row-three-c"], y=0.40, xs=[0.12, 0.25, 0.38]),
+        _line(["row-four-a", "row-four-b", "row-four-c"], y=0.46, xs=[0.12, 0.25, 0.38]),
     )
 
     question = OfflineExamParser().parse_pages([page])[0]
 
     assert question.choices == [
-        "r1a r1b r1c",
-        "r2a r2b r2c",
-        "r3a r3b r3c",
-        "r4a r4b r4c",
+        "row-one-a row-one-b row-one-c",
+        "row-two-a row-two-b row-two-c",
+        "row-three-a row-three-b row-three-c",
+        "row-four-a row-four-b row-four-c",
     ]
     assert validate_offline_question(question).importable is True
 

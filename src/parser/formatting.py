@@ -144,6 +144,8 @@ def repair_extracted_text_artifacts(value: str) -> str:
     """Repair high-confidence PDF/OCR text artifacts without changing meaning."""
     text = normalize_private_math_glyphs(value)
     text = _normalize_extracted_whitespace(text)
+    text = repair_common_english_ocr_confusables(text)
+    text = repair_common_korean_ocr_confusables(text)
     text = repair_subject_header_artifacts(text)
     text = repair_number_unit_order_artifacts(text)
     text = repair_residual_numeric_order_artifacts(text)
@@ -153,6 +155,75 @@ def repair_extracted_text_artifacts(value: str) -> str:
     text = repair_reversed_choice_fragments(text)
     text = _repair_db_audit_findings(text)
     return text
+
+
+def repair_common_english_ocr_confusables(text: str) -> str:
+    """Repair unambiguous zero/one and capital-I OCR substitutions in prose."""
+
+    raw = str(text or "")
+    token_replacements = {
+        "lnternational": "International",
+        "InternationaI": "International",
+        "C011ision": "Collision",
+        "C011isions": "Collisions",
+        "C0IIision": "Collision",
+        "C0IIisions": "Collisions",
+        "011e": "one",
+        "011t": "out",
+        "0f": "of",
+        "t0": "to",
+        "0i1": "oil",
+        "A11": "All",
+        "a11": "all",
+        "ManuaI": "Manual",
+        "RuIe": "Rule",
+        "TerritoriaI": "Territorial",
+        "CaIIing": "Calling",
+        "ldentification": "Identification",
+        "sh1P": "ship",
+        "sh1Ps": "ships",
+        "tO": "to",
+        "Of": "of",
+        "whO": "who",
+        "alSO": "also",
+        "ThiS": "This",
+        "compr1S1ng": "comprising",
+        "mportant": "important",
+        "Convent10n": "Convention",
+        "t011S": "tons",
+    }
+    for damaged, repaired in token_replacements.items():
+        raw = re.sub(
+            rf"(?<![0-9A-Za-z]){re.escape(damaged)}(?![0-9A-Za-z])",
+            repaired,
+            raw,
+        )
+    raw = re.sub(
+        r"(?<![0-9A-Za-z])f011[^0-9A-Za-z\s]{0,3}Ming(?![0-9A-Za-z])",
+        "following",
+        raw,
+    )
+    return raw
+
+
+def repair_common_korean_ocr_confusables(text: str) -> str:
+    """Repair Korean OCR substitutions whose surrounding phrase is unambiguous."""
+
+    raw = str(text or "")
+    raw = re.sub(r"(?<![가-힣])(다읔|디음)(?=\s)", "다음", raw)
+    raw = re.sub(r"^\s*[c口](?=음\s)", "다", raw)
+    raw = re.sub(r"오으\s*것", "옳은 것", raw)
+    raw = re.sub(r"(?<![가-힣])云치", "조치", raw)
+    raw = re.sub(r"조\s*大\s*1(?=\s*(?:를|가|를 다))", "조치", raw)
+    raw = re.sub(r"수리\s*八치", "수리 조치", raw)
+    raw = re.sub(
+        r"설치(?:以\}|祆卜|必\})용",
+        "설치·사용",
+        raw,
+    )
+    raw = re.sub(r"(\d+)(년|개월)口卜다", r"\1\2마다", raw)
+    raw = raw.replace("해잉오염", "해양오염")
+    return raw
 
 
 def repair_subject_header_artifacts(text: str) -> str:
@@ -179,6 +250,11 @@ def repair_residual_numeric_order_artifacts(text: str) -> str:
 def repair_common_korean_spacing_artifacts(text: str) -> str:
     """Repair tiny, high-confidence Korean spacing artifacts from PDF joins."""
     raw = str(text or '').strip()
+    raw = re.sub(
+        r'(?<![A-Za-z])r([가-힣][가-힣\s·ㆍ및]{0,40}법)\]',
+        r'「\1」',
+        raw,
+    )
     replacements = {
         '으로옳은': '으로 옳은',
         '으로옳지': '으로 옳지',
@@ -201,6 +277,9 @@ def has_suspicious_text_artifact(value: str) -> bool:
         return False
     for match in re.finditer(r'[가-힣]{1,8}\d+(?:,\d{3})*(?:\.\d+)?\s+[가-힣]{1,8}', text):
         if re.fullmatch(r'기관[1-3]\s+문제', match.group(0)):
+            continue
+        context = text[max(0, match.start() - 12):match.end() + 12]
+        if re.search(r'제?\d+조(?:의\d+)?\s*제?\d+항', context):
             continue
         return True
     suspect_patterns = [

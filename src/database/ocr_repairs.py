@@ -6,6 +6,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 CHOICE_SYMBOLS = ("㉮", "㉯", "㉴", "㉵", "⑤")
@@ -59,35 +60,62 @@ def apply_audited_repairs(
                 subject_predicate = "s.name_ko = ?"
                 subject_params = (subject,)
                 identity_subject = (subject,)
+            has_exam_identity = repair.get("year") is not None and repair.get(
+                "session"
+            ) is not None
+            if has_exam_identity:
+                identity_filter = (
+                    "q.year = ? AND q.session = ? AND q.question_number = ?"
+                )
+                identity_params = (
+                    int(repair["year"]),
+                    int(repair["session"]),
+                    int(repair["question_number"]),
+                )
+                identity = (*identity_subject, *identity_params)
+            else:
+                question_id = int(repair.get("question_id", 0) or 0)
+                audited_source = str(
+                    repair.get("source_pdf_relative_path", "") or ""
+                ).strip()
+                if question_id < 1 or not audited_source:
+                    raise ValueError(
+                        "audited repair without year/session requires question_id "
+                        "and source_pdf_relative_path"
+                    )
+                identity_filter = "q.id = ? AND q.question_number = ?"
+                identity_params = (question_id, int(repair["question_number"]))
+                identity = (*identity_subject, question_id, repair["question_number"])
             rows = connection.execute(
                 f"""
-                SELECT q.id, q.question_text, q.source_page
+                SELECT q.id, q.question_text, q.source_page, qs.source_url
                 FROM questions q
                 JOIN exam_subjects es ON es.id = q.exam_subject_id
                 JOIN subjects s ON s.id = es.subject_id
                 JOIN exams e ON e.id = es.exam_id
-                WHERE {subject_predicate}
-                  AND q.year = ? AND q.session = ?
-                  AND q.question_number = ?
+                LEFT JOIN question_sources qs ON qs.id = q.source_id
+                WHERE {subject_predicate} AND {identity_filter}
                 """,
-                (
-                    *subject_params,
-                    int(repair["year"]),
-                    int(repair["session"]),
-                    int(repair["question_number"]),
-                ),
+                (*subject_params, *identity_params),
             ).fetchall()
-            identity = (
-                *identity_subject,
-                repair["year"],
-                repair["session"],
-                repair["question_number"],
-            )
             if len(rows) != 1:
                 raise ValueError(
                     f"audited repair identity is not unique: {identity!r}: {len(rows)}"
                 )
-            question_id, current_stem, source_page = rows[0]
+            question_id, current_stem, source_page, source_url = rows[0]
+            if not has_exam_identity:
+                database_source = Path(
+                    unquote(urlparse(str(source_url or "")).path)
+                ).name.casefold()
+                audited_source = Path(
+                    str(repair["source_pdf_relative_path"]).replace("\\", "/")
+                ).name.casefold()
+                if database_source != audited_source:
+                    raise ValueError(
+                        "audited repair source document mismatch: "
+                        f"{identity!r}: database={database_source!r} "
+                        f"audit={audited_source!r}"
+                    )
             audited_source_page = int(repair["source_page"])
             source_page_matches = (
                 source_page is not None
@@ -148,6 +176,9 @@ def apply_audited_repairs(
                     changed_question_images += 1
 
             repaired_choices = repair.get("repaired_choices")
+            repaired_choice_overrides = repair.get("repaired_choice_overrides")
+            if repaired_choices is not None and repaired_choice_overrides is not None:
+                raise ValueError(f"ambiguous audited choices: {identity!r}")
             if repaired_choices is not None:
                 if not isinstance(repaired_choices, list) or len(repaired_choices) not in (
                     4,
@@ -225,6 +256,43 @@ def apply_audited_repairs(
                             )
                             for number, text in enumerate(expected, start=1)
                         ],
+                    )
+                    changed_choice_sets += 1
+            elif repaired_choice_overrides is not None:
+                if (
+                    not isinstance(repaired_choice_overrides, dict)
+                    or not repaired_choice_overrides
+                ):
+                    raise ValueError(f"invalid audited choice overrides: {identity!r}")
+                current_choices = {
+                    int(row[0]): str(row[1])
+                    for row in connection.execute(
+                        """
+                        SELECT choice_number, choice_text
+                        FROM question_choices
+                        WHERE question_id = ? ORDER BY choice_number
+                        """,
+                        (int(question_id),),
+                    )
+                }
+                updates: list[tuple[str, int, int]] = []
+                for raw_number, raw_value in repaired_choice_overrides.items():
+                    number = int(raw_number)
+                    value = str(raw_value).strip()
+                    if number not in current_choices or number not in range(1, 6) or not value:
+                        raise ValueError(
+                            f"invalid audited choice override: {identity!r}: {raw_number!r}"
+                        )
+                    if current_choices[number] != value:
+                        updates.append((value, int(question_id), number))
+                if updates:
+                    connection.executemany(
+                        """
+                        UPDATE question_choices
+                        SET choice_text = ?, choice_format_json = NULL
+                        WHERE question_id = ? AND choice_number = ?
+                        """,
+                        updates,
                     )
                     changed_choice_sets += 1
             applied_records += 1

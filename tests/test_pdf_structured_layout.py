@@ -104,6 +104,21 @@ def _ocr_page_from_lines(*lines: str) -> StructuredPage:
     )
 
 
+def test_english_heavy_scanned_page_uses_english_only_tesseract_pass():
+    english_page = _ocr_page_from_lines(
+        "다음 보기 중 옳은 것은",
+        "This indicates that the following message informs others about danger.",
+        "The vessel shall keep out of the way and avoid collision.",
+    )
+    korean_page = _ocr_page_from_lines(
+        "다음 보기 중 기관실 안전수칙으로 가장 옳은 것은 무엇인가",
+        "윤활유 압력과 냉각수 온도를 점검한다",
+    )
+
+    assert PDFExtractor._tesseract_languages_for_ocr_page(english_page) == "eng"
+    assert PDFExtractor._tesseract_languages_for_ocr_page(korean_page) == "kor+eng"
+
+
 def test_prefers_complete_tesseract_page_for_english_heavy_scanned_exam():
     windows_page = _ocr_page_from_lines(
         "Every crew member shall participate ⅲ at least ()11e fire drill",
@@ -193,6 +208,95 @@ def test_tesseract_text_replaces_damaged_ocr_choice_prefix_with_windows_marker()
     ]
 
 
+def test_tesseract_repairs_korean_ocr_garble_without_overwriting_clean_lines():
+    windows_page = _ocr_page_from_lines(
+        "① 음향 측심기는 지속과의 초음파를 해저로 발사",
+        "한 후, 발사한 초음파가 해저에서 되 도 근 }~= 0 느",
+        "시간을 측정하여 수심을 측정한다.",
+        "② 수심의 측정은 음파의 속도와 해저에 반사되어",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "0) 음향 측심기는 지속파의 초음파를 해저로 발사",
+        "한 후, 발사한 초음파가 해저에서 되돌아오는",
+        "시간을 측정하여 수심을 측정한다.",
+        "Q) 수심의 측정은 음파의 속도와 BA 반사되어",
+    )
+
+    assert PDFExtractor._should_prefer_tesseract_ocr_page(
+        windows_page, tesseract_page
+    ) is True
+
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+    selected_text = PDFExtractor._ocr_page_plain_text(selected)
+
+    assert selected.lines[0].text.startswith("①")
+    assert "지속파의" in selected_text
+    assert "되돌아오는" in selected_text
+    assert "}~=" not in selected_text
+    assert "해저에 반사되어" in selected_text
+    assert "BA 반사되어" not in selected_text
+
+
+def test_tesseract_repairs_unbalanced_delimiter_ocr_line():
+    windows_page = _ocr_page_from_lines(
+        "39. 다음 중 휘트스톤 브리지 회로의 미지 저항은?",
+        "(단, R1=10[Ω, R2=20[Ω], R3=30[Ω]이다.)",
+        "① 20 [Ω]",
+        "② 40 [Ω]",
+        "③ 50 [Ω]",
+        "④ 60 [Ω]",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "39. 다음 중 휘트스톤 브리지 회로의 미지 저항은?",
+        "(단, R1=10[Ω], R2=20[Ω], R3=30[Ω]이다.)",
+        "① 20 [Ω]",
+        "② 40 [Ω]",
+        "③ 50 [Ω]",
+        "④ 60 [Ω]",
+    )
+
+    assert PDFExtractor._should_prefer_tesseract_ocr_page(
+        windows_page, tesseract_page
+    ) is True
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+
+    assert "R1=10[Ω]," in PDFExtractor._ocr_page_plain_text(selected)
+
+
+def test_tesseract_korean_spacing_keeps_word_boundaries_between_phrases():
+    tokens = (
+        ("시", 0.000, 0.014),
+        ("간", 0.022, 0.036),
+        ("을", 0.044, 0.058),
+        ("측", 0.071, 0.085),
+        ("정", 0.089, 0.103),
+        ("하여", 0.111, 0.139),
+        ("수", 0.155, 0.169),
+        ("심", 0.175, 0.189),
+        ("을", 0.197, 0.211),
+        ("측", 0.224, 0.238),
+        ("정", 0.242, 0.256),
+        ("한다.", 0.264, 0.306),
+    )
+    line = LayoutLine(
+        words=tuple(
+            LayoutWord(text=text, bbox=(x0, 0.1, x1, 0.12), confidence=0.93)
+            for text, x0, x1 in tokens
+        ),
+        bbox=(0.0, 0.1, 0.306, 0.12),
+        page=1,
+        column=0,
+    )
+
+    assert PDFExtractor._normalize_tesseract_korean_spacing(line) == (
+        "시간을 측정하여 수심을 측정한다."
+    )
+
+
 def test_tesseract_merge_must_preserve_importable_question_coverage():
     windows_page = _ocr_page_from_lines(
         "1. First question?",
@@ -279,11 +383,25 @@ def test_extracts_optional_tesseract_page_as_structured_words(monkeypatch):
         page_width=100,
         page_height=150,
         divider_x=None,
+        languages="eng+kor",
     )
 
     assert page is not None
     assert _texts(page) == ["Every crew"]
+    assert commands[0][commands[0].index("-l") + 1] == "eng+kor"
+    assert commands[0][commands[0].index("--psm") + 1] == "4"
     assert commands[0][-2:] == ["-c", "tessedit_create_tsv=1"]
+
+    PDFExtractor._extract_tesseract_structured_page(
+        Image.new("RGB", (200, 300), "white"),
+        page_number=4,
+        page_width=100,
+        page_height=150,
+        divider_x=100,
+        languages="eng",
+    )
+
+    assert commands[1][commands[1].index("--psm") + 1] == "3"
 
 
 def test_targeted_ton_hour_rows_merge_only_numeric_raster_evidence(monkeypatch):

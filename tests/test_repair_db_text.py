@@ -19,9 +19,16 @@ def test_has_unbalanced_delimiters_ignores_fraction_parentheses():
     assert not QuestionValidator(None)._has_unbalanced_delimiters(example)
 
 
+def test_has_unbalanced_delimiters_ignores_common_enumerator_labels():
+    assert not has_unbalanced_delimiters("a) port side b) starboard side")
+    assert not has_unbalanced_delimiters("i) first condition ii) second condition")
+    assert not has_unbalanced_delimiters("K) Kelvin V) voltage")
+
+
 def test_has_unbalanced_delimiters_detects_real_imbalance():
     assert has_unbalanced_delimiters("함수 f(t)의 라플라스 변환은? (단, s는 복소수이다.")
     assert has_unbalanced_delimiters("배수량 6,560톤인 선박이 해수(비중: 1.025에 떠있는 경우")
+    assert has_unbalanced_delimiters("This token is broken) inside a sentence.")
 
 
 def test_repair_text_and_format_regenerates_stale_format_json():

@@ -137,6 +137,92 @@ def test_applies_exact_source_repairs_transactionally_to_staging_database(tmp_pa
     assert choices == ["갑", "을", "병", "정"]
 
 
+def test_applies_id_based_repair_only_when_source_document_matches(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    _database(database, [_question(1)])
+    with sqlite3.connect(database) as connection:
+        question_id = connection.execute("SELECT id FROM questions").fetchone()[0]
+    repairs = tmp_path / "repairs.json"
+
+    def write_repairs(source_name: str) -> None:
+        repairs.write_text(
+            json.dumps(
+                {
+                    "repairs": [
+                        {
+                            "question_id": question_id,
+                            "subject": "항해",
+                            "question_number": 1,
+                            "source_page": 1,
+                            "source_pdf_relative_path": source_name,
+                            "repaired_stem": "ID와 원문을 함께 확인한 발문",
+                            "confidence": "exact_source",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    write_repairs("different.pdf")
+    with pytest.raises(ValueError, match="source document mismatch"):
+        apply_audited_repairs(database, repairs)
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT question_text FROM questions"
+        ).fetchone()[0] == "1번 문제"
+
+    write_repairs("question.pdf")
+    result = apply_audited_repairs(database, repairs)
+    assert result.applied_records == 1
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT question_text FROM questions"
+        ).fetchone()[0] == "ID와 원문을 함께 확인한 발문"
+
+
+def test_applies_only_audited_choice_overrides_to_staging_database(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    _database(database, [_question(1)])
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_choice_overrides": {"2": "원문 둘째 선지"},
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_audited_repairs(database, repairs)
+
+    assert result.changed_choice_sets == 1
+    with sqlite3.connect(database) as connection:
+        choices = [
+            row[0]
+            for row in connection.execute(
+                "SELECT choice_text FROM question_choices ORDER BY choice_number"
+            )
+        ]
+    assert choices == ["선지 1", "원문 둘째 선지", "선지 3", "선지 4"]
+
+
 def test_applies_legacy_repairs_by_exam_and_subject_code_with_missing_page(tmp_path):
     from src.database.ocr_repairs import apply_audited_repairs
 

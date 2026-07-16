@@ -70,6 +70,9 @@ def apply_audited_source_repair(
     raw_stem = repair.get("repaired_stem")
     stem = str(raw_stem).strip() if raw_stem is not None else candidate.stem
     raw_choices = repair.get("repaired_choices")
+    raw_choice_overrides = repair.get("repaired_choice_overrides")
+    if raw_choices is not None and raw_choice_overrides is not None:
+        raise ValueError(f"ambiguous audited choices for {key!r}")
     choices = candidate.choices
     diagnostics = list(candidate.diagnostics)
     if raw_choices is not None:
@@ -87,6 +90,23 @@ def apply_audited_source_repair(
             diagnostics.append("source_duplicate_choices")
         if all(re.match(r"^[㉠-㉭](?:\s|$)", value) for value in choices):
             diagnostics.append("explicit_proposition_choices")
+    elif raw_choice_overrides is not None:
+        if not isinstance(raw_choice_overrides, Mapping) or not raw_choice_overrides:
+            raise ValueError(f"invalid audited choice overrides for {key!r}")
+        choices = list(candidate.choices)
+        for raw_number, raw_value in raw_choice_overrides.items():
+            number = int(raw_number)
+            value = str(raw_value).strip()
+            if number < 1 or number > len(choices) or not value:
+                raise ValueError(f"invalid audited choice override for {key!r}")
+            choices[number - 1] = value
+        diagnostics = [
+            value for value in diagnostics if value not in _CHOICE_DIAGNOSTICS
+        ]
+        if len({re.sub(r"\s+", "", value).casefold() for value in choices}) != len(
+            choices
+        ):
+            diagnostics.append("source_duplicate_choices")
 
     diagnostics.append("source_text_repair")
     return replace(

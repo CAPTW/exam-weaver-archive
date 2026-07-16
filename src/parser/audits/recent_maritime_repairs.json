@@ -1,0 +1,683 @@
+{
+  "schema_version": 1,
+  "generated_from": [
+    "2024-2025 source PDF visual audit"
+  ],
+  "repairs": [
+    {
+      "question_id": 695,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 2,
+      "question_number": 15,
+      "source_page": 8,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 8쪽 15번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기> 중 「어촌·어항법(시행령 및 시행규칙 포함)」상 어항의 지정권자를 순서대로 바르게 나열한 것은? <보기> · 국가어항: (㉠) · 지방어항: (㉡) · 어촌정주어항 및 마을공동어항: (㉢)",
+      "repaired_choices": [
+        "국무총리 / 해양수산부장관 / 시·도지사",
+        "해양수산부장관 / 시·도지사 / 시장·군수·구청장",
+        "해양수산부장관 / 지방해양수산청장 / 시장·군수·구청장",
+        "해양수산부장관 / 시·도지사 / 지방해양수산청장"
+      ]
+    },
+    {
+      "question_id": 734,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 3,
+      "question_number": 14,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 14번을 직접 판독했다.",
+      "repaired_choices": [
+        "해양사고의 조사, 심판의 청구",
+        "재결의 집행",
+        "해양사고 통계의 수집",
+        "해양사고관련자 등에 대한 사고 관련 기술적 자문"
+      ]
+    },
+    {
+      "question_id": 736,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 3,
+      "question_number": 16,
+      "source_page": 17,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 17쪽 16번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「선박에서의 오염방지에 관한 규칙」상 유조선에서 화물유가 섞인 선박평형수, 세정수, 선저폐수 등을 배출하는 방법 등에 대한 설명의 일부이다. ( ) 안에 내용을 가장 옳은 순서로 나열한 것은? <보기> ○ ( ) 중에 배출할 것 ○ 기름의 순간배출률이 1해리당 ( ) 이하일 것 ○ 기선으로부터 ( ) 이상 떨어진 곳에서 배출할 것"
+    },
+    {
+      "question_id": 793,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 13,
+      "source_page": 28,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 28쪽 13번을 직접 판독했다.",
+      "repaired_stem": "「선박교통관제에 관한 법률(시행령 및 시행규칙 포함)」상 관제대상선박의 선장은 선박교통관제구역을 출입·이동하는 경우 관제통신을 항상 청취·응답하여야 한다. 이에 따른 관제통신을 녹음하여 보존하여야 하는 대상 선박으로 가장 옳지 않은 것은?"
+    },
+    {
+      "question_id": 857,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 2,
+      "question_number": 17,
+      "source_page": 41,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 41쪽 17번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기> 중 「항만운송사업법(시행령 및 시행규칙 포함)」상 항만하역사업에 해당하는 것은 모두 몇 개인가? <보기> ㉠ 선박을 이용하여 운송될 화물을 화물주 또는 선박운항업자의 위탁을 받아 항만에서 화물주로부터 인수하거나 선박에 인도하는 행위 ㉡ 항만에서 화물을 선박에 싣거나 선박으로부터 내리는 일 ㉢ 항만에서 선박 또는 부선을 이용하여 운송될 화물을 하역장에서 내가는 행위 ㉣ 항만이나 지정구간에서 목재를 뗏목으로 편성하여 운송하는 행위 ㉤ 선적화물 및 선박(부선을 포함)에 관련된 증명·조사·감정을 하는 일"
+    },
+    {
+      "question_id": 889,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 3,
+      "question_number": 9,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 9번을 직접 판독했다.",
+      "repaired_stem": "다음 중 「유선 및 도선사업법(시행령 및 시행규칙 포함)」상 유선사업자가 유선 및 유선사업장에 갖추어야 하는 인명구조용 장비 등에 대한 내용이다. (가), (나), (다)의 합으로 가장 옳은 것은? <보기> ㉠ 유선에는 승선정원의 (가)퍼센트 이상에 해당하는 수의 구명조끼를 갖추어야 한다. ㉡ 유선장에 통신장비를 갖추지 못한 유선(5톤 미만)이 90척일 때 (나)척 이상의 비상구조선을 갖추어야 한다. ㉢ 승객정원이 11명인 유선이 45척일 때 최소 (다)명 이상의 인명구조요원을 두어야 한다."
+    },
+    {
+      "question_id": 936,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 4,
+      "question_number": 16,
+      "source_page": 11,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 11쪽 16번을 직접 판독했다.",
+      "repaired_stem": "다음 중 「배타적 경제수역에서의 외국인어업 등에 대한 주권적 권리의 행사에 관한 법률(시행령 및 시행규칙 포함)」(이하 「경제수역어업주권법」이라 한다)에 대한 내용으로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 940,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 4,
+      "question_number": 20,
+      "source_page": 12,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 12쪽 20번을 직접 판독했다.",
+      "repaired_stem": "다음 중 「해양경비법(시행령 및 시행규칙 포함)」에 대한 내용으로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 942,
+      "subject": "해사법규",
+      "year": 2024,
+      "session": 4,
+      "question_number": 22,
+      "source_page": 12,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 12쪽 22번을 직접 판독했다.",
+      "repaired_stem": "「해양과학조사법(시행령 및 시행규칙 포함)」상 대한민국의 배타적 경제수역 또는 대륙붕에서 해양과학조사를 실시하려는 외국인등은 해양수산부장관의 ( )을/를 받아야 한다. 다음 중 빈칸에 들어갈 단어로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 1344,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 1,
+      "question_number": 4,
+      "source_page": 1,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 1쪽 4번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기> 중 「SMCP(Standard Marine Communication Phrases)」의 일반적 원칙에 관한 내용으로 옳지 않은 것은 모두 몇 개인가? <보기> ㉠ Responses to orders and answers to questions of special importance both in external and on-board communication are given in wording in the phrases concerned. ㉡ Numbers are to be spoken in separate digits except when rudder angles, e.g. in wheel orders, are given. ㉢ The bearing of the mark or vessel concerned is the bearing in the 360 degree notation from north (true north unless otherwise stated), include in the case of relative bearings. ㉣ When the position is related to a mark, the mark shall be a indefinite charted object. ㉤ Relative bearings can be expressed in degrees relative to the vessel’s head. More frequently this is in relation to the port or starboard bow."
+    },
+    {
+      "question_id": 1353,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 1,
+      "question_number": 13,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 13번을 직접 판독했다.",
+      "repaired_stem": "다음 중 「COLREGs(International Regulations for Preventing Collisions at Sea)」상 유지선의 동작으로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "Where one of two vessels is to keep out of the way the other shall keep her course and speed.",
+        "The stand on vessel may however take action to avoid collision by her manoeuvre alone, as soon as it becomes apparent to her that the vessel required to keep out of the way is not taking appropriate action in compliance with these Rules.",
+        "When, from any cause, the vessel required to keep her course and speed finds herself so close that collision cannot be avoided by the action of the give-way vessel alone, she shall take such action as will best aid to avoid collision.",
+        "A power-driven vessel which takes action in a crossing situation in accordance with sub-paragraph of this Rule to avoid collision with another power-driven vessel shall, if the circumstances of the case admit, not alter course to starboard for a vessel on her own port side."
+      ]
+    },
+    {
+      "question_id": 1358,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 1,
+      "question_number": 18,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 5쪽 18번을 직접 판독했다.",
+      "repaired_stem": "다음은 「SOLAS(International Convention for the Safety of Life at Sea)」상 항해선교의 시야에 관한 내용이다. <보기>의 빈칸에 들어갈 숫자나 단어를 가장 옳은 순서로 나열한 것은? <보기> Regulation 22 - Navigation bridge visibility Ships of not less than 55m in length, as defined in regulation 2.4, constructed on or after 1 July 1998, shall meet the following requirements: The view of the sea surface from the conning position shall not be obscured by more than (㉠) ship lengths, or (㉡)m, whichever is the less, forward of the bow to (㉢)° on either side under all conditions of draught, trim and deck cargo.",
+      "repaired_choices": [
+        "one / 400 / 5",
+        "two / 500 / 10",
+        "one time of / 400 / 10",
+        "two times of / 500 / 5"
+      ]
+    },
+    {
+      "question_id": 1359,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 1,
+      "question_number": 19,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 5쪽 19번을 직접 판독했다.",
+      "repaired_stem": "다음은 「COLREGs(International Regulations for Preventing Collisions at Sea)」상 음향신호장비에 관한 규정이다. <보기>의 빈칸에 들어갈 숫자와 단어를 가장 옳은 순서로 나열한 것은? <보기> A vessel of (㉠) metres or more in length shall be provided with a whistle, a vessel of (㉡) metres or more in length shall be provided with a (㉢) in addition to a (㉣), and a vessel of (㉤) metres or more in length shall, in addition, be provided with a (㉥), the tone and sound of which cannot be confused with that of the bell.",
+      "repaired_choices": [
+        "12 / 20 / bell / whistle / 100 / gong",
+        "12 / 20 / whistle / gong / 200 / bell",
+        "10 / 24 / bell / whistle / 100 / gong",
+        "10 / 24 / whistle / gong / 200 / bell"
+      ]
+    },
+    {
+      "question_id": 1361,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 2,
+      "question_number": 1,
+      "source_page": 6,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 6쪽 1번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「United Nations Convention on the Law of the Sea (UNCLOS)」 Article 55 이다. ( )에 들어갈 내용으로 가장 옳은 것은? <보기> The exclusive economic zone is an area beyond and adjacent to the territorial sea, subject to the specific legal regime established in this Part, under which the rights and jurisdiction of ( ) and the rights and freedoms of other States are governed by the relevant provisions of this Convention."
+    },
+    {
+      "question_id": 1376,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 2,
+      "question_number": 16,
+      "source_page": 9,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 9쪽 16번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「International Convention on Standards of Training, Certification and Watchkeeping for Seafarers (STCW)」의 당직준수원칙상 항해당직을 담당하는 해기사가 즉시 선장에게 보고하여야 하는 경우로 옳은 것은 모두 몇 개인가? <보기> ㉠ if restricted visibility is encountered or expected ㉡ when the navigational and signal lights and navigational equipment are functioning properly ㉢ if difficulty is experienced in maintaining course ㉣ on failure to sight land, or a navigation mark or to obtain soundings by the expected time ㉤ when the UMS controls, alarms and indicators are functioning properly ㉥ if the ship meets any hazard to navigation, such as ice or a derelict"
+    },
+    {
+      "question_id": 1378,
+      "subject": "해사영어",
+      "year": 2025,
+      "session": 2,
+      "question_number": 18,
+      "source_page": 10,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 10쪽 18번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 해사영어 약어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가? <보기> ㉠ A/Co.: Alter Course ㉡ B.W.E.: Break Water Entrance ㉢ F.W.E.: Fresh Water Equipment ㉣ C.P.A.: Closest Point of Approach ㉤ S.B.E.: Stand by Engine ㉥ L.O.T.: Lowest Onboard Tank"
+    },
+    {
+      "question_id": 1402,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 2,
+      "source_page": 15,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 15쪽 2번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「MARPOL(International Convention for the Prevention of Pollution from Ships)」상 용어의 정의에 대한 내용이다. 빈칸에 들어갈 내용으로 가장 옳은 것은? <보기> ( ) means the ballast water introduced into a tank which is completely separated from the cargo oil and oil fuel system and which is permanently allocated to the carriage of ballast or to the carriage of ballast or cargoes other than oil or noxious liquid substances as variously defined in the Annexes of the present Convention."
+    },
+    {
+      "question_id": 1405,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 5,
+      "source_page": 15,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 15쪽 5번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>가 설명하는 CODE로 가장 옳은 것은? <보기> The objectives of this Code are: To establish an international framework involving co-operation between Contracting Governments, Government agencies, local administrations and the shipping and port industries to detect security threats and take preventive measures against security incidents affecting ships or port facilities used in international trade."
+    },
+    {
+      "question_id": 1406,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 6,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 6번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「SOLAS(International Convention for the Safety of Life at Sea)」의 내용이다. <보기> Every crew member shall participate in at least one (㉠) drill and one (㉡) drill every month. The drills of the crew shall take place within 24h of the ship leaving a port if more than 25% of the crew have not participated in (㉠) and (㉡) drills on board that particular ship in the previous month. When a ship enters service for the first time, after modification of a major character or when a new crew is engaged, these drills shall be held before sailing. The Administration may accept other arrangements that are at least equivalent for those classes of ships for which this is impracticable.",
+      "repaired_choices": [
+        "rescue / fire",
+        "abandon ship / fire",
+        "fire / emergency steering",
+        "abandon ship / emergency steering"
+      ]
+    },
+    {
+      "question_id": 1407,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 7,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 7번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「SOLAS(International Convention for the Safety of Life at Sea)」에 대한 내용이다. <보기>의 빈칸에 들어갈 내용으로 가장 옳은 것은? <보기> ( ) means a technique using digital codes which enables a radio station to establish contact with, and transfer information to, another station or group of stations, and complying with the relevant recommendations of the International Telecommunication Union Radiocommunication Sector (ITU-R).",
+      "repaired_choices": [
+        "Digital selective calling",
+        "Rescue co-ordination centre",
+        "On-scene co-ordinator",
+        "AIS-SART"
+      ]
+    },
+    {
+      "question_id": 1411,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 11,
+      "source_page": 17,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 17쪽 11번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「IAMSAR(International Aeronautical and Maritime Search and Rescue) manual」상 Vessel distress message에 대한 내용이다. <보기>에서 밑줄 친 내용으로 옳은 것은 모두 몇 개인가? <보기> Important components of the distress message include: ㉠ identification of the vessel ㉡ time of abandoning ship ㉢ destination ㉣ number of seriously injured ㉤ emergency location aids in survival craft or in the sea ㉥ weather in immediate vicinity, wind direction, sea and swell, visibility"
+    },
+    {
+      "question_id": 1412,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 12,
+      "source_page": 17,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 17쪽 12번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「IAMSAR(International Aeronautical and Maritime Search and Rescue) manual」상 Distress Alert from a Vessel에 대한 내용이다. <보기>에서 옳지 않은 것으로만 짝지어진 것은? <보기> Use any one or more of the following international maritime distress frequencies to transmit a distress alert: ㉠ 156.650 MHz ㉡ 2182 kHz (radiotelephony) ㉢ 156.8 MHz ㉣ 121.5 MHz"
+    },
+    {
+      "question_id": 1413,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 13,
+      "source_page": 17,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 17쪽 13번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「COLREG(International Regulations for Preventing Collisions at Sea)」에 대한 내용이다. 빈칸에 들어갈 내용으로 가장 옳은 것은? <보기> Every vessel shall at all times maintain a proper ( ) by sight and hearing as well as by all available means appropriate in the prevailing circumstances and conditions so as to make a full appraisal of the situation and of the risk of collision.",
+      "repaired_choices": [
+        "distance",
+        "action to avoid collision",
+        "speed",
+        "look-out"
+      ]
+    },
+    {
+      "question_id": 1416,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 1,
+      "question_number": 16,
+      "source_page": 18,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 18쪽 16번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 해사영어 약어에 대한 설명 중 옳지 않은 것은 모두 몇 개인가? <보기> ㉠ ETA: Estimated Time of Arrival ㉡ MMSI: Maritime Mobile Service Identity ㉢ VTS: Vessel Traffic Service(s) ㉣ EPIRB: Electric Position Indicating Radio Beacon ㉤ GMDSS: Global Marine Distress and Survival System ㉥ GPS: Global Positioning System ㉦ SART: Search and Rescue Report Transponder"
+    },
+    {
+      "question_id": 1422,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 2,
+      "source_page": 2,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 2쪽 2번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「International Regulations for Preventing Collisions at Sea (COLREG)」상 빈칸에 들어갈 내용으로 가장 옳은 것은? <보기> The term ‘( )’ means a vessel which through some exceptional circumstance is unable to manoeuvre as required by these Rules and is therefore unable to keep out of the way of another vessel.",
+      "repaired_choices": [
+        "vessel engaged in fishing",
+        "vessel restricted in her ability to manoeuvre",
+        "vessel not under command",
+        "vessel constrained by her draught"
+      ]
+    },
+    {
+      "question_id": 1431,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 11,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 11번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「International Regulations for Preventing Collisions at Sea (COLREG)」상 Definitions of Lights에 대한 내용이다. 빈칸에 들어갈 숫자를 합한 값은? <보기> ㉠ “All round light” means a light showing an unbroken light over an arc of the horizon of ( ) degrees. ㉡ “Flashing light” means a light flashing at regular intervals at a frequency of ( ) flashes or more per minute."
+    },
+    {
+      "question_id": 1432,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 12,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 12번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「United Nations Convention on the Law of the Sea (UNCLOS)」상 Innocent Passage 조항에서 외국선박이 연안국의 평화, 공공질서 또는 안전을 해치는 활동으로 규정한 것은 모두 몇 개인가? <보기> ㉠ any exercise or practice with weapons of any kind ㉡ any act of propaganda aimed at affecting the defence or security of the coastal state ㉢ the launching, landing or taking on board of any aircraft ㉣ any fishing activities ㉤ the carrying out of research or survey activities"
+    },
+    {
+      "question_id": 1434,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 14,
+      "source_page": 4,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 4쪽 14번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「Standard Marine Communication Phrases (SMCP)」상 빈칸에 들어갈 말로 가장 옳은 것은? <보기> ( ) is place on deck, in mess rooms, etc., assigned to crew and passengers where they have to meet according to the muster list when the corresponding alarm is released or announcement made.",
+      "repaired_choices": [
+        "Top Bridge",
+        "Accommodation",
+        "Engine Control Room",
+        "Assembly Station"
+      ]
+    },
+    {
+      "question_id": 1437,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 17,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 5쪽 17번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「International Code for the Security of Ships and of Port Facilities (ISPS Code)」상 Security Level에 관한 내용이다. 빈칸에 들어갈 말로 가장 옳은 것은? <보기> Security level 3 The level for which further specific protective security measures shall be maintained ( ) when a security incident is probable or imminent, although it may not be possible to identify the specific target."
+    },
+    {
+      "question_id": 1438,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 2,
+      "question_number": 18,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 5쪽 18번을 직접 판독했다.",
+      "repaired_stem": "다음 중 「United Nations Convention on the Law of the Sea (UNCLOS)」상 Right of Hot Pursuit (Article111)에 대한 내용으로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "The hot pursuit of a foreign ship may be undertaken when the competent authorities of the coastal State have good reason to believe that the ship has violated the laws and regulations of that State.",
+        "Such pursuit must be finished when the foreign ship or one of its boats is within the internal waters, the archipelagic waters, the territorial sea or the contiguous zone of the pursuing State, and may only be suspended outside the territorial sea or the contiguous zone if the pursuit has not been interrupted.",
+        "It is not necessary that, at the time when foreign ship within the territorial sea or the contiguous zone receives the order to stop, the ship giving the order should likewise be within the territorial sea or the contiguous zone.",
+        "The right of hot pursuit ceases as soon as the ship pursued enters the territorial sea of its own State or of a third State."
+      ]
+    },
+    {
+      "question_id": 1444,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 4,
+      "source_page": 6,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 6쪽 4번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「International Regulations for Preventing Collisions at Sea (COLREG)」상 본선의 Safe Speed를 결정할 때 고려사항으로 옳은 것은 모두 몇 개인가? <보기> ㉠ the traffic density including concentrations of fishing vessels or any other vessels ㉡ the manoeuvrability of the vessel with special reference to stopping distance and turning ability in the prevailing conditions ㉢ the state of wind, sea and current, and the proximity of navigational hazards ㉣ the draught in relation to the available depth of water"
+    },
+    {
+      "question_id": 1445,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 5,
+      "source_page": 6,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 6쪽 5번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>에서 별도의 명문 규정이 없는 한 「International Convention for the Safety of Life at Sea (SOLAS)」 적용 대상 선박이 아닌 것을 모두 고른 것은? (단, <보기>의 선박은 모두 국제항해에 종사한다.) <보기> ㉠ Ships of war and troopships ㉡ Passenger ships ㉢ Cargo ships of more than 900 tons gross tonnage ㉣ Fishing vessels ㉤ Ships not propelled by mechanical means",
+      "repaired_choices": [
+        "㉡, ㉢",
+        "㉠, ㉡, ㉢",
+        "㉡, ㉣, ㉤",
+        "㉠, ㉣, ㉤"
+      ]
+    },
+    {
+      "question_id": 1447,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 7,
+      "source_page": 7,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 7쪽 7번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「United Nations Convention on the Law of the Sea (UNCLOS)」상 빈칸에 들어갈 숫자를 합한 값은? <보기> ㉠ Every State has the right to establish the breadth of territorial sea up to a limit not exceeding ( ) nautical miles, measured from baselines determined in accordance with this Convention. ㉡ The exclusive economic zone shall not extend beyond ( ) nautical miles from the baselines from which the breadth of the territorial sea is measured."
+    },
+    {
+      "question_id": 1448,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 8,
+      "source_page": 7,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 7쪽 8번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「International Ship and Port Facility Security (ISPS) Code」 적용 대상 선박만을 모두 고른 것은? <보기> ㉠ Passenger ships, including high-speed passenger craft engaged on international voyages ㉡ Cargo ships of less than 200 gross tonnage engaged on international voyages ㉢ Mobile offshore drilling units engaged on international voyages ㉣ Port facilities serving such ships engaged on international voyages ㉤ Warships, naval auxiliaries",
+      "repaired_choices": [
+        "㉠, ㉡, ㉤",
+        "㉡, ㉢, ㉣",
+        "㉠, ㉢, ㉣",
+        "㉢, ㉣, ㉤"
+      ]
+    },
+    {
+      "question_id": 1453,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 13,
+      "source_page": 8,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 8쪽 13번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 현상으로 가장 옳은 것은? <보기> Moving of an anchor over the sea bottom involuntarily because it is no longer preventing the movement of the vessel",
+      "repaired_choices": [
+        "foul of anchor",
+        "slipping anchor",
+        "dragging of anchor",
+        "sighting anchor"
+      ]
+    },
+    {
+      "question_id": 1460,
+      "subject": "해사영어",
+      "year": 2024,
+      "session": 3,
+      "question_number": 20,
+      "source_page": 9,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 9쪽 20번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>의 「United Nations Convention on the Law of the Sea (UNCLOS)」상 Innocent Passage 조항에서 외국선박이 연안국의 평화, 공공질서 또는 안전을 해치는 활동으로 규정한 것은 모두 몇 개인가? <보기> ㉠ any exercise or practice with weapons of any kind ㉡ any act of propaganda aimed at affecting the defence or security of the coastal state ㉢ the launching, landing or taking on board of any aircraft ㉣ any fishing activities ㉤ the carrying out of research or survey activities"
+    },
+    {
+      "question_id": 1944,
+      "subject": "항해학",
+      "year": 2025,
+      "session": 1,
+      "question_number": 4,
+      "source_page": 1,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 1쪽 4번을 직접 판독했다.",
+      "repaired_stem": "상관 선속계(acoustic correlation log)에 대한 설명으로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 2008,
+      "subject": "항해학",
+      "year": 2025,
+      "session": 3,
+      "question_number": 8,
+      "source_page": 13,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 13쪽 8번을 직접 판독했다.",
+      "repaired_stem": "다음 중 <보기>의 선박에 대한 GM과 선폭이 가장 옳게 나열된 것은? <보기> ○ 기선에서 무게중심(G)까지의 높이 = 3m ○ 기선에서 메타센터(M)까지의 높이 = 4m ○ 기선에서 부심(B)까지의 높이 = 2m ○ 횡요주기 = 12초",
+      "repaired_choices": [
+        "GM 2m / 선폭 14m",
+        "GM 1m / 선폭 15m",
+        "GM 2m / 선폭 15m",
+        "GM 1m / 선폭 14m"
+      ]
+    },
+    {
+      "question_id": 2009,
+      "subject": "항해학",
+      "year": 2025,
+      "session": 3,
+      "question_number": 9,
+      "source_page": 13,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 13쪽 9번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「IAMSAR Manual」상 인명구조 조선법에 대한 설명이다. ( )안에 들어갈 숫자들의 총합은 얼마인가? <보기> ○ ‘샤르노브 턴(Scharnov turn)’은 타를 전타하여 원침로로부터 (㉠)도 벗어난 후에 반대방향으로 전타하며, 침로가 원침로의 반대 침로에 (㉡)도 못 미친 상태에서 타를 Midship하여 선박을 침로 반대방향으로 선회시킨다. ○ ‘앤더슨 턴(Anderson turn)’은 익수자가 빠진 쪽으로 타를 전타하여 원침로로부터 (㉢)도 벗어난 후 타를 Midship하고 원침로로 되돌아가도록 조종한다. ○ ‘윌리암슨 턴(Williamson turn)’은 익수자가 빠진 쪽으로 타를 전타하여 원침로로부터 (㉣)도 정도 벗어난 후에 반대 방향으로 전타하며, 침로가 원침로의 반대 침로에 (㉤)도 못 미친 상태에서 타를 Midship하여 선박을 침로 반대방향으로 선회시킨다.",
+      "repaired_choices": [
+        "610",
+        "590",
+        "570",
+        "550"
+      ]
+    },
+    {
+      "question_id": 2024,
+      "subject": "항해학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 4,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 4번을 직접 판독했다.",
+      "repaired_stem": "다음 중 자차(Deviation)에 대한 설명으로 가장 옳은 것은?"
+    },
+    {
+      "question_id": 2027,
+      "subject": "항해학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 7,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 7번을 직접 판독했다.",
+      "repaired_stem": "다음 중 히브 투(Heave to)에 대한 설명으로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "선미 추종파에 의하여 해수가 선미 갑판을 덮칠 수 있다.",
+        "선속을 너무 감속하면 보침이 어렵고, 정횡으로 파랑을 받는 형태가 되기 쉽다.",
+        "선수를 풍랑쪽으로 향하게 하여 조타가 가능한 최소의 속력으로 전진하는 방법이다.",
+        "일반적으로 풍랑을 선수로부터 좌우현으로 25~35° 방향에서 받도록 하는 것이 좋다."
+      ]
+    },
+    {
+      "question_id": 2030,
+      "subject": "항해학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 10,
+      "source_page": 16,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 16쪽 10번을 직접 판독했다.",
+      "repaired_stem": "다음 중 온난한 해면상에 있는 공기덩어리가 한랭한 해면상으로 이동하며 발생하는 안개를 말하며 해무(Sea fog)라고도 부르는 것은?",
+      "repaired_choices": [
+        "역전 안개(Inversion fog)",
+        "이류 안개(Advection fog)",
+        "활승 안개(Upslope fog)",
+        "복사 안개(Radiation fog)"
+      ]
+    },
+    {
+      "question_id": 2036,
+      "subject": "항해학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 16,
+      "source_page": 17,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 17쪽 16번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기>에서 괄호 안에 순서대로 들어갈 말로 가장 옳은 것은? <보기> 구명정을 이용하여 조난선의 인명을 구조할 때 구조선은 조난선의 ( )에 위치하여, ( ) 구명정을 하강하여 조난선으로 가게 한다.",
+      "repaired_choices": [
+        "풍하측, 풍상측",
+        "풍하측, 풍하측",
+        "풍상측, 풍하측",
+        "풍상측, 풍상측"
+      ]
+    },
+    {
+      "question_id": 2614,
+      "subject": "기관학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 14,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 14번을 직접 판독했다.",
+      "repaired_stem": "다음 <보기> 중 유수분리장치에 대해 설명한 것으로 옳지 않은 것은 모두 몇 개인가? <보기> ㉠ 유수분리장치는 폐수와 유분이 섞인 물을 선외로 배출할 때, 기름 성분이 물과 함께 배출되지 않도록 기름 성분을 분리해 주는 역할을 한다. ㉡ 「MARPOL 협약(국제해양오염방지협약)」에 따르면 정박 중 유수분리장치를 작동하여 유분이 섞인 물을 해양에 배출할 때 배출액 중 기름 성분을 15ppm 이하로 배출해야 한다. ㉢ 유수혼합액의 유속이 느린 경우 유수분리 효과가 높아진다. ㉣ 유수혼합액에 포함된 기름 입자의 부상 속도는 기름 입자의 직경이 작을수록, 온도가 높을수록 빠르다. ㉤ 수평 또는 경사진 여러 개의 포집판 사이로 유수혼합액을 저속으로 통과시키면 물과 기름의 비중 차에 의해 유수혼합액에 포함된 기름 입자가 물 위로 떠오르는 원리를 이용한 필터식 유수분리장치가 있다."
+    },
+    {
+      "question_id": 2615,
+      "subject": "기관학",
+      "year": 2024,
+      "session": 1,
+      "question_number": 15,
+      "source_page": 3,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 3쪽 15번을 직접 판독했다.",
+      "repaired_choices": [
+        "저압 스위치(Low pressure switch)는 저압 측 압력이 설정값 이하로 낮아지면 압축기를 기동시키고 설정값 이상으로 회복되면 압축기를 정지시킨다.",
+        "고압 스위치(High pressure switch)는 압력이 과도하게 상승하면 압축기를 정지시키고 한 번 고압스위치가 작동되면 자동으로 리셋되지 않는다.",
+        "고·저압 스위치(Dual pressure switch)는 고압 스위치와 저압 스위치를 한 개로 조합한 것이다.",
+        "유압 보호 스위치(Oil protection switch)는 압축기가 윤활 불량으로 손상되지 않도록 윤활유압이 한계치보다 낮아지면 압축기를 정지시킨다."
+      ]
+    },
+    {
+      "question_id": 3229,
+      "subject": "기관학",
+      "year": 2024,
+      "session": 3,
+      "question_number": 29,
+      "source_page": 22,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 22쪽 29번을 직접 판독했다.",
+      "repaired_choices": [
+        "홀 노즐(Hole Nozzle)에는 단공 노즐과 다공 노즐이 있고, 단공 노즐은 구멍이 커서 잘 막히지 않고, 유립이 커서 관통과 분포 상태가 좋다.",
+        "노즐(Nozzle)은 연료 밸브의 가장 끝에 있고, 연료유의 압력이 설정한 압력 이상으로 되면 실린더 내로 연료를 분사하는 역할을 한다.",
+        "핀들노즐(Pintle Nozzle)은 분사 시작 압력이 낮아도 되고 입자의 크기도 작게 할 수 있다.",
+        "연료 분사 밸브는 실린더 헤드에 설치되어 연료 분사 펌프에서 송출되는 연료유를 실린더 내에 분사한다."
+      ]
+    }
+  ]
+}

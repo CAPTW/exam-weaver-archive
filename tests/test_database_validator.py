@@ -245,6 +245,40 @@ def test_question_validator_flags_missing_required_image(repo, sample_metadata, 
     assert 'missing_required_image' in issue_codes
 
 
+def test_question_validator_avoids_broad_image_hint_false_positives(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    sample_question.text = (
+        "연료분사장치의 상태는 다음과 같은 기준으로 판단하며 도표상 수치를 참고한다."
+    )
+    sample_question.has_image = False
+    sample_question.image_path = None
+    repo.save_questions([sample_question], sample_metadata)
+
+    assert QuestionValidator(repo).scan() == []
+
+
+def test_question_validator_recognizes_specific_following_table_reference(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    sample_question.text = "다음과 같은 도표를 보고 옳은 것을 고르시오."
+    sample_question.has_image = False
+    sample_question.image_path = None
+    repo.save_questions([sample_question], sample_metadata)
+
+    findings = QuestionValidator(repo).scan()
+
+    assert len(findings) == 1
+    assert any(
+        issue['code'] == 'missing_required_image'
+        for issue in findings[0]['issues']
+    )
+
+
 def test_question_validator_flags_ocr_placeholder_and_noise(repo, sample_metadata, sample_question):
     sample_question.text = "[OCR 누락] 원본 PDF에서 문항을 확인해 주세요."
     sample_question.choices[0].text = "0卜0 으9"
