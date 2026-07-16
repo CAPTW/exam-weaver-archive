@@ -1,7 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QScrollArea,
     QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
-    QDialogButtonBox, QHeaderView, QTableWidget, QTableWidgetItem,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QTextCharFormat, QTextCursor
@@ -29,6 +28,7 @@ from ...parser.table_format import (
     resolve_table_anchor,
     serialize_format_payload,
 )
+from ...parser.table_structure import normalize_rectangular_table
 from ...parser.view_table import (
     add_one_cell_table,
     promote_view_block,
@@ -39,6 +39,7 @@ from ...choice_markers import (
     choice_marker,
     normalize_choice_marker_style,
 )
+from ..table_editor import TableEditorDialog
 
 
 MIN_CHOICE_COUNT = 4
@@ -557,6 +558,29 @@ class QuestionEditor(QDialog):
             None,
         )
 
+    def _replace_table_spec(self, owner, table_id, replacement):
+        payload = self._owner_format_payload(owner)
+        editable_keys = {
+            'rows',
+            'cells',
+            'column_widths',
+            'row_heights',
+            'layout',
+        }
+        for index, table in enumerate(payload.get('tables', [])):
+            if table.get('id') != table_id:
+                continue
+            merged = dict(table)
+            for key in editable_keys:
+                if key in replacement:
+                    merged[key] = replacement[key]
+            merged['id'] = table_id
+            payload['tables'][index] = normalize_rectangular_table(merged)
+            self._store_owner_format_payload(owner, payload)
+            self._rebuild_table_cards()
+            return True
+        return False
+
     def _show_table_source(self, owner, table_id):
         table = self._find_owner_table(owner, table_id) or {}
         path = str((table.get('source') or {}).get('image_path') or '')
@@ -569,85 +593,27 @@ class QuestionEditor(QDialog):
         QMessageBox.information(self, "표 구조", text or "저장된 표 구조가 없습니다.")
 
     def _edit_table_structure(self, owner, table_id):
-        table = self._find_owner_table(owner, table_id) or {}
-        rows = table.get('rows') or []
-        if not rows:
+        table = self._find_owner_table(owner, table_id)
+        if not table:
             return
-        column_count = max((len(row) for row in rows), default=0)
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"표 편집 · {table_id}")
-        layout = QVBoxLayout(dialog)
-        grid = QTableWidget(len(rows), column_count, dialog)
-        grid.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        for row_index, row in enumerate(rows):
-            for column_index in range(column_count):
-                value = row[column_index] if column_index < len(row) else ''
-                grid.setItem(row_index, column_index, QTableWidgetItem(str(value)))
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
-            parent=dialog,
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(grid)
-        layout.addWidget(buttons)
-        dialog.resize(720, 420)
+        dialog = TableEditorDialog(table, self)
         if dialog.exec() != QDialog.Accepted:
             return
-        edited_rows = [
-            [
-                grid.item(row_index, column_index).text()
-                if grid.item(row_index, column_index) is not None else ''
-                for column_index in range(column_count)
-            ]
-            for row_index in range(len(rows))
-        ]
-        self._update_table_rows(owner, table_id, edited_rows)
+        self._replace_table_spec(owner, table_id, dialog.result_table_spec())
 
     def _update_table_rows(self, owner, table_id, rows):
-        payload = self._owner_format_payload(owner)
-        for table in payload.get('tables', []):
-            if table.get('id') != table_id:
-                continue
-            cleaned_rows = [
-                [str(cell or '') for cell in row]
-                for row in rows or []
-                if isinstance(row, (list, tuple))
-            ]
-            existing = {
-                (int(cell.get('row', -1)), int(cell.get('col', -1))): dict(cell)
-                for cell in table.get('cells') or []
-                if isinstance(cell, dict)
-            }
-
-            def covered_by_merge(row_index, column_index):
-                return any(
-                    origin != (row_index, column_index)
-                    and origin[0] <= row_index < origin[0] + max(1, int(cell.get('row_span', 1)))
-                    and origin[1] <= column_index < origin[1] + max(1, int(cell.get('col_span', 1)))
-                    for origin, cell in existing.items()
-                )
-
-            cells = []
-            for row_index, row in enumerate(cleaned_rows):
-                for column_index, value in enumerate(row):
-                    if covered_by_merge(row_index, column_index):
-                        continue
-                    cell = existing.get((row_index, column_index), {
-                        'row': row_index,
-                        'col': column_index,
-                        'row_span': 1,
-                        'col_span': 1,
-                        'horizontal_alignment': 'left',
-                        'vertical_alignment': 'center',
-                    })
-                    cell['text'] = value
-                    cells.append(cell)
-            table['rows'] = cleaned_rows
-            table['cells'] = cells
-            break
-        self._store_owner_format_payload(owner, payload)
-        self._rebuild_table_cards()
+        table = self._find_owner_table(owner, table_id)
+        if not table:
+            return False
+        cleaned_rows = [
+            [str(cell or '') for cell in row]
+            for row in rows or []
+            if isinstance(row, (list, tuple))
+        ]
+        replacement = dict(table)
+        replacement['rows'] = cleaned_rows
+        replacement['cells'] = []
+        return self._replace_table_spec(owner, table_id, replacement)
 
     def accept(self):
         data = self.get_data()

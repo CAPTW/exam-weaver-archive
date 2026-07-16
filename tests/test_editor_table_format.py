@@ -106,6 +106,35 @@ def test_table_structure_edit_updates_rows_and_cells_without_losing_source():
     APP.processEvents()
 
 
+def test_replacing_table_spec_keeps_source_anchor_and_unknown_metadata():
+    data = _editor_data()
+    payload = json.loads(data["question_format_json"])
+    payload["tables"][0]["custom_table"] = {"keep": True}
+    data["question_format_json"] = json.dumps(payload, ensure_ascii=False)
+    editor = QuestionEditor(
+        question_data=data,
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+    replacement = {
+        "rows": [["A", "B"], ["C", "D"]],
+        "cells": [],
+        "column_widths": [0.3, 0.7],
+        "layout": {"width_mode": "manual"},
+    }
+
+    editor._replace_table_spec("question", "table-1", replacement)
+
+    table = json.loads(editor.question_data["question_format_json"])["tables"][0]
+    assert table["id"] == "table-1"
+    assert table["source"]["sha256"] == "abc123"
+    assert table["anchor"]["offset"] == 8
+    assert table["custom_table"] == {"keep": True}
+    assert table["rows"] == [["A", "B"], ["C", "D"]]
+    assert table["layout"]["width_mode"] == "manual"
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_plain_view_question_is_promoted_when_editor_opens():
     editor = QuestionEditor(
         question_data=_plain_editor_data("질문? <보기> ① A ② B"),
