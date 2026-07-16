@@ -6,9 +6,11 @@ from zipfile import ZipFile
 from lxml import etree
 from docx import Document
 from PIL import Image
+import pytest
 
 from src.choice_markers import CIRCLED_NUMBER_STYLE
 from src.exporter.docx import DocxExporter
+from src.parser.view_table import promote_view_block
 
 
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
@@ -776,6 +778,8 @@ def test_export_converts_images_that_python_docx_cannot_read_directly(tmp_path):
 
 def test_export_converts_extracted_pdf_jpeg_with_invalid_density(tmp_path):
     image_path = Path("data/extracted/images/2022_202203/34_46_xref1199.jpeg")
+    if not image_path.exists():
+        pytest.skip("optional local extracted-PDF JPEG fixture is not available")
     output_path = tmp_path / "extracted-jpeg.docx"
     questions = [
         {
@@ -790,8 +794,6 @@ def test_export_converts_extracted_pdf_jpeg_with_invalid_density(tmp_path):
             ],
         }
     ]
-
-    assert image_path.exists()
 
     DocxExporter().export("추출 이미지 변환 테스트", questions, str(output_path))
 
@@ -901,3 +903,34 @@ def test_export_renders_unicode_sqrt_and_private_math_glyphs_visibly(tmp_path):
     assert "θ" in visible_text
     assert math_texts == ["3", "3"]
     assert len(document_xml.xpath("//m:rad", namespaces=MATH_NS)) == 2
+
+
+def test_promoted_view_block_exports_once_as_one_cell_table(tmp_path):
+    output_path = tmp_path / "view-table.docx"
+    question_text, format_json, changed = promote_view_block(
+        "질문? <보기> ① A ② B"
+    )
+    questions = [
+        {
+            "question_text": question_text,
+            "question_format_json": format_json,
+            "correct_answer": 1,
+            "choices": [
+                {"choice_number": 1, "choice_text": "A"},
+                {"choice_number": 2, "choice_text": "B"},
+                {"choice_number": 3, "choice_text": "C"},
+                {"choice_number": 4, "choice_text": "D"},
+            ],
+        }
+    ]
+
+    assert changed is True
+    DocxExporter().export("보기 표", questions, str(output_path))
+    document = Document(output_path)
+
+    assert len(document.tables) == 1
+    assert len(document.tables[0].rows) == 1
+    assert len(document.tables[0].columns) == 1
+    visible_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    visible_text += "\n" + document.tables[0].cell(0, 0).text
+    assert visible_text.count("<보기>") == 1

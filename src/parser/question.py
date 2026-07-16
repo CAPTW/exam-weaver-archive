@@ -17,6 +17,7 @@ from .formatting import (
 )
 from .table_format import normalize_table_spec, serialize_format_payload
 from .table_detection import assign_table_owner
+from .view_table import promote_view_block
 
 LEGACY_CHOICE_SYMBOL_TO_NUMBER = {
     '가': 1,
@@ -302,6 +303,10 @@ class QuestionParser:
                     matching_tables,
                     formatted_question.spans
                 )
+                question_text, q_format_json, _view_promoted = promote_view_block(
+                    formatted_question.text,
+                    q_format_json,
+                )
                 self._apply_choice_format_json(
                     choices,
                     underlined_texts or [],
@@ -314,7 +319,7 @@ class QuestionParser:
                 
                 questions.append(Question(
                     number=q_num,
-                    text=formatted_question.text,
+                    text=question_text,
                     choices=choices,
                     has_image=False,
                     image_path=None,

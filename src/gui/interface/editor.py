@@ -29,6 +29,11 @@ from ...parser.table_format import (
     resolve_table_anchor,
     serialize_format_payload,
 )
+from ...parser.view_table import (
+    add_one_cell_table,
+    promote_view_block,
+    remove_table_and_restore,
+)
 from ...choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     choice_marker,
@@ -58,6 +63,13 @@ class QuestionEditor(QDialog):
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.setModal(True)
         self.question_data = question_data or {}
+        promoted_text, promoted_format_json, promoted = promote_view_block(
+            self.question_data.get('question_text', ''),
+            self.question_data.get('question_format_json'),
+        )
+        if promoted:
+            self.question_data['question_text'] = promoted_text
+            self.question_data['question_format_json'] = promoted_format_json
         self.editor_title = (
             self.question_data.get('editor_title')
             or ("개인 제작 문제 추가" if self.create_mode else "문제 수정")
@@ -162,6 +174,13 @@ class QuestionEditor(QDialog):
         self._apply_input_height(self.btnQuestionOverline, 34)
         self.btnQuestionOverline.clicked.connect(self._wrap_question_selection_as_overline)
         self.questionToolbarLayout.addWidget(self.btnQuestionOverline)
+        self.btnAddQuestionTable = PushButton("발문 표 추가", self)
+        self.btnAddQuestionTable.setToolTip(
+            "선택한 발문을 한 셀 표로 옮기거나 커서 위치에 빈 <보기> 표를 추가"
+        )
+        self._apply_input_height(self.btnAddQuestionTable, 34)
+        self.btnAddQuestionTable.clicked.connect(self._add_question_table)
+        self.questionToolbarLayout.addWidget(self.btnAddQuestionTable)
         self.questionToolbarLayout.addStretch(1)
 
         self.answerCombo = ComboBox(self)
@@ -343,12 +362,36 @@ class QuestionEditor(QDialog):
         self.resize(1060, 820)
 
     def _init_table_cards(self):
-        """Build compact controls for every stored question or choice table."""
+        """Create the dynamic card container used by all stored tables."""
         self.tableSectionLabel = BodyLabel("표", self)
         self.tableCardsWidget = QWidget(self)
         self.tableCardsLayout = QVBoxLayout(self.tableCardsWidget)
         self.tableCardsLayout.setContentsMargins(0, 0, 0, 0)
         self.tableCardsLayout.setSpacing(6)
+        self.tableRenderModeCombos = {}
+        self._rebuild_table_cards()
+
+    @staticmethod
+    def _table_preview(table, limit=72):
+        value = ' / '.join(
+            ' | '.join(str(cell or '') for cell in row)
+            for row in table.get('rows') or []
+            if isinstance(row, list)
+        )
+        value = re.sub(r'\s+', ' ', value).strip()
+        return value if len(value) <= limit else f"{value[:limit - 1]}…"
+
+    def _clear_table_cards(self):
+        while self.tableCardsLayout.count():
+            item = self.tableCardsLayout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _rebuild_table_cards(self):
+        """Recreate table controls after add, edit, or deletion."""
+        self._clear_table_cards()
         self.tableRenderModeCombos = {}
 
         owners = [("question", self.question_data.get('question_format_json'))]
@@ -370,12 +413,13 @@ class QuestionEditor(QDialog):
                 row.setSpacing(8)
                 owner_label = "발문" if owner == "question" else f"{owner.split(':')[1]}번 선지"
                 row.addWidget(BodyLabel(
-                    f"{owner_label} · {table_id} · {len(table.get('rows') or [])}행",
+                    f"{owner_label} · {table_id} · {self._table_preview(table)}",
                     card,
                 ), 1)
                 source_button = PushButton("원본 보기", card)
                 structure_button = PushButton("구조 보기", card)
                 edit_button = PushButton("표 편집", card)
+                delete_button = PushButton("표 삭제", card)
                 mode_combo = ComboBox(card)
                 for label, value in (
                     ("자동", "auto"),
@@ -398,6 +442,10 @@ class QuestionEditor(QDialog):
                 edit_button.clicked.connect(
                     lambda _checked=False, o=owner, i=table_id: self._edit_table_structure(o, i)
                 )
+                delete_button.clicked.connect(
+                    lambda _checked=False, o=owner, i=table_id:
+                    self._delete_table(o, i)
+                )
                 mode_combo.currentIndexChanged.connect(
                     lambda _index, o=owner, i=table_id, c=mode_combo:
                     self._set_table_render_mode(o, i, c.currentData())
@@ -405,15 +453,15 @@ class QuestionEditor(QDialog):
                 row.addWidget(source_button)
                 row.addWidget(structure_button)
                 row.addWidget(edit_button)
+                row.addWidget(delete_button)
                 row.addWidget(mode_combo)
                 self.tableCardsLayout.addWidget(card)
                 key_owner = "question" if owner == "question" else owner
                 self.tableRenderModeCombos[(key_owner, table_id)] = mode_combo
                 card_count += 1
 
-        visible = card_count > 0
-        self.tableSectionLabel.setVisible(visible)
-        self.tableCardsWidget.setVisible(visible)
+        self.tableSectionLabel.setVisible(True)
+        self.tableCardsWidget.setVisible(card_count > 0)
 
     def _owner_format_payload(self, owner):
         if owner == 'question':
@@ -436,6 +484,63 @@ class QuestionEditor(QDialog):
             if int(choice.get('choice_number') or 0) == number:
                 choice['choice_format_json'] = encoded
                 return
+
+    def _owner_text(self, owner):
+        if owner == 'question':
+            return self.questionText.toPlainText()
+        number = int(owner.split(':', 1)[1])
+        field = self.choiceInputs.get(number)
+        return field.text() if field is not None else ''
+
+    def _set_owner_text(self, owner, text):
+        if owner == 'question':
+            self.questionText.setPlainText(str(text or ''))
+            return
+        number = int(owner.split(':', 1)[1])
+        field = self.choiceInputs.get(number)
+        if field is not None:
+            field.setText(str(text or ''))
+
+    def _add_question_table(self):
+        cursor = self.questionText.textCursor()
+        start = cursor.selectionStart()
+        if cursor.hasSelection():
+            cell_text = cursor.selectedText().replace('\u2029', '\n')
+            cursor.removeSelectedText()
+            self.questionText.setTextCursor(cursor)
+        else:
+            cell_text = '<보기>\n'
+        owner_text = self.questionText.toPlainText()
+        self.question_data['question_format_json'] = add_one_cell_table(
+            owner_text,
+            self.question_data.get('question_format_json'),
+            cell_text,
+            start,
+        )
+        self._rebuild_table_cards()
+
+    def _delete_table(self, owner, table_id, confirm=True):
+        if confirm:
+            answer = QMessageBox.question(
+                self,
+                "표 삭제",
+                "표를 삭제하고 셀 내용을 원래 위치의 텍스트로 복원할까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        restored, encoded, removed = remove_table_and_restore(
+            self._owner_text(owner),
+            serialize_format_payload(self._owner_format_payload(owner)),
+            table_id,
+        )
+        if not removed:
+            return False
+        self._set_owner_text(owner, restored)
+        self._store_owner_format_payload(owner, parse_format_payload(encoded))
+        self._rebuild_table_cards()
+        return True
 
     def _set_table_render_mode(self, owner, table_id, mode):
         payload = self._owner_format_payload(owner)
@@ -542,6 +647,7 @@ class QuestionEditor(QDialog):
             table['cells'] = cells
             break
         self._store_owner_format_payload(owner, payload)
+        self._rebuild_table_cards()
 
     def accept(self):
         data = self.get_data()

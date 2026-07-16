@@ -1,3 +1,5 @@
+import json
+
 from src.parser.question import QuestionParser
 
 
@@ -61,3 +63,21 @@ def test_missing_single_question_number_is_inferred_between_choice_blocks():
 
     assert [question.number for question in questions] == [9, 10, 11]
     assert questions[1].text.startswith(")에 순서대로")
+
+
+def test_parser_promotes_last_view_block_to_one_cell_table():
+    text = (
+        "1. 다음 <보기>에서 옳은 것은? <보기> ㄱ. A ㄴ. B\n"
+        "㉮ 1 ㉯ 2 ㉴ 3 ㉵ 4\n"
+    )
+
+    question = QuestionParser("3급항해사(상선)")._parse_page(
+        text,
+        1,
+        [],
+        allow_subject_reset=False,
+    )[0]
+    payload = json.loads(question.format_json)
+
+    assert question.text == "다음 <보기>에서 옳은 것은?"
+    assert payload["tables"][0]["rows"] == [["<보기>\nㄱ. A ㄴ. B"]]
