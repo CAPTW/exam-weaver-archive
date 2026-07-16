@@ -29,6 +29,7 @@ from ..choice_markers import (
     choice_marker,
     normalize_choice_marker_style,
 )
+from .table_layout import fallback_table_layout, resolve_table_layout
 
 logger = logging.getLogger(__name__)
 
@@ -610,48 +611,59 @@ class DocxExporter:
             self._add_one_format_table(doc, table_spec)
 
     def _add_one_format_table(self, doc, table_spec):
-        use_wide_section = self._table_requires_one_column(table_spec) and hasattr(doc, 'add_section')
+        table_id = table_spec.get('id', 'table')
+        try:
+            layout = resolve_table_layout(table_spec)
+        except Exception as exc:
+            logger.warning("Table layout calculation failed for %s: %s", table_id, exc)
+            layout = fallback_table_layout(table_spec)
+        if layout.fallback_used:
+            warning = f"{table_id}:table_layout_fallback"
+            if warning not in self.warnings:
+                self.warnings.append(warning)
+        use_wide_section = (
+            self._table_requires_one_column(table_spec, layout)
+            and hasattr(doc, 'add_section')
+        )
         if use_wide_section:
             wide_section = doc.add_section(WD_SECTION.CONTINUOUS)
             self._set_columns(wide_section, 1)
         try:
-            return self._render_one_format_table(doc, table_spec)
+            return self._render_one_format_table(doc, table_spec, layout)
         finally:
             if use_wide_section:
                 restored_section = doc.add_section(WD_SECTION.CONTINUOUS)
                 self._set_columns(restored_section, 2)
 
-    def _render_one_format_table(self, doc, table_spec):
+    def _render_one_format_table(self, doc, table_spec, layout):
         mode = effective_table_render_mode(table_spec, self.table_render_mode)
         if mode == 'image':
-            if self._add_table_image(doc, table_spec):
+            if self._add_table_image(doc, table_spec, layout):
                 return True
             self.warnings.append(
                 f"{table_spec.get('id', 'table')}:image_to_native"
             )
-            if self._add_native_table(doc, table_spec):
+            if self._add_native_table(doc, table_spec, layout):
                 return True
         else:
             try:
-                if self._add_native_table(doc, table_spec):
+                if self._add_native_table(doc, table_spec, layout):
                     return True
             except Exception as exc:
                 logger.warning("Native table render failed: %s", exc)
             self.warnings.append(
                 f"{table_spec.get('id', 'table')}:native_to_image"
             )
-            if self._add_table_image(doc, table_spec):
+            if self._add_table_image(doc, table_spec, layout):
                 return True
         self.warnings.append(f"{table_spec.get('id', 'table')}:table_unrendered")
         return False
 
     @staticmethod
-    def _table_requires_one_column(table_spec):
-        if bool((table_spec.get('layout') or {}).get('wide')):
-            return True
-        rows = table_spec.get('rows') or []
-        column_count = max((len(row) for row in rows if isinstance(row, list)), default=0)
-        return column_count >= 5
+    def _table_requires_one_column(table_spec, layout=None):
+        if layout is not None:
+            return bool(layout.wide)
+        return bool((table_spec.get('layout') or {}).get('wide'))
 
     def _add_text_with_format_tables(
         self,
@@ -737,7 +749,47 @@ class DocxExporter:
             spans.append(adjusted)
         return json.dumps({'spans': spans}, ensure_ascii=False) if spans else None
 
-    def _add_native_table(self, doc, table_spec):
+    @staticmethod
+    def _width_twips(width_mm):
+        return max(1, round(float(width_mm) / 25.4 * 1440))
+
+    @classmethod
+    def _set_cell_width(cls, cell, width_mm):
+        tc_pr = cell._tc.get_or_add_tcPr()
+        tc_width = tc_pr.find(qn('w:tcW'))
+        if tc_width is None:
+            tc_width = OxmlElement('w:tcW')
+            tc_pr.append(tc_width)
+        tc_width.set(qn('w:type'), 'dxa')
+        tc_width.set(qn('w:w'), str(cls._width_twips(width_mm)))
+
+    @classmethod
+    def _set_fixed_table_widths(cls, table, widths_mm):
+        table.autofit = False
+        table_pr = table._tbl.tblPr
+        table_layout = table_pr.find(qn('w:tblLayout'))
+        if table_layout is None:
+            table_layout = OxmlElement('w:tblLayout')
+            table_pr.append(table_layout)
+        table_layout.set(qn('w:type'), 'fixed')
+
+        grid_columns = list(table._tbl.tblGrid)
+        for index, width_mm in enumerate(widths_mm):
+            if index >= len(grid_columns):
+                grid_column = OxmlElement('w:gridCol')
+                table._tbl.tblGrid.append(grid_column)
+                grid_columns.append(grid_column)
+            grid_columns[index].set(
+                qn('w:w'),
+                str(cls._width_twips(width_mm)),
+            )
+            table.columns[index].width = Mm(width_mm)
+
+        for row in table.rows:
+            for index, cell in enumerate(row.cells[:len(widths_mm)]):
+                cls._set_cell_width(cell, widths_mm[index])
+
+    def _add_native_table(self, doc, table_spec, layout=None):
         rows = [
             [str(cell or '') for cell in row]
             for row in table_spec.get('rows') or []
@@ -754,14 +806,15 @@ class DocxExporter:
             table.style = 'Table Grid'
         except Exception:
             pass
-        widths = table_spec.get('column_widths') or []
-        if len(widths) == column_count:
-            total_width_mm = 82.0
-            for col_idx, proportion in enumerate(widths):
-                try:
-                    table.columns[col_idx].width = Mm(total_width_mm * float(proportion))
-                except (TypeError, ValueError):
-                    pass
+        layout = layout or resolve_table_layout(table_spec)
+        widths_mm = list(layout.column_widths_mm)
+        if len(widths_mm) != column_count:
+            layout = fallback_table_layout(table_spec)
+            widths_mm = list(layout.column_widths_mm)
+            warning = f"{table_spec.get('id', 'table')}:table_layout_fallback"
+            if warning not in self.warnings:
+                self.warnings.append(warning)
+        self._set_fixed_table_widths(table, widths_mm)
 
         cell_specs = {
             (int(cell.get('row', -1)), int(cell.get('col', -1))): cell
@@ -785,6 +838,7 @@ class DocxExporter:
                         for merged_col in range(col_idx, end_col + 1):
                             if (merged_row, merged_col) != (row_idx, col_idx):
                                 merged_positions.add((merged_row, merged_col))
+                self._set_cell_width(cell, sum(widths_mm[col_idx:end_col + 1]))
                 text = spec.get('text')
                 if text is None:
                     text = row[col_idx] if col_idx < len(row) else ''
@@ -806,7 +860,7 @@ class DocxExporter:
                 self._format_run(run, size_pt=9)
         return True
 
-    def _add_table_image(self, doc, table_spec):
+    def _add_table_image(self, doc, table_spec, layout=None):
         source = table_spec.get('source') or {}
         image_path = self._resolve_table_image_path(source.get('image_path'))
         if image_path is None:
@@ -815,7 +869,8 @@ class DocxExporter:
             paragraph = doc.add_paragraph()
             self._format_paragraph(paragraph, alignment=WD_ALIGN_PARAGRAPH.CENTER)
             run = paragraph.add_run()
-            run.add_picture(str(image_path), width=Mm(82))
+            width_mm = (layout or resolve_table_layout(table_spec)).total_width_mm
+            run.add_picture(str(image_path), width=Mm(width_mm))
             return True
         except Exception as exc:
             logger.warning("Table source image render failed for %s: %s", image_path, exc)

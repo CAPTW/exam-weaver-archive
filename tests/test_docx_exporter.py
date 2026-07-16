@@ -684,6 +684,98 @@ def test_wide_table_temporarily_switches_to_one_column_section(tmp_path):
     assert column_counts[-1] == "2"
 
 
+def test_native_table_writes_fixed_grid_widths_from_manual_layout(tmp_path):
+    output = tmp_path / "manual-widths.docx"
+    payload = json.dumps({
+        "tables": [{
+            "id": "manual",
+            "rows": [["A", "B"]],
+            "column_widths": [0.25, 0.75],
+            "layout": {"width_mode": "manual"},
+            "confidence": {"score": 1.0},
+            "render_mode": "native",
+        }]
+    })
+
+    DocxExporter().export(
+        "수동 폭",
+        _single_table_question(payload),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    assert (
+        xml.xpath(
+            "string(//w:tbl/w:tblPr/w:tblLayout/@w:type)",
+            namespaces=NS,
+        )
+        == "fixed"
+    )
+    grid_widths = [
+        int(value)
+        for value in xml.xpath("//w:tbl/w:tblGrid/w:gridCol/@w:w", namespaces=NS)
+    ]
+    assert len(grid_widths) == 2
+    assert grid_widths[1] / grid_widths[0] == pytest.approx(3.0, rel=0.03)
+
+
+def test_content_heavy_table_switches_to_one_column_and_restores_two_columns(tmp_path):
+    output = tmp_path / "content-wide.docx"
+    payload = json.dumps({
+        "tables": [{
+            "id": "wide-content",
+            "rows": [["구분", "아주 긴 설명" * 30]],
+            "layout": {"width_mode": "auto"},
+            "confidence": {"score": 1.0},
+            "render_mode": "native",
+        }]
+    }, ensure_ascii=False)
+
+    DocxExporter().export(
+        "내용 폭",
+        _single_table_question(payload),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    column_counts = xml.xpath("//w:sectPr/w:cols/@w:num", namespaces=NS)
+    assert "1" in column_counts
+    assert column_counts[-1] == "2"
+    grid_widths = [
+        int(value)
+        for value in xml.xpath("//w:tbl/w:tblGrid/w:gridCol/@w:w", namespaces=NS)
+    ]
+    assert sum(grid_widths) == pytest.approx(180 / 25.4 * 1440, rel=0.03)
+
+
+def test_layout_failure_uses_equal_widths_and_records_warning(tmp_path, monkeypatch):
+    output = tmp_path / "layout-fallback.docx"
+    payload = json.dumps({
+        "tables": [{
+            "id": "fallback",
+            "rows": [["A", "B"]],
+            "confidence": {"score": 1.0},
+            "render_mode": "native",
+        }]
+    })
+
+    def fail_layout(_table_spec):
+        raise RuntimeError("layout failed")
+
+    monkeypatch.setattr("src.exporter.docx.resolve_table_layout", fail_layout)
+    exporter = DocxExporter()
+    exporter.export("fallback", _single_table_question(payload), str(output))
+
+    xml = _read_document_xml(output)
+    grid_widths = [
+        int(value)
+        for value in xml.xpath("//w:tbl/w:tblGrid/w:gridCol/@w:w", namespaces=NS)
+    ]
+    assert len(grid_widths) == 2
+    assert grid_widths[0] == pytest.approx(grid_widths[1], abs=1)
+    assert "fallback:table_layout_fallback" in exporter.warnings
+
+
 def test_export_keeps_question_image_when_table_format_is_absent(tmp_path):
     image_path = tmp_path / "question.png"
     image_path.write_bytes(PNG_1X1)
