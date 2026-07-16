@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QScrollArea,
-    QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    QMessageBox, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+    QDialogButtonBox, QHeaderView, QTableWidget, QTableWidgetItem,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QTextCharFormat, QTextCursor
@@ -22,6 +23,12 @@ from ...parser.formatting import (
 )
 from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ...parser.question import ALL_CHOICES_CORRECT
+from ...parser.table_format import (
+    merge_format_spans,
+    parse_format_payload,
+    resolve_table_anchor,
+    serialize_format_payload,
+)
 from ...choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     choice_marker,
@@ -266,6 +273,8 @@ class QuestionEditor(QDialog):
         self.imageWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._set_image_preview(self.imagePath)
 
+        self._init_table_cards()
+
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.infoLabel)
         self.viewLayout.addWidget(BodyLabel("기본 정보", self))
@@ -283,6 +292,8 @@ class QuestionEditor(QDialog):
         self.viewLayout.addWidget(self.questionSectionLabel)
         self.viewLayout.addWidget(self.questionToolbar)
         self.viewLayout.addWidget(self.questionText)
+        self.viewLayout.addWidget(self.tableSectionLabel)
+        self.viewLayout.addWidget(self.tableCardsWidget)
         self.viewLayout.addWidget(self.choiceSectionLabel)
         self.viewLayout.addWidget(self.choiceWidget)
         self.viewLayout.addWidget(self.answerSectionLabel)
@@ -330,6 +341,207 @@ class QuestionEditor(QDialog):
         self._apply_question_type_visibility()
         self.setMinimumSize(960, 780)
         self.resize(1060, 820)
+
+    def _init_table_cards(self):
+        """Build compact controls for every stored question or choice table."""
+        self.tableSectionLabel = BodyLabel("표", self)
+        self.tableCardsWidget = QWidget(self)
+        self.tableCardsLayout = QVBoxLayout(self.tableCardsWidget)
+        self.tableCardsLayout.setContentsMargins(0, 0, 0, 0)
+        self.tableCardsLayout.setSpacing(6)
+        self.tableRenderModeCombos = {}
+
+        owners = [("question", self.question_data.get('question_format_json'))]
+        for choice in self.question_data.get('choices') or []:
+            number = int(choice.get('choice_number') or 0)
+            owners.append((
+                f"choice:{number}",
+                choice.get('choice_format_json') or choice.get('format_json'),
+            ))
+
+        card_count = 0
+        for owner, format_json in owners:
+            payload = parse_format_payload(format_json)
+            for table in payload.get('tables', []):
+                table_id = table['id']
+                card = QWidget(self.tableCardsWidget)
+                row = QHBoxLayout(card)
+                row.setContentsMargins(8, 4, 8, 4)
+                row.setSpacing(8)
+                owner_label = "발문" if owner == "question" else f"{owner.split(':')[1]}번 선지"
+                row.addWidget(BodyLabel(
+                    f"{owner_label} · {table_id} · {len(table.get('rows') or [])}행",
+                    card,
+                ), 1)
+                source_button = PushButton("원본 보기", card)
+                structure_button = PushButton("구조 보기", card)
+                edit_button = PushButton("표 편집", card)
+                mode_combo = ComboBox(card)
+                for label, value in (
+                    ("자동", "auto"),
+                    ("원본 이미지", "image"),
+                    ("편집 가능한 표", "native"),
+                ):
+                    mode_combo.addItem(label, userData=value)
+                mode_combo.setCurrentIndex(
+                    max(0, mode_combo.findData(table.get('render_mode') or 'auto'))
+                )
+                source_button.setEnabled(bool((table.get('source') or {}).get('image_path')))
+                structure_button.setEnabled(bool(table.get('rows') or table.get('cells')))
+                edit_button.setEnabled(bool(table.get('rows') or table.get('cells')))
+                source_button.clicked.connect(
+                    lambda _checked=False, o=owner, i=table_id: self._show_table_source(o, i)
+                )
+                structure_button.clicked.connect(
+                    lambda _checked=False, o=owner, i=table_id: self._show_table_structure(o, i)
+                )
+                edit_button.clicked.connect(
+                    lambda _checked=False, o=owner, i=table_id: self._edit_table_structure(o, i)
+                )
+                mode_combo.currentIndexChanged.connect(
+                    lambda _index, o=owner, i=table_id, c=mode_combo:
+                    self._set_table_render_mode(o, i, c.currentData())
+                )
+                row.addWidget(source_button)
+                row.addWidget(structure_button)
+                row.addWidget(edit_button)
+                row.addWidget(mode_combo)
+                self.tableCardsLayout.addWidget(card)
+                key_owner = "question" if owner == "question" else owner
+                self.tableRenderModeCombos[(key_owner, table_id)] = mode_combo
+                card_count += 1
+
+        visible = card_count > 0
+        self.tableSectionLabel.setVisible(visible)
+        self.tableCardsWidget.setVisible(visible)
+
+    def _owner_format_payload(self, owner):
+        if owner == 'question':
+            return parse_format_payload(self.question_data.get('question_format_json'))
+        number = int(owner.split(':', 1)[1])
+        for choice in self.question_data.get('choices') or []:
+            if int(choice.get('choice_number') or 0) == number:
+                return parse_format_payload(
+                    choice.get('choice_format_json') or choice.get('format_json')
+                )
+        return parse_format_payload(None)
+
+    def _store_owner_format_payload(self, owner, payload):
+        encoded = serialize_format_payload(payload)
+        if owner == 'question':
+            self.question_data['question_format_json'] = encoded
+            return
+        number = int(owner.split(':', 1)[1])
+        for choice in self.question_data.get('choices') or []:
+            if int(choice.get('choice_number') or 0) == number:
+                choice['choice_format_json'] = encoded
+                return
+
+    def _set_table_render_mode(self, owner, table_id, mode):
+        payload = self._owner_format_payload(owner)
+        for table in payload.get('tables', []):
+            if table.get('id') == table_id:
+                table['render_mode'] = mode if mode in {'auto', 'image', 'native'} else 'auto'
+                break
+        self._store_owner_format_payload(owner, payload)
+
+    def _find_owner_table(self, owner, table_id):
+        payload = self._owner_format_payload(owner)
+        return next(
+            (table for table in payload.get('tables', []) if table.get('id') == table_id),
+            None,
+        )
+
+    def _show_table_source(self, owner, table_id):
+        table = self._find_owner_table(owner, table_id) or {}
+        path = str((table.get('source') or {}).get('image_path') or '')
+        QMessageBox.information(self, "표 원본", path or "저장된 원본 이미지가 없습니다.")
+
+    def _show_table_structure(self, owner, table_id):
+        table = self._find_owner_table(owner, table_id) or {}
+        rows = table.get('rows') or []
+        text = '\n'.join(' | '.join(str(cell) for cell in row) for row in rows)
+        QMessageBox.information(self, "표 구조", text or "저장된 표 구조가 없습니다.")
+
+    def _edit_table_structure(self, owner, table_id):
+        table = self._find_owner_table(owner, table_id) or {}
+        rows = table.get('rows') or []
+        if not rows:
+            return
+        column_count = max((len(row) for row in rows), default=0)
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"표 편집 · {table_id}")
+        layout = QVBoxLayout(dialog)
+        grid = QTableWidget(len(rows), column_count, dialog)
+        grid.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for row_index, row in enumerate(rows):
+            for column_index in range(column_count):
+                value = row[column_index] if column_index < len(row) else ''
+                grid.setItem(row_index, column_index, QTableWidgetItem(str(value)))
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(grid)
+        layout.addWidget(buttons)
+        dialog.resize(720, 420)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        edited_rows = [
+            [
+                grid.item(row_index, column_index).text()
+                if grid.item(row_index, column_index) is not None else ''
+                for column_index in range(column_count)
+            ]
+            for row_index in range(len(rows))
+        ]
+        self._update_table_rows(owner, table_id, edited_rows)
+
+    def _update_table_rows(self, owner, table_id, rows):
+        payload = self._owner_format_payload(owner)
+        for table in payload.get('tables', []):
+            if table.get('id') != table_id:
+                continue
+            cleaned_rows = [
+                [str(cell or '') for cell in row]
+                for row in rows or []
+                if isinstance(row, (list, tuple))
+            ]
+            existing = {
+                (int(cell.get('row', -1)), int(cell.get('col', -1))): dict(cell)
+                for cell in table.get('cells') or []
+                if isinstance(cell, dict)
+            }
+
+            def covered_by_merge(row_index, column_index):
+                return any(
+                    origin != (row_index, column_index)
+                    and origin[0] <= row_index < origin[0] + max(1, int(cell.get('row_span', 1)))
+                    and origin[1] <= column_index < origin[1] + max(1, int(cell.get('col_span', 1)))
+                    for origin, cell in existing.items()
+                )
+
+            cells = []
+            for row_index, row in enumerate(cleaned_rows):
+                for column_index, value in enumerate(row):
+                    if covered_by_merge(row_index, column_index):
+                        continue
+                    cell = existing.get((row_index, column_index), {
+                        'row': row_index,
+                        'col': column_index,
+                        'row_span': 1,
+                        'col_span': 1,
+                        'horizontal_alignment': 'left',
+                        'vertical_alignment': 'center',
+                    })
+                    cell['text'] = value
+                    cells.append(cell)
+            table['rows'] = cleaned_rows
+            table['cells'] = cells
+            break
+        self._store_owner_format_payload(owner, payload)
 
     def accept(self):
         data = self.get_data()
@@ -866,9 +1078,19 @@ class QuestionEditor(QDialog):
             existing_latex_spans(existing_format_json, formatted.text),
             formatted.spans
         )
-        if not spans:
-            return formatted.text, None
-        return formatted.text, json.dumps({'spans': spans}, ensure_ascii=False)
+        encoded = merge_format_spans(existing_format_json, spans)
+        payload = parse_format_payload(encoded)
+        for table in payload.get('tables', []):
+            offset, _recovered = resolve_table_anchor(
+                formatted.text,
+                table.get('anchor'),
+            )
+            table['anchor'] = {
+                'offset': offset,
+                'before_context': formatted.text[max(0, offset - 24):offset],
+                'after_context': formatted.text[offset:offset + 24],
+            }
+        return formatted.text, serialize_format_payload(payload)
 
     def _map_spans_to_normalized(self, spans, raw_to_normalized, text_length):
         mapped = []

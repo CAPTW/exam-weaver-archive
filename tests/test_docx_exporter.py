@@ -522,6 +522,166 @@ def test_export_renders_table_format_as_native_word_table(tmp_path):
     assert cell_texts == ["구분", "값", "A", "10", "B", "20"]
 
 
+def _hybrid_table_payload(image_path, score=.95, render_mode="auto", complexity=None):
+    return json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "table-1",
+            "anchor": {"offset": 8, "before_context": "다음 표를 보고", "after_context": "답하시오"},
+            "rows": [["구분", "값"], ["A", "10"]],
+            "cells": [
+                {"row": 0, "col": 0, "text": "구분", "row_span": 1, "col_span": 1,
+                 "horizontal_alignment": "center", "vertical_alignment": "center"},
+                {"row": 0, "col": 1, "text": "값", "row_span": 1, "col_span": 1,
+                 "horizontal_alignment": "center", "vertical_alignment": "center"},
+                {"row": 1, "col": 0, "text": "A", "row_span": 1, "col_span": 1},
+                {"row": 1, "col": 1, "text": "10", "row_span": 1, "col_span": 1},
+            ],
+            "column_widths": [.6, .4],
+            "source": {"image_path": str(image_path), "sha256": "unused"},
+            "confidence": {"score": score, "reasons": ["native_grid"]},
+            "complexity": complexity or {},
+            "render_mode": render_mode,
+        }],
+    }, ensure_ascii=False)
+
+
+def _single_table_question(format_json):
+    return [{
+        "question_text": "다음 표를 보고 답하시오",
+        "question_format_json": format_json,
+        "correct_answer": 1,
+        "choices": [
+            {"choice_number": 1, "choice_text": "A"},
+            {"choice_number": 2, "choice_text": "B"},
+            {"choice_number": 3, "choice_text": "C"},
+            {"choice_number": 4, "choice_text": "D"},
+        ],
+    }]
+
+
+def test_auto_table_mode_uses_native_for_high_confidence_structure(tmp_path):
+    crop = tmp_path / "table.png"
+    crop.write_bytes(PNG_1X1)
+    output = tmp_path / "auto-native.docx"
+
+    DocxExporter(table_render_mode="auto").export(
+        "자동 표",
+        _single_table_question(_hybrid_table_payload(crop, score=.95)),
+        str(output),
+    )
+
+    with ZipFile(output) as package:
+        xml = etree.fromstring(package.read("word/document.xml"))
+        media = [name for name in package.namelist() if name.startswith("word/media/")]
+    assert len(xml.xpath("//w:tbl", namespaces=NS)) == 1
+    assert media == []
+
+
+def test_auto_table_mode_uses_exact_source_image_for_low_confidence(tmp_path):
+    crop = tmp_path / "table.png"
+    crop.write_bytes(PNG_1X1)
+    output = tmp_path / "auto-image.docx"
+
+    DocxExporter(table_render_mode="auto").export(
+        "원본 표",
+        _single_table_question(_hybrid_table_payload(crop, score=.55)),
+        str(output),
+    )
+
+    with ZipFile(output) as package:
+        xml = etree.fromstring(package.read("word/document.xml"))
+        media_name = next(name for name in package.namelist() if name.startswith("word/media/"))
+        media = package.read(media_name)
+    assert xml.xpath("//w:tbl", namespaces=NS) == []
+    assert media == crop.read_bytes()
+
+
+def test_per_table_mode_overrides_document_mode(tmp_path):
+    crop = tmp_path / "table.png"
+    crop.write_bytes(PNG_1X1)
+    output = tmp_path / "override.docx"
+
+    DocxExporter(table_render_mode="image").export(
+        "표 우선순위",
+        _single_table_question(
+            _hybrid_table_payload(crop, score=.30, render_mode="native")
+        ),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    assert len(xml.xpath("//w:tbl", namespaces=NS)) == 1
+
+
+def test_missing_table_image_falls_back_to_native_and_records_warning(tmp_path):
+    output = tmp_path / "fallback.docx"
+    exporter = DocxExporter(table_render_mode="image")
+
+    exporter.export(
+        "표 fallback",
+        _single_table_question(
+            _hybrid_table_payload(tmp_path / "missing.png", score=.20)
+        ),
+        str(output),
+    )
+
+    assert len(_read_document_xml(output).xpath("//w:tbl", namespaces=NS)) == 1
+    assert any("image_to_native" in warning for warning in exporter.warnings)
+
+
+def test_table_is_inserted_at_text_anchor_in_document_order(tmp_path):
+    crop = tmp_path / "table.png"
+    crop.write_bytes(PNG_1X1)
+    payload = json.loads(_hybrid_table_payload(crop, score=.95))
+    payload["tables"][0]["anchor"] = {
+        "offset": len("다음 표를 보고"),
+        "before_context": "다음 표를 보고",
+        "after_context": " 답하시오",
+    }
+    output = tmp_path / "anchored.docx"
+
+    DocxExporter().export(
+        "표 위치",
+        _single_table_question(json.dumps(payload, ensure_ascii=False)),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    body_children = xml.xpath("/w:document/w:body/*", namespaces=NS)
+    table_index = next(index for index, node in enumerate(body_children) if node.tag.endswith("}tbl"))
+    before_text = "".join(body_children[table_index - 1].xpath(".//w:t/text()", namespaces=NS))
+    after_text = "".join(body_children[table_index + 1].xpath(".//w:t/text()", namespaces=NS))
+    assert before_text == "1. 다음 표를 보고"
+    assert after_text == "답하시오"
+
+
+def test_wide_table_temporarily_switches_to_one_column_section(tmp_path):
+    output = tmp_path / "wide-table.docx"
+    payload = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "wide",
+            "anchor": {"offset": 2},
+            "rows": [["A", "B", "C", "D", "E"]],
+            "column_widths": [.2, .2, .2, .2, .2],
+            "confidence": {"score": .96},
+            "render_mode": "native",
+        }],
+    })
+
+    DocxExporter().export(
+        "넓은 표",
+        _single_table_question(payload),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    column_counts = xml.xpath("//w:sectPr/w:cols/@w:num", namespaces=NS)
+    assert "1" in column_counts
+    assert column_counts[-1] == "2"
+
+
 def test_export_keeps_question_image_when_table_format_is_absent(tmp_path):
     image_path = tmp_path / "question.png"
     image_path.write_bytes(PNG_1X1)

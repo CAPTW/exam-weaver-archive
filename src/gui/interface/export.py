@@ -187,6 +187,21 @@ class ExportInterface(QScrollArea):
         self.shuffleChoices = QCheckBox("4지선다 선지 순서 섞기", self)
         self.vBoxLayout.addWidget(self.shuffleChoices)
 
+        self.tableRenderModeLabel = BodyLabel("표 출력 방식", self)
+        self.tableRenderModeFilter = QComboBox(self)
+        self.tableRenderModeFilter.addItem("자동", "auto")
+        self.tableRenderModeFilter.addItem("원본 이미지", "image")
+        self.tableRenderModeFilter.addItem("편집 가능한 표", "native")
+        self.tableRenderModeFilter.setToolTip(
+            "자동은 신뢰도 0.90 이상의 단순 표를 Word 표로 만들고, "
+            "그 외 표는 저장된 원본 이미지를 사용합니다."
+        )
+        self.tableRenderModeFilter.currentIndexChanged.connect(
+            self._on_table_render_mode_changed
+        )
+        self.vBoxLayout.addWidget(self.tableRenderModeLabel)
+        self.vBoxLayout.addWidget(self.tableRenderModeFilter)
+
         self.vBoxLayout.addStretch(1)
 
         # Export Button
@@ -205,6 +220,16 @@ class ExportInterface(QScrollArea):
         widget.setMinimumHeight(height)
         if hasattr(widget, "setFixedHeight"):
             widget.setFixedHeight(height)
+
+    def _selected_table_render_mode(self):
+        combo = self.__dict__.get('tableRenderModeFilter')
+        if combo is None:
+            return 'auto'
+        mode = combo.currentData()
+        return mode if mode in {'auto', 'image', 'native'} else 'auto'
+
+    def _on_table_render_mode_changed(self, *_args):
+        self.exporter.set_table_render_mode(self._selected_table_render_mode())
 
     def load_options(self):
         options = self.repo.get_filter_options()
@@ -777,12 +802,24 @@ class ExportInterface(QScrollArea):
                     sections=sections
                 )
 
-                InfoBar.success(
-                    title="내보내기 완료",
-                    content=f"DOCX 시험지를 저장했습니다: {file_path}",
-                    parent=self,
-                    duration=3000
-                )
+                export_warnings = getattr(self.exporter, 'warnings', [])
+                if export_warnings:
+                    InfoBar.warning(
+                        title="내보내기 완료 · 표 폴백 적용",
+                        content=(
+                            f"DOCX를 저장했으며 {len(export_warnings)}개 표에 "
+                            "대체 출력 방식을 적용했습니다."
+                        ),
+                        parent=self,
+                        duration=5000,
+                    )
+                else:
+                    InfoBar.success(
+                        title="내보내기 완료",
+                        content=f"DOCX 시험지를 저장했습니다: {file_path}",
+                        parent=self,
+                        duration=3000
+                    )
             except Exception as e:
                 InfoBar.error(
                     title="내보내기 실패",

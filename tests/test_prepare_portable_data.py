@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from pathlib import Path
 
 import pytest
@@ -21,11 +22,13 @@ def _create_minimal_db(path: Path, question_image: str, choice_image: str):
             """
             CREATE TABLE questions (
                 id INTEGER PRIMARY KEY,
-                image_path TEXT
+                image_path TEXT,
+                question_format_json TEXT
             );
             CREATE TABLE question_choices (
                 id INTEGER PRIMARY KEY,
-                choice_image_path TEXT
+                choice_image_path TEXT,
+                choice_format_json TEXT
             );
             """,
         )
@@ -78,6 +81,57 @@ def test_prepare_portable_data_copies_factory_user_db_and_rewrites_images(tmp_pa
 def test_prepare_portable_data_fails_on_missing_image_by_default(tmp_path):
     source_db = tmp_path / "source.db"
     _create_minimal_db(source_db, "missing-question.png", "")
+
+    with pytest.raises(RuntimeError, match="Missing 1 image"):
+        prepare_portable_data(source_db, tmp_path / "data", tmp_path)
+
+
+def test_prepare_portable_data_rewrites_table_images_inside_format_json(tmp_path):
+    repo_root = tmp_path / "repo"
+    table_image = repo_root / "data" / "table_images" / "table.png"
+    table_image.parent.mkdir(parents=True)
+    table_image.write_bytes(PNG_1X1 + b"table")
+    source_db = tmp_path / "source.db"
+    _create_minimal_db(source_db, "", "")
+    payload = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "table-1",
+            "rows": [["A"]],
+            "source": {"image_path": "data/table_images/table.png"},
+        }],
+    })
+    with sqlite3.connect(source_db) as conn:
+        conn.execute("UPDATE questions SET question_format_json = ?", (payload,))
+        conn.execute("UPDATE question_choices SET choice_format_json = ?", (payload,))
+
+    target_data = tmp_path / "dist" / "ExamGenerator" / "data"
+    manifest = prepare_portable_data(source_db, target_data, repo_root)
+
+    assert manifest["table_image_refs"] == 2
+    assert manifest["updated_table_image_refs"] == 2
+    assert manifest["copied_images"] == 1
+    with sqlite3.connect(target_data / FACTORY_DB_NAME) as conn:
+        question_json = conn.execute(
+            "SELECT question_format_json FROM questions"
+        ).fetchone()[0]
+        choice_json = conn.execute(
+            "SELECT choice_format_json FROM question_choices"
+        ).fetchone()[0]
+    for encoded in (question_json, choice_json):
+        rewritten = json.loads(encoded)["tables"][0]["source"]["image_path"]
+        assert rewritten.startswith("data/portable_images/")
+        assert (target_data.parent / rewritten).is_file()
+
+
+def test_prepare_portable_data_reports_missing_table_image(tmp_path):
+    source_db = tmp_path / "source.db"
+    _create_minimal_db(source_db, "", "")
+    payload = json.dumps({
+        "tables": [{"rows": [["A"]], "source": {"image_path": "missing-table.png"}}]
+    })
+    with sqlite3.connect(source_db) as conn:
+        conn.execute("UPDATE questions SET question_format_json = ?", (payload,))
 
     with pytest.raises(RuntimeError, match="Missing 1 image"):
         prepare_portable_data(source_db, tmp_path / "data", tmp_path)

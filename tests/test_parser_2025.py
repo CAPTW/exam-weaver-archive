@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from src.parser.extractor import ImageData, TableData
+from src.parser.layout import build_structured_page
 from src.parser.answer import AnswerParser
 from src.parser.main import ExamPDFParser
 from src.parser.merger import DataMerger
@@ -561,7 +562,140 @@ def test_question_parser_attaches_detected_table_format_to_matching_question():
 
     question_format = json.loads(questions[0].format_json)
 
-    assert question_format['tables'] == [{'rows': [['구분', '값'], ['A', '10'], ['B', '20']]}]
+    assert question_format['schema_version'] == 2
+    assert question_format['tables'][0]['rows'] == [
+        ['구분', '값'], ['A', '10'], ['B', '20']
+    ]
+    assert question_format['tables'][0]['recommended_render'] == 'image'
+
+
+def test_question_parser_removes_flattened_table_text_and_keeps_anchor():
+    parser = QuestionParser('4급기관사')
+    table = TableData(rows=[['구분', '값'], ['A', '10'], ['B', '20']])
+    text = (
+        '1. 다음 표를 보고 옳은 것은? 구분 값 A 10 B 20'
+        '㉮A㉯B㉴C㉵D'
+    )
+
+    question = parser._parse_page(text, 1, [], tables=[table])[0]
+    payload = json.loads(question.format_json)
+
+    assert question.text == '다음 표를 보고 옳은 것은?'
+    assert payload['tables'][0]['anchor']['offset'] == len(question.text)
+    assert payload['tables'][0]['complexity']['has_duplicate_text_risk'] is False
+
+
+def test_question_parser_preserves_hybrid_table_payload():
+    parser = QuestionParser('4급기관사')
+    table = TableData(
+        rows=[['구분', '값'], ['A', '10']],
+        bbox=(10, 20, 210, 120),
+        cells=[{
+            'row': 0,
+            'col': 0,
+            'text': '구분',
+            'row_span': 1,
+            'col_span': 1,
+            'horizontal_alignment': 'center',
+            'vertical_alignment': 'center',
+        }],
+        column_widths=[0.5, 0.5],
+        row_heights=[0.5, 0.5],
+        source={
+            'image_path': 'data/table_images/table.png',
+            'page': 1,
+            'bbox': [10, 20, 210, 120],
+            'sha256': 'abc123',
+        },
+        confidence={'score': 0.96, 'reasons': ['native_grid']},
+        complexity={'has_formula': False},
+    )
+    text = '1. 다음 표를 보고 답하시오. 구분 값 A 10㉮A㉯B㉴C㉵D'
+
+    question = parser._parse_page(text, 1, [], tables=[table])[0]
+    payload = json.loads(question.format_json)
+    saved = payload['tables'][0]
+
+    assert payload['schema_version'] == 2
+    assert saved['source']['sha256'] == 'abc123'
+    assert saved['cells'][0]['horizontal_alignment'] == 'center'
+    assert saved['confidence']['score'] == 0.96
+    assert saved['recommended_render'] == 'native'
+    assert saved['anchor']['offset'] <= len(question.text)
+
+
+def test_question_parser_assigns_spatial_table_to_owning_choice():
+    parser = QuestionParser('4급기관사')
+    structured_page = build_structured_page(
+        [
+            (10, 10, 25, 30, '1.'), (35, 10, 120, 30, '문제'),
+            (10, 80, 80, 100, '㉮A'),
+            (10, 130, 80, 150, '㉯B'),
+            (10, 230, 80, 250, '㉴C'),
+            (10, 280, 80, 300, '㉵D'),
+        ],
+        page_number=1,
+        width=500,
+        height=400,
+        source='ocr',
+    )
+    table = TableData(
+        rows=[['항목', '값'], ['A', '10']],
+        bbox=(50, 155, 450, 215),
+        source={'image_path': 'data/table_images/choice-2.png'},
+        confidence={'score': 0.95, 'reasons': ['ocr_grid']},
+    )
+    text = '1. 문제㉮A㉯B㉴C㉵D'
+
+    question = parser._parse_page(
+        text,
+        1,
+        [],
+        tables=[table],
+        structured_page=structured_page,
+    )[0]
+
+    assert question.format_json is None
+    assert question.choices[0].format_json is None
+    second_payload = json.loads(question.choices[1].format_json)
+    assert second_payload['tables'][0]['rows'][0] == ['항목', '값']
+    assert second_payload['tables'][0]['source']['image_path'].endswith('choice-2.png')
+
+
+def test_spatial_choice_table_removes_duplicated_flattened_choice_text():
+    parser = QuestionParser('4급기관사')
+    structured_page = build_structured_page(
+        [
+            (10, 10, 25, 30, '1.'), (35, 10, 120, 30, '문제'),
+            (10, 80, 80, 100, '㉮A'),
+            (10, 130, 180, 150, '㉯항목 값 A 10'),
+            (10, 230, 80, 250, '㉴C'),
+            (10, 280, 80, 300, '㉵D'),
+        ],
+        page_number=1,
+        width=500,
+        height=400,
+        source='ocr',
+    )
+    table = TableData(
+        rows=[['항목', '값'], ['A', '10']],
+        bbox=(50, 155, 450, 215),
+        source={'image_path': 'data/table_images/choice-2.png'},
+        confidence={'score': 0.95, 'reasons': ['ocr_grid']},
+    )
+
+    question = parser._parse_page(
+        '1. 문제㉮A㉯항목 값 A 10㉴C㉵D',
+        1,
+        [],
+        tables=[table],
+        structured_page=structured_page,
+    )[0]
+
+    assert question.choices[1].text == ''
+    payload = json.loads(question.choices[1].format_json)
+    assert payload['tables'][0]['anchor']['offset'] == 0
+    assert payload['tables'][0]['complexity']['has_duplicate_text_risk'] is False
 
 
 def test_question_parser_converts_root_notation_to_latex_spans():

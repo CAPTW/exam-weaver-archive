@@ -15,6 +15,8 @@ from .formatting import (
     normalize_latex_text,
     repair_extracted_text_artifacts,
 )
+from .table_format import normalize_table_spec, serialize_format_payload
+from .table_detection import assign_table_owner
 
 LEGACY_CHOICE_SYMBOL_TO_NUMBER = {
     '가': 1,
@@ -130,7 +132,8 @@ class QuestionParser:
                 getattr(page, 'image_infos', None),
                 getattr(page, 'underlined_texts', None),
                 getattr(page, 'tables', None),
-                getattr(page, 'overlined_texts', None)
+                getattr(page, 'overlined_texts', None),
+                structured_page=getattr(page, 'structured_page', None),
             )
             
             for q in page_questions:
@@ -238,7 +241,8 @@ class QuestionParser:
         underlined_texts: Optional[List[str]] = None,
         tables: Optional[List] = None,
         overlined_texts: Optional[List] = None,
-        allow_subject_reset: bool = True
+        allow_subject_reset: bool = True,
+        structured_page=None,
     ) -> List[Question]:
         """단일 페이지에서 문제 추출"""
         questions = []
@@ -253,6 +257,7 @@ class QuestionParser:
         
         # 문제 분리
         matches = self._find_question_starts(text, allow_subject_reset=allow_subject_reset)
+        spatial_tables = self._spatial_table_assignments(structured_page, tables or [])
 
         for idx, match in enumerate(matches):
             try:
@@ -272,15 +277,36 @@ class QuestionParser:
                 # 문제 텍스트 정리 (선지 제거)
                 q_text = self._clean_question_text(q_text_raw)
                 q_text = repair_extracted_text_artifacts(q_text.strip())
+                spatial_for_question = spatial_tables.get(q_num)
+                if spatial_for_question is not None:
+                    matched_table_objects = spatial_for_question['question']
+                else:
+                    matched_table_objects = self._matching_table_objects(
+                        q_text_raw,
+                        tables or [],
+                    )
+                q_text, table_anchors, duplicate_risks = self._remove_flattened_table_text(
+                    q_text,
+                    matched_table_objects,
+                )
                 formatted_question = normalize_latex_text(q_text)
-                matching_tables = self._matching_tables(q_text_raw, tables or [])
+                matching_tables = self._table_specs(
+                    matched_table_objects,
+                    formatted_question.text,
+                    anchor_offsets=table_anchors,
+                    duplicate_risks=duplicate_risks,
+                )
                 q_format_json = self._build_format_json(
                     formatted_question.text,
                     underlined_texts or [],
                     matching_tables,
                     formatted_question.spans
                 )
-                self._apply_choice_format_json(choices, underlined_texts or [])
+                self._apply_choice_format_json(
+                    choices,
+                    underlined_texts or [],
+                    (spatial_for_question or {}).get('choices', {}),
+                )
                 
                 # 이미지 필요 여부 판단
                 needs_image = self._needs_image(q_text_raw, choices)
@@ -336,15 +362,30 @@ class QuestionParser:
 
         return questions
 
-    def _apply_choice_format_json(self, choices: List[Choice], underlined_texts: List[str]) -> None:
+    def _apply_choice_format_json(
+        self,
+        choices: List[Choice],
+        underlined_texts: List[str],
+        choice_tables: Optional[dict] = None,
+    ) -> None:
         for choice in choices:
             choice.text = repair_extracted_text_artifacts(choice.text)
+            owned_tables = (choice_tables or {}).get(choice.number, [])
+            choice.text, table_anchors, duplicate_risks = self._remove_flattened_table_text(
+                choice.text,
+                owned_tables,
+            )
             formatted_choice = normalize_latex_text(choice.text)
             choice.text = formatted_choice.text
             choice.format_json = self._build_format_json(
                 choice.text,
                 underlined_texts,
-                [],
+                self._table_specs(
+                    owned_tables,
+                    choice.text,
+                    anchor_offsets=table_anchors,
+                    duplicate_risks=duplicate_risks,
+                ),
                 formatted_choice.spans
             )
 
@@ -363,10 +404,14 @@ class QuestionParser:
         if spans:
             payload['spans'] = spans
         if tables:
-            payload['tables'] = tables
+            payload['schema_version'] = 2
+            payload['tables'] = [
+                normalize_table_spec(table, index)
+                for index, table in enumerate(tables)
+            ]
         if not payload:
             return None
-        return json.dumps(payload, ensure_ascii=False)
+        return serialize_format_payload(payload)
 
     def _underline_spans(self, text: str, underlined_texts: List[str]) -> List[dict]:
         spans = []
@@ -388,7 +433,16 @@ class QuestionParser:
         spans.sort(key=lambda span: (span['start'], span['end']))
         return spans
 
-    def _matching_tables(self, text: str, tables: List) -> List[dict]:
+    def _matching_tables(
+        self,
+        text: str,
+        tables: List,
+        owner_text: str = '',
+    ) -> List[dict]:
+        matched_objects = self._matching_table_objects(text, tables)
+        return self._table_specs(matched_objects, owner_text)
+
+    def _matching_table_objects(self, text: str, tables: List) -> List:
         matched = []
         normalized_text = self._normalize_for_match(text)
         for table in tables:
@@ -408,8 +462,160 @@ class QuestionParser:
             hit_count = sum(1 for cell in sample if cell in normalized_text)
             required = 1 if len(sample) == 1 else 2
             if hit_count >= required:
-                matched.append({'rows': rows})
+                matched.append(table)
         return matched
+
+    def _table_specs(
+        self,
+        tables: List,
+        owner_text: str,
+        start_index: int = 0,
+        anchor_offsets: Optional[List[int]] = None,
+        duplicate_risks: Optional[List[bool]] = None,
+    ) -> List[dict]:
+        specs = []
+        for table_position, table in enumerate(tables or []):
+            rows = getattr(table, 'rows', None) or []
+            if anchor_offsets and table_position < len(anchor_offsets):
+                anchor_offset = min(len(owner_text), max(0, anchor_offsets[table_position]))
+            else:
+                anchor_offset = len(owner_text)
+                for raw_cell in (cell for row in rows for cell in row):
+                    cell_text = str(raw_cell or '').strip()
+                    if not cell_text:
+                        continue
+                    found = owner_text.find(cell_text)
+                    if found >= 0:
+                        anchor_offset = found
+                        break
+            before = owner_text[max(0, anchor_offset - 24):anchor_offset]
+            after = owner_text[anchor_offset:anchor_offset + 24]
+            complexity = dict(getattr(table, 'complexity', {}) or {})
+            if duplicate_risks and table_position < len(duplicate_risks):
+                complexity['has_duplicate_text_risk'] = duplicate_risks[table_position]
+            spec = {
+                'rows': rows,
+                'cells': getattr(table, 'cells', []),
+                'column_widths': getattr(table, 'column_widths', []),
+                'row_heights': getattr(table, 'row_heights', []),
+                'source': getattr(table, 'source', {}),
+                'confidence': getattr(table, 'confidence', {}),
+                'complexity': complexity,
+                'anchor': {
+                    'offset': anchor_offset,
+                    'before_context': before,
+                    'after_context': after,
+                },
+                'render_mode': 'auto',
+            }
+            specs.append(normalize_table_spec(spec, start_index + len(specs)))
+        return specs
+
+    @staticmethod
+    def _remove_flattened_table_text(text: str, tables: List) -> Tuple[str, List[int], List[bool]]:
+        """Remove only an exact contiguous flattened table, retaining safe anchors."""
+        current = str(text or '')
+        offsets = []
+        duplicate_risks = []
+        for table in tables or []:
+            tokens = [
+                str(cell or '').strip()
+                for row in (getattr(table, 'rows', None) or [])
+                for cell in row
+                if str(cell or '').strip()
+            ]
+            if not tokens:
+                offsets.append(len(current))
+                duplicate_risks.append(False)
+                continue
+            pattern = re.compile(r'\s+'.join(re.escape(token) for token in tokens))
+            match = pattern.search(current)
+            if match is None:
+                offsets.append(len(current))
+                duplicate_risks.append(True)
+                continue
+            offset = match.start()
+            current = f"{current[:match.start()].rstrip()} {current[match.end():].lstrip()}".strip()
+            offsets.append(min(offset, len(current)))
+            duplicate_risks.append(False)
+        return current, offsets, duplicate_risks
+
+    def _spatial_table_assignments(self, structured_page, tables: List) -> dict:
+        if structured_page is None or not tables or not structured_page.lines:
+            return {}
+        width = float(structured_page.width)
+        height = float(structured_page.height)
+        lines = list(structured_page.lines)
+
+        def absolute_line_bbox(line):
+            x0, y0, x1, y1 = line.bbox
+            return (x0 * width, y0 * height, x1 * width, y1 * height)
+
+        starts = []
+        for line_index, line in enumerate(lines):
+            match = re.match(r'^\s*(\d{1,2})\s*[.)]', line.text)
+            if match:
+                starts.append((line_index, int(match.group(1))))
+        if not starts:
+            return {}
+
+        assignments = {}
+        for start_index, (line_index, question_number) in enumerate(starts):
+            next_line_index = starts[start_index + 1][0] if start_index + 1 < len(starts) else len(lines)
+            section_lines = lines[line_index:next_line_index]
+            section_top = absolute_line_bbox(section_lines[0])[1]
+            section_bottom = (
+                absolute_line_bbox(lines[next_line_index])[1]
+                if next_line_index < len(lines)
+                else height
+            )
+            choice_starts = []
+            for relative_index, line in enumerate(section_lines):
+                choice_number = self._structured_choice_number(line.text)
+                if choice_number is not None:
+                    choice_starts.append((relative_index, choice_number))
+            first_choice_top = (
+                absolute_line_bbox(section_lines[choice_starts[0][0]])[1]
+                if choice_starts else section_bottom
+            )
+            regions = {
+                'question': (0.0, section_top, width, first_choice_top),
+                'choices': {},
+            }
+            for choice_index, (relative_index, choice_number) in enumerate(choice_starts):
+                top = absolute_line_bbox(section_lines[relative_index])[1]
+                bottom = (
+                    absolute_line_bbox(section_lines[choice_starts[choice_index + 1][0]])[1]
+                    if choice_index + 1 < len(choice_starts)
+                    else section_bottom
+                )
+                regions['choices'][choice_number] = (0.0, top, width, bottom)
+            owned = {'question': [], 'choices': {}}
+            for table in tables:
+                bbox = getattr(table, 'bbox', None)
+                if not bbox:
+                    continue
+                center_y = (bbox[1] + bbox[3]) / 2
+                if not section_top <= center_y <= section_bottom:
+                    continue
+                owner = assign_table_owner(bbox, regions)
+                if owner is None:
+                    continue
+                if owner[0] == 'question':
+                    owned['question'].append(table)
+                else:
+                    owned['choices'].setdefault(owner[1], []).append(table)
+            if owned['question'] or owned['choices']:
+                assignments[question_number] = owned
+        return assignments
+
+    @staticmethod
+    def _structured_choice_number(text: str) -> Optional[int]:
+        stripped = str(text or '').lstrip()
+        for symbol, number in CHOICE_SYMBOL_TO_NUMBER.items():
+            if stripped.startswith(symbol):
+                return number
+        return None
 
     def _normalize_for_match(self, value: str) -> str:
         return re.sub(r'\s+', '', str(value or ''))

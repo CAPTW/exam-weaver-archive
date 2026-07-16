@@ -29,6 +29,21 @@ def test_export_interface_forwards_choice_marker_style_to_docx_exporter():
     assert applied == [CIRCLED_NUMBER_STYLE]
 
 
+def test_export_interface_exposes_table_render_mode_and_forwards_selection():
+    widget = ExportInterface(repository=_MultiExamRepository())
+
+    assert widget.tableRenderModeLabel.text() == "표 출력 방식"
+    assert widget.tableRenderModeFilter.currentData() == "auto"
+    widget.tableRenderModeFilter.setCurrentIndex(
+        widget.tableRenderModeFilter.findData("image")
+    )
+
+    assert widget._selected_table_render_mode() == "image"
+    assert widget.exporter.table_render_mode == "image"
+    widget.deleteLater()
+    APP.processEvents()
+
+
 class _Combo:
     def __init__(self, data, text):
         self._data = data

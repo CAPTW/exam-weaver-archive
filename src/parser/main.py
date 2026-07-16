@@ -315,6 +315,7 @@ class ExamPDFParser:
                     getattr(page, 'tables', None),
                     getattr(page, 'overlined_texts', None),
                     allow_subject_reset=False,
+                    structured_page=getattr(page, 'structured_page', None),
                 )
                 for q in page_questions:
                     if not current_subject and subject_order:

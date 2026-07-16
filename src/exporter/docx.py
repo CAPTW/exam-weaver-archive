@@ -5,6 +5,8 @@ from docx import Document
 from docx.shared import Pt, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.text import WD_COLOR_INDEX
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.section import WD_SECTION
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from pathlib import Path
@@ -17,6 +19,11 @@ import re
 from ..parser.formatting import normalize_private_math_glyphs, repair_extracted_text_artifacts
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL, CHOICE_SYMBOL_TO_NUMBER
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..parser.table_format import (
+    effective_table_render_mode,
+    parse_format_payload,
+    resolve_table_anchor,
+)
 from ..choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     choice_marker,
@@ -30,11 +37,25 @@ class DocxExporter:
     BODY_LINE_TWIPS = '160'
     COLUMN_SPACE_TWIPS = '425'
 
-    def __init__(self, choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE):
+    def __init__(
+        self,
+        choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+        table_render_mode="auto",
+    ):
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
+        self.table_render_mode = self._normalize_table_render_mode(table_render_mode)
+        self.warnings = []
 
     def set_choice_marker_style(self, style):
         self.choice_marker_style = normalize_choice_marker_style(style)
+
+    def set_table_render_mode(self, mode):
+        self.table_render_mode = self._normalize_table_render_mode(mode)
+
+    @staticmethod
+    def _normalize_table_render_mode(mode):
+        mode = str(mode or "auto").lower()
+        return mode if mode in {"auto", "image", "native"} else "auto"
 
     def export(
         self,
@@ -57,6 +78,7 @@ class DocxExporter:
             sections: Optional grouped sections, each with title and questions.
         """
         doc = Document()
+        self.warnings = []
 
         self._set_document_defaults(doc)
 
@@ -166,16 +188,12 @@ class DocxExporter:
         rng: random.Random = None
     ):
         """Add a question and its choices. Returns answer symbol or None."""
-        p = doc.add_paragraph()
-        self._format_paragraph(p)
-        self._add_formatted_text(
-            p,
+        p = self._add_text_with_format_tables(
+            doc,
             q.get('question_text', ''),
             q.get('question_format_json'),
             prefix=f"{display_number}. "
         )
-
-        self._add_format_tables(doc, q.get('question_format_json'))
         question_image_path = q.get('image_path')
         if self._image_exists(question_image_path):
             self._keep_paragraph_together(p, keep_with_next=True)
@@ -230,8 +248,6 @@ class DocxExporter:
                     choice['choice_symbol'] = NUMBER_TO_CHOICE_SYMBOL.get(idx, str(idx))
 
             for choice in choices:
-                p = doc.add_paragraph()
-                self._format_paragraph(p)
                 stored_symbol = choice.get('choice_symbol') or ''
                 symbol = choice_marker(
                     choice.get('choice_number'),
@@ -242,8 +258,8 @@ class DocxExporter:
                     answer_number == ALL_CHOICES_CORRECT
                     or choice.get('choice_number') == answer_number
                 )
-                self._add_formatted_text(
-                    p,
+                p = self._add_text_with_format_tables(
+                    doc,
                     choice.get('choice_text', ''),
                     choice.get('choice_format_json') or choice.get('format_json'),
                     prefix=f"{symbol} " if symbol else '',
@@ -589,35 +605,229 @@ class DocxExporter:
         return merged
 
     def _add_format_tables(self, doc, format_json):
-        spec = self._parse_format_json(format_json)
+        spec = parse_format_payload(format_json)
         for table_spec in spec.get('tables') or []:
-            rows = table_spec.get('rows') if isinstance(table_spec, dict) else None
-            rows = [
-                [str(cell or '') for cell in row]
-                for row in rows or []
-                if isinstance(row, list)
-            ]
-            if not rows:
-                continue
+            self._add_one_format_table(doc, table_spec)
 
-            column_count = max((len(row) for row in rows), default=0)
-            if column_count == 0:
-                continue
+    def _add_one_format_table(self, doc, table_spec):
+        use_wide_section = self._table_requires_one_column(table_spec) and hasattr(doc, 'add_section')
+        if use_wide_section:
+            wide_section = doc.add_section(WD_SECTION.CONTINUOUS)
+            self._set_columns(wide_section, 1)
+        try:
+            return self._render_one_format_table(doc, table_spec)
+        finally:
+            if use_wide_section:
+                restored_section = doc.add_section(WD_SECTION.CONTINUOUS)
+                self._set_columns(restored_section, 2)
 
-            table = doc.add_table(rows=len(rows), cols=column_count)
+    def _render_one_format_table(self, doc, table_spec):
+        mode = effective_table_render_mode(table_spec, self.table_render_mode)
+        if mode == 'image':
+            if self._add_table_image(doc, table_spec):
+                return True
+            self.warnings.append(
+                f"{table_spec.get('id', 'table')}:image_to_native"
+            )
+            if self._add_native_table(doc, table_spec):
+                return True
+        else:
             try:
-                table.style = 'Table Grid'
-            except Exception:
-                pass
+                if self._add_native_table(doc, table_spec):
+                    return True
+            except Exception as exc:
+                logger.warning("Native table render failed: %s", exc)
+            self.warnings.append(
+                f"{table_spec.get('id', 'table')}:native_to_image"
+            )
+            if self._add_table_image(doc, table_spec):
+                return True
+        self.warnings.append(f"{table_spec.get('id', 'table')}:table_unrendered")
+        return False
 
-            for row_idx, row in enumerate(rows):
-                for col_idx in range(column_count):
-                    cell = table.cell(row_idx, col_idx)
+    @staticmethod
+    def _table_requires_one_column(table_spec):
+        if bool((table_spec.get('layout') or {}).get('wide')):
+            return True
+        rows = table_spec.get('rows') or []
+        column_count = max((len(row) for row in rows if isinstance(row, list)), default=0)
+        return column_count >= 5
+
+    def _add_text_with_format_tables(
+        self,
+        doc,
+        text,
+        format_json=None,
+        prefix='',
+        size_pt=11,
+        highlight=False,
+    ):
+        """Render text and tables in anchor order, returning the last text paragraph."""
+        text = str(text or '')
+        payload = parse_format_payload(format_json)
+        anchored = []
+        for index, table in enumerate(payload.get('tables') or []):
+            offset, _recovered = resolve_table_anchor(text, table.get('anchor'))
+            anchored.append((offset, index, table))
+        anchored.sort(key=lambda item: (item[0], item[1]))
+        if not anchored:
+            paragraph = doc.add_paragraph()
+            self._format_paragraph(paragraph)
+            self._add_formatted_text(
+                paragraph,
+                text,
+                format_json,
+                prefix=prefix,
+                size_pt=size_pt,
+                highlight=highlight,
+            )
+            return paragraph
+
+        cursor = 0
+        last_paragraph = None
+        prefix_value = prefix
+        for offset, _index, table in anchored:
+            offset = min(len(text), max(cursor, offset))
+            if offset > cursor or prefix_value:
+                last_paragraph = doc.add_paragraph()
+                self._format_paragraph(last_paragraph)
+                self._add_formatted_text(
+                    last_paragraph,
+                    text[cursor:offset],
+                    self._slice_format_json(payload, cursor, offset),
+                    prefix=prefix_value,
+                    size_pt=size_pt,
+                    highlight=highlight,
+                )
+                prefix_value = ''
+            self._add_one_format_table(doc, table)
+            cursor = offset
+        if cursor < len(text):
+            last_paragraph = doc.add_paragraph()
+            self._format_paragraph(last_paragraph)
+            self._add_formatted_text(
+                last_paragraph,
+                text[cursor:],
+                self._slice_format_json(payload, cursor, len(text)),
+                prefix=prefix_value,
+                size_pt=size_pt,
+                highlight=highlight,
+            )
+        if last_paragraph is None:
+            last_paragraph = doc.add_paragraph()
+            self._format_paragraph(last_paragraph)
+        return last_paragraph
+
+    @staticmethod
+    def _slice_format_json(payload, start, end):
+        spans = []
+        for span in payload.get('spans') or []:
+            try:
+                span_start = int(span.get('start'))
+                span_end = int(span.get('end'))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            clipped_start = max(start, span_start)
+            clipped_end = min(end, span_end)
+            if clipped_end <= clipped_start:
+                continue
+            adjusted = dict(span)
+            adjusted['start'] = clipped_start - start
+            adjusted['end'] = clipped_end - start
+            spans.append(adjusted)
+        return json.dumps({'spans': spans}, ensure_ascii=False) if spans else None
+
+    def _add_native_table(self, doc, table_spec):
+        rows = [
+            [str(cell or '') for cell in row]
+            for row in table_spec.get('rows') or []
+            if isinstance(row, list)
+        ]
+        if not rows:
+            return False
+        column_count = max((len(row) for row in rows), default=0)
+        if column_count == 0:
+            return False
+
+        table = doc.add_table(rows=len(rows), cols=column_count)
+        try:
+            table.style = 'Table Grid'
+        except Exception:
+            pass
+        widths = table_spec.get('column_widths') or []
+        if len(widths) == column_count:
+            total_width_mm = 82.0
+            for col_idx, proportion in enumerate(widths):
+                try:
+                    table.columns[col_idx].width = Mm(total_width_mm * float(proportion))
+                except (TypeError, ValueError):
+                    pass
+
+        cell_specs = {
+            (int(cell.get('row', -1)), int(cell.get('col', -1))): cell
+            for cell in table_spec.get('cells') or []
+            if isinstance(cell, dict)
+        }
+        merged_positions = set()
+        for row_idx, row in enumerate(rows):
+            for col_idx in range(column_count):
+                if (row_idx, col_idx) in merged_positions:
+                    continue
+                cell = table.cell(row_idx, col_idx)
+                spec = cell_specs.get((row_idx, col_idx), {})
+                row_span = max(1, int(spec.get('row_span', 1) or 1))
+                col_span = max(1, int(spec.get('col_span', 1) or 1))
+                end_row = min(len(rows) - 1, row_idx + row_span - 1)
+                end_col = min(column_count - 1, col_idx + col_span - 1)
+                if end_row != row_idx or end_col != col_idx:
+                    cell = cell.merge(table.cell(end_row, end_col))
+                    for merged_row in range(row_idx, end_row + 1):
+                        for merged_col in range(col_idx, end_col + 1):
+                            if (merged_row, merged_col) != (row_idx, col_idx):
+                                merged_positions.add((merged_row, merged_col))
+                text = spec.get('text')
+                if text is None:
                     text = row[col_idx] if col_idx < len(row) else ''
-                    paragraph = cell.paragraphs[0]
-                    self._format_paragraph(paragraph)
-                    run = paragraph.add_run(text)
-                    self._format_run(run, size_pt=9)
+                paragraph = cell.paragraphs[0]
+                self._format_paragraph(paragraph)
+                alignment = str(spec.get('horizontal_alignment') or 'left')
+                if alignment == 'center':
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif alignment == 'right':
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                vertical = str(spec.get('vertical_alignment') or 'center')
+                if vertical == 'top':
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                elif vertical == 'bottom':
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
+                else:
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                run = paragraph.add_run(str(text or ''))
+                self._format_run(run, size_pt=9)
+        return True
+
+    def _add_table_image(self, doc, table_spec):
+        source = table_spec.get('source') or {}
+        image_path = self._resolve_table_image_path(source.get('image_path'))
+        if image_path is None:
+            return False
+        try:
+            paragraph = doc.add_paragraph()
+            self._format_paragraph(paragraph, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            run = paragraph.add_run()
+            run.add_picture(str(image_path), width=Mm(82))
+            return True
+        except Exception as exc:
+            logger.warning("Table source image render failed for %s: %s", image_path, exc)
+            return False
+
+    @staticmethod
+    def _resolve_table_image_path(image_path):
+        if not image_path:
+            return None
+        path = Path(str(image_path))
+        candidates = [path] if path.is_absolute() else [Path.cwd() / path, path]
+        return next((candidate for candidate in candidates if candidate.is_file()), None)
 
     def _add_image(
         self,

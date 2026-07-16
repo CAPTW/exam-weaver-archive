@@ -7,6 +7,7 @@ import json
 import os
 import io
 import contextlib
+import hashlib
 import unicodedata
 import re
 import math
@@ -154,6 +155,12 @@ class TableData:
     """페이지 내 텍스트 기반 표 데이터"""
     rows: List[List[str]]
     bbox: Optional[tuple] = None
+    cells: List[dict] = field(default_factory=list)
+    column_widths: List[float] = field(default_factory=list)
+    row_heights: List[float] = field(default_factory=list)
+    source: dict = field(default_factory=dict)
+    confidence: dict = field(default_factory=dict)
+    complexity: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -422,6 +429,8 @@ class PDFExtractor:
         
         image_out_dir = self.output_dir / "images" / pdf_path.stem
         image_out_dir.mkdir(parents=True, exist_ok=True)
+        table_image_dir = self.output_dir / "table_images" / pdf_path.stem
+        table_image_dir.mkdir(parents=True, exist_ok=True)
         ocr_out_dir = self.output_dir / "ocr" / pdf_path.stem
         ocr_out_dir.mkdir(parents=True, exist_ok=True)
         
@@ -468,7 +477,26 @@ class PDFExtractor:
                             is_ocr_text = True
                     underlined_texts = self._extract_underlined_texts(fitz_page)
                     overlined_texts = self._extract_overlined_texts(fitz_page)
-                    tables = self._extract_text_tables(fitz_page)
+                    tables = self._extract_text_tables(
+                        fitz_page,
+                        page_number=i + 1,
+                        source_path=pdf_path,
+                        table_image_dir=table_image_dir,
+                    )
+                    if is_ocr_text and structured_page is not None:
+                        ocr_tables = self._extract_ocr_grid_tables(
+                            fitz_page,
+                            structured_page,
+                            page_number=i + 1,
+                            source_path=pdf_path,
+                            table_image_dir=table_image_dir,
+                        )
+                        for ocr_table in ocr_tables:
+                            if not any(
+                                self._bbox_overlap_ratio(ocr_table.bbox, existing.bbox) >= 0.85
+                                for existing in tables
+                            ):
+                                tables.append(ocr_table)
                     seen = {}
                     image_index = 0
 
@@ -5273,7 +5301,13 @@ class PDFExtractor:
             return False
         return True
 
-    def _extract_text_tables(self, page) -> List[TableData]:
+    def _extract_text_tables(
+        self,
+        page,
+        page_number: int = 1,
+        source_path: Optional[Path] = None,
+        table_image_dir: Optional[Path] = None,
+    ) -> List[TableData]:
         """Extract native text tables when PyMuPDF can identify a stable table."""
         if not hasattr(page, 'find_tables'):
             return []
@@ -5284,7 +5318,7 @@ class PDFExtractor:
             return []
 
         tables = []
-        for table in getattr(finder, 'tables', []) or []:
+        for table_index, table in enumerate(getattr(finder, 'tables', []) or []):
             try:
                 rows = table.extract()
             except Exception:
@@ -5302,8 +5336,284 @@ class PDFExtractor:
             if not cleaned_rows:
                 continue
             bbox = getattr(table, 'bbox', None)
-            tables.append(TableData(rows=cleaned_rows, bbox=tuple(bbox) if bbox else None))
+            bbox = tuple(float(value) for value in bbox) if bbox else None
+            row_count = len(cleaned_rows)
+            column_count = max((len(row) for row in cleaned_rows), default=0)
+            cells = self._native_table_cells(table, cleaned_rows)
+            column_widths, row_heights = self._table_grid_proportions(
+                table,
+                row_count,
+                column_count,
+                bbox,
+            )
+            source = self._save_table_crop(
+                page,
+                bbox,
+                page_number,
+                source_path,
+                table_image_dir,
+                table_index,
+            )
+            tables.append(TableData(
+                rows=cleaned_rows,
+                bbox=bbox,
+                cells=cells,
+                column_widths=column_widths,
+                row_heights=row_heights,
+                source=source,
+                confidence={'score': 0.96, 'reasons': ['native_grid', 'all_words_assigned']},
+                complexity={
+                    'has_formula': False,
+                    'has_embedded_image': self._table_has_embedded_image(page, bbox),
+                    'has_rotated_text': False,
+                    'has_complex_merge': False,
+                    'has_duplicate_text_risk': False,
+                },
+            ))
         return tables
+
+    @staticmethod
+    def _table_grid_proportions(table, row_count, column_count, bbox):
+        """Return normalized grid dimensions using native cell rectangles when available."""
+        if not bbox or not row_count or not column_count:
+            return [], []
+        raw_cells = [cell for cell in (getattr(table, 'cells', None) or []) if cell]
+        x_edges = sorted({round(float(cell[0]), 3) for cell in raw_cells} | {
+            round(float(cell[2]), 3) for cell in raw_cells
+        })
+        y_edges = sorted({round(float(cell[1]), 3) for cell in raw_cells} | {
+            round(float(cell[3]), 3) for cell in raw_cells
+        })
+        if len(x_edges) != column_count + 1:
+            x0, _, x1, _ = bbox
+            step = (x1 - x0) / column_count
+            x_edges = [x0 + step * index for index in range(column_count + 1)]
+        if len(y_edges) != row_count + 1:
+            _, y0, _, y1 = bbox
+            step = (y1 - y0) / row_count
+            y_edges = [y0 + step * index for index in range(row_count + 1)]
+        width_total = max(1e-9, x_edges[-1] - x_edges[0])
+        height_total = max(1e-9, y_edges[-1] - y_edges[0])
+        widths = [
+            round((x_edges[index + 1] - x_edges[index]) / width_total, 6)
+            for index in range(column_count)
+        ]
+        heights = [
+            round((y_edges[index + 1] - y_edges[index]) / height_total, 6)
+            for index in range(row_count)
+        ]
+        return widths, heights
+
+    @staticmethod
+    def _native_table_cells(table, rows):
+        """Convert native cell rectangles to row/column spans, including merges."""
+        raw_rows = getattr(table, 'rows', None) or []
+        raw_cells = [
+            cell
+            for raw_row in raw_rows
+            for cell in (getattr(raw_row, 'cells', None) or [])
+            if cell
+        ]
+        if not raw_cells:
+            return [
+                {
+                    'row': row_index,
+                    'col': column_index,
+                    'text': cell_text,
+                    'row_span': 1,
+                    'col_span': 1,
+                    'horizontal_alignment': 'left',
+                    'vertical_alignment': 'center',
+                }
+                for row_index, row in enumerate(rows)
+                for column_index, cell_text in enumerate(row)
+            ]
+        x_edges = sorted({round(float(cell[0]), 3) for cell in raw_cells} | {
+            round(float(cell[2]), 3) for cell in raw_cells
+        })
+        y_edges = sorted({round(float(cell[1]), 3) for cell in raw_cells} | {
+            round(float(cell[3]), 3) for cell in raw_cells
+        })
+
+        def edge_index(edges, value):
+            return min(range(len(edges)), key=lambda index: abs(edges[index] - float(value)))
+
+        cells = []
+        for row_index, raw_row in enumerate(raw_rows):
+            for source_col, rect in enumerate(getattr(raw_row, 'cells', None) or []):
+                if rect is None:
+                    continue
+                start_col = edge_index(x_edges, rect[0])
+                end_col = edge_index(x_edges, rect[2])
+                start_row = edge_index(y_edges, rect[1])
+                end_row = edge_index(y_edges, rect[3])
+                text = (
+                    rows[row_index][source_col]
+                    if row_index < len(rows) and source_col < len(rows[row_index])
+                    else ''
+                )
+                cells.append({
+                    'row': start_row,
+                    'col': start_col,
+                    'text': text,
+                    'row_span': max(1, end_row - start_row),
+                    'col_span': max(1, end_col - start_col),
+                    'horizontal_alignment': 'left',
+                    'vertical_alignment': 'center',
+                })
+        return cells
+
+    @staticmethod
+    def _save_table_crop(
+        page,
+        bbox,
+        page_number,
+        source_path,
+        table_image_dir,
+        table_index,
+    ):
+        source = {
+            'source_pdf_relative_path': Path(source_path).name if source_path else '',
+            'page': int(page_number),
+            'bbox': list(bbox) if bbox else [],
+        }
+        if not bbox or table_image_dir is None:
+            source['missing_reason'] = 'crop_output_unavailable'
+            return source
+        try:
+            table_image_dir = Path(table_image_dir)
+            table_image_dir.mkdir(parents=True, exist_ok=True)
+            temporary = table_image_dir / f'p{page_number}_table{table_index + 1}.png'
+            pixmap = page.get_pixmap(clip=bbox, dpi=216, alpha=False)
+            pixmap.save(str(temporary))
+            digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
+            target = table_image_dir / f'{digest}.png'
+            if target != temporary:
+                if target.exists():
+                    temporary.unlink()
+                else:
+                    temporary.replace(target)
+            source['image_path'] = str(target)
+            source['sha256'] = digest
+        except Exception as exc:
+            source['missing_reason'] = exc.__class__.__name__
+        return source
+
+    @staticmethod
+    def _table_has_embedded_image(page, bbox):
+        if not bbox:
+            return False
+        try:
+            x0, y0, x1, y1 = bbox
+            for image in page.get_images(full=True) or []:
+                for rect in page.get_image_rects(image[0]) or []:
+                    if rect.x1 > x0 and rect.x0 < x1 and rect.y1 > y0 and rect.y0 < y1:
+                        return True
+        except Exception:
+            return False
+        return False
+
+    def _extract_ocr_grid_tables(
+        self,
+        page,
+        structured_page: StructuredPage,
+        page_number: int,
+        source_path: Optional[Path],
+        table_image_dir: Path,
+    ) -> List[TableData]:
+        """Recover line-grid tables using OCR word geometry."""
+        from src.parser.table_detection import detect_grid_tables
+
+        horizontal, vertical = self._drawing_table_segments(page)
+        words = []
+        for line in structured_page.lines:
+            for word in line.words:
+                x0, y0, x1, y1 = word.bbox
+                words.append({
+                    'text': word.text,
+                    'bbox': (
+                        x0 * structured_page.width,
+                        y0 * structured_page.height,
+                        x1 * structured_page.width,
+                        y1 * structured_page.height,
+                    ),
+                    'confidence': word.confidence,
+                })
+        detected = detect_grid_tables(horizontal, vertical, words)
+        results = []
+        for table_index, spec in enumerate(detected):
+            bbox = tuple(spec['bbox'])
+            source = self._save_table_crop(
+                page,
+                bbox,
+                page_number,
+                source_path,
+                table_image_dir,
+                table_index,
+            )
+            results.append(TableData(
+                rows=spec['rows'],
+                bbox=bbox,
+                cells=spec['cells'],
+                column_widths=spec['column_widths'],
+                row_heights=spec['row_heights'],
+                source=source,
+                confidence=spec['confidence'],
+                complexity=spec['complexity'],
+            ))
+        return results
+
+    @staticmethod
+    def _drawing_table_segments(page):
+        horizontal = []
+        vertical = []
+
+        def point(value):
+            try:
+                return float(value.x), float(value.y)
+            except AttributeError:
+                return float(value[0]), float(value[1])
+
+        try:
+            drawings = page.get_drawings() or []
+        except Exception:
+            drawings = []
+        for drawing in drawings:
+            for item in drawing.get('items', []) if isinstance(drawing, dict) else []:
+                if not item:
+                    continue
+                if item[0] == 'l' and len(item) >= 3:
+                    x0, y0 = point(item[1])
+                    x1, y1 = point(item[2])
+                    segment = (x0, y0, x1, y1)
+                    if abs(y1 - y0) <= 3:
+                        horizontal.append(segment)
+                    if abs(x1 - x0) <= 3:
+                        vertical.append(segment)
+                elif item[0] == 're' and len(item) >= 2:
+                    rect = item[1]
+                    try:
+                        x0, y0, x1, y1 = (
+                            float(rect.x0), float(rect.y0),
+                            float(rect.x1), float(rect.y1),
+                        )
+                    except AttributeError:
+                        x0, y0, x1, y1 = (float(value) for value in rect[:4])
+                    horizontal.extend(((x0, y0, x1, y0), (x0, y1, x1, y1)))
+                    vertical.extend(((x0, y0, x0, y1), (x1, y0, x1, y1)))
+        return horizontal, vertical
+
+    @staticmethod
+    def _bbox_overlap_ratio(first, second):
+        if not first or not second:
+            return 0.0
+        x0 = max(first[0], second[0])
+        y0 = max(first[1], second[1])
+        x1 = min(first[2], second[2])
+        y1 = min(first[3], second[3])
+        intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        first_area = max(1e-9, first[2] - first[0]) * max(1e-9, first[3] - first[1])
+        return intersection / first_area
 
     def _extract_underlined_texts(self, page) -> List[str]:
         """Detect underlined text snippets from horizontal drawing lines."""

@@ -18,6 +18,10 @@ IMAGE_REFS = (
     ("questions", "image_path"),
     ("question_choices", "choice_image_path"),
 )
+FORMAT_JSON_REFS = (
+    ("questions", "question_format_json"),
+    ("question_choices", "choice_format_json"),
+)
 
 
 def _portable_ref(path: Path) -> str:
@@ -62,6 +66,13 @@ def _count(conn: sqlite3.Connection, sql: str) -> int:
     return int(conn.execute(sql).fetchone()[0])
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(
+        row[1] == column
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    )
+
+
 def prepare_portable_data(
     source_db: str | Path,
     target_data_dir: str | Path,
@@ -88,6 +99,8 @@ def prepare_portable_data(
     copied_images: dict[str, str] = {}
     missing_images: list[dict[str, object]] = []
     updated_refs = 0
+    table_image_refs = 0
+    updated_table_image_refs = 0
 
     with sqlite3.connect(factory_db) as conn:
         cursor = conn.cursor()
@@ -114,6 +127,52 @@ def prepare_portable_data(
             )
             updated_refs += 1
 
+        for table, column in FORMAT_JSON_REFS:
+            if not _column_exists(conn, table, column):
+                continue
+            rows = cursor.execute(
+                f"SELECT id, {column} FROM {table} WHERE COALESCE({column}, '') <> ''"
+            ).fetchall()
+            for row_id, encoded in rows:
+                try:
+                    payload = json.loads(encoded)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                changed = False
+                for table_spec in payload.get("tables") or []:
+                    if not isinstance(table_spec, dict):
+                        continue
+                    source = table_spec.get("source")
+                    if not isinstance(source, dict) or not source.get("image_path"):
+                        continue
+                    table_image_refs += 1
+                    original_value = str(source["image_path"])
+                    resolved = _resolve_image_path(original_value, repo_root, source_db)
+                    if resolved is None:
+                        missing_images.append({
+                            "table": table,
+                            "column": column,
+                            "id": row_id,
+                            "table_id": table_spec.get("id"),
+                            "path": original_value,
+                        })
+                        continue
+                    if str(resolved) not in copied_images:
+                        target_image = image_dir / _hashed_image_name(resolved)
+                        if not target_image.exists():
+                            shutil.copy2(resolved, target_image)
+                        copied_images[str(resolved)] = _portable_ref(target_image)
+                    source["image_path"] = copied_images[str(resolved)]
+                    updated_table_image_refs += 1
+                    changed = True
+                if changed:
+                    cursor.execute(
+                        f"UPDATE {table} SET {column} = ? WHERE id = ?",
+                        (json.dumps(payload, ensure_ascii=False), row_id),
+                    )
+
         if missing_images and not allow_missing_images:
             raise RuntimeError(
                 f"Missing {len(missing_images)} image file(s). "
@@ -135,6 +194,8 @@ def prepare_portable_data(
                 "SELECT COUNT(*) FROM question_choices WHERE COALESCE(choice_image_path, '') <> ''",
             ),
             "updated_image_refs": updated_refs,
+            "table_image_refs": table_image_refs,
+            "updated_table_image_refs": updated_table_image_refs,
             "copied_images": len(set(copied_images.values())),
             "missing_images": missing_images,
         }
