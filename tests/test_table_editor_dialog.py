@@ -1,3 +1,4 @@
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -7,6 +8,8 @@ from PyQt5.QtCore import QItemSelectionModel
 from PyQt5.QtWidgets import QApplication
 
 from src.gui.table_editor import TableEditorDialog
+from src.parser.table_format import parse_format_payload, serialize_format_payload
+from src.parser.view_table import add_one_cell_table
 
 
 APP = QApplication.instance() or QApplication([])
@@ -148,4 +151,71 @@ def test_result_captures_last_uncommitted_cell_text():
     dialog.grid.item(0, 0).setText("수정된 값")
 
     assert dialog.result_table_spec()["rows"] == [["수정된 값"]]
+    _close(dialog)
+
+
+def test_parse_edit_serialize_reopen_preserves_structure_and_metadata():
+    payload = parse_format_payload({
+        "tables": [{
+            "id": "source-table",
+            "rows": [["A", "B"], ["C", "D"]],
+            "column_widths": [0.4, 0.6],
+            "anchor": {"offset": 3, "before_context": "앞"},
+            "source": {"image_path": "table.png", "sha256": "abc"},
+            "custom_table": {"keep": True},
+        }]
+    })
+    dialog = _dialog(payload["tables"][0])
+    dialog.grid.setCurrentCell(1, 1)
+    dialog.add_row_below()
+    dialog.grid.setCurrentCell(1, 1)
+    dialog.add_column_right()
+    selection = dialog.grid.selectionModel()
+    selection.clearSelection()
+    for row in range(1, 3):
+        for col in range(1, 3):
+            selection.select(
+                dialog.grid.model().index(row, col),
+                QItemSelectionModel.Select,
+            )
+    dialog.merge_selected_cells()
+    dialog.grid.setColumnWidth(0, 90)
+    dialog.grid.setColumnWidth(1, 180)
+    dialog.grid.setColumnWidth(2, 90)
+    APP.processEvents()
+
+    encoded = serialize_format_payload({"tables": [dialog.result_table_spec()]})
+    reopened = parse_format_payload(encoded)["tables"][0]
+
+    assert reopened["id"] == "source-table"
+    assert reopened["anchor"]["offset"] == 3
+    assert reopened["source"]["sha256"] == "abc"
+    assert reopened["custom_table"] == {"keep": True}
+    assert len(reopened["rows"]) == 3
+    assert len(reopened["rows"][0]) == 3
+    merged = next(cell for cell in reopened["cells"] if cell["row_span"] == 2)
+    assert merged["col_span"] == 2
+    assert len(merged["merge_backup"]) == 4
+    assert reopened["layout"]["width_mode"] == "manual"
+    assert sum(reopened["column_widths"]) == pytest.approx(1.0)
+    _close(dialog)
+
+
+def test_manual_view_table_expands_without_losing_view_metadata():
+    encoded = add_one_cell_table("앞 뒤", None, "<보기>\n① A ② B", 1)
+    original = parse_format_payload(encoded)["tables"][0]
+    dialog = _dialog(original)
+    dialog.grid.setCurrentCell(0, 0)
+
+    dialog.add_row_below()
+    dialog.add_row_below()
+    dialog.add_column_right()
+    result = dialog.result_table_spec()
+
+    assert result["rows"][0][0] == "<보기>\n① A ② B"
+    assert len(result["rows"]) == 3
+    assert len(result["rows"][0]) == 2
+    assert result["anchor"]["offset"] == 1
+    assert result["source"]["kind"] == "view_block_text"
+    assert result["render_mode"] == "native"
     _close(dialog)

@@ -120,3 +120,45 @@ def test_normalize_database_leaves_non_table_format_payloads_unchanged(tmp_path)
             "SELECT question_format_json FROM questions"
         ).fetchone()[0]
     assert stored == spans_only
+
+
+def test_normalize_database_preserves_multicell_layout_and_merge_backup(tmp_path):
+    payload = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "merged",
+            "rows": [["AB", ""], ["C", "D"]],
+            "cells": [
+                {
+                    "row": 0,
+                    "col": 0,
+                    "text": "AB",
+                    "row_span": 1,
+                    "col_span": 2,
+                    "merge_backup": [
+                        {"row": 0, "col": 0, "text": "A"},
+                        {"row": 0, "col": 1, "text": "B"},
+                    ],
+                },
+                {"row": 1, "col": 0, "text": "C"},
+                {"row": 1, "col": 1, "text": "D"},
+            ],
+            "column_widths": [0.3, 0.7],
+            "layout": {"width_mode": "manual", "wide": False},
+            "confidence": {"score": 1.0},
+            "custom_table": {"keep": True},
+        }],
+    })
+    db_path = tmp_path / "bank.db"
+    _database(db_path, payload, None)
+
+    normalize_database(db_path, source_root=tmp_path)
+
+    with sqlite3.connect(db_path) as conn:
+        stored = json.loads(
+            conn.execute("SELECT question_format_json FROM questions").fetchone()[0]
+        )["tables"][0]
+    assert stored["layout"] == {"width_mode": "manual", "wide": False}
+    assert stored["column_widths"] == [0.3, 0.7]
+    assert stored["cells"][0]["merge_backup"][1]["text"] == "B"
+    assert stored["custom_table"] == {"keep": True}
