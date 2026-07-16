@@ -22,6 +22,11 @@ from ...parser.formatting import (
 )
 from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ...parser.question import ALL_CHOICES_CORRECT
+from ...choice_markers import (
+    DEFAULT_CHOICE_MARKER_STYLE,
+    choice_marker,
+    normalize_choice_marker_style,
+)
 
 
 MIN_CHOICE_COUNT = 4
@@ -33,9 +38,17 @@ QUESTION_TYPE_DESCRIPTIVE = "descriptive"
 class QuestionEditor(QDialog):
     """문제 전체 수정 다이얼로그"""
     
-    def __init__(self, parent=None, question_data=None, subject_options=None, create_mode=False):
+    def __init__(
+        self,
+        parent=None,
+        question_data=None,
+        subject_options=None,
+        create_mode=False,
+        choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+    ):
         super().__init__(parent)
         self.create_mode = bool(create_mode)
+        self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.setModal(True)
         self.question_data = question_data or {}
         self.editor_title = (
@@ -148,6 +161,8 @@ class QuestionEditor(QDialog):
         self.choice_count = self._initial_choice_count()
         self.choiceInputs = {}
         self.choiceRows = {}
+        self.choiceLabels = {}
+        self.choiceOverlineButtons = {}
         self.choiceImagePaths = {
             number: self._choice_image_path(number)
             for number in self._choice_numbers()
@@ -462,6 +477,8 @@ class QuestionEditor(QDialog):
         self._apply_input_height(clear_button)
         clear_button.setFixedWidth(64)
         clear_button.clicked.connect(lambda checked=False, n=number: self._clear_choice_image(n))
+        self.choiceLabels[number] = label
+        self.choiceOverlineButtons[number] = overline_button
         self.choiceImagePreviews[number] = image_preview
         self.choiceImageLabels[number] = image_label
         self.choiceClearImageButtons[number] = clear_button
@@ -497,7 +514,43 @@ class QuestionEditor(QDialog):
         return max(MIN_CHOICE_COUNT, min(MAX_CHOICE_COUNT, count))
 
     def _choice_symbol(self, number):
+        return choice_marker(number, self.choice_marker_style, fallback=str(number))
+
+    def _stored_choice_symbol(self, number):
+        for choice in self.question_data.get('choices') or []:
+            try:
+                choice_number = int(
+                    choice.get('choice_number') or choice.get('number') or 0
+                )
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if choice_number == int(number):
+                return choice.get('choice_symbol') or choice.get('symbol') or (
+                    NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
+                )
         return NUMBER_TO_CHOICE_SYMBOL.get(number, str(number))
+
+    def set_choice_marker_style(self, style):
+        self.choice_marker_style = normalize_choice_marker_style(style)
+        for number in self._choice_numbers():
+            symbol = self._choice_symbol(number)
+            label = self.choiceLabels.get(number)
+            if label is not None:
+                label.setText(symbol)
+            field = self.choiceInputs.get(number)
+            if field is not None:
+                field.setPlaceholderText(f"{symbol} 선지 내용")
+            overline_button = self.choiceOverlineButtons.get(number)
+            if overline_button is not None:
+                overline_button.setToolTip(
+                    f"{symbol} 선지 선택 텍스트를 overline 수식으로 변환"
+                )
+            clear_button = self.choiceClearImageButtons.get(number)
+            if clear_button is not None:
+                clear_button.setToolTip(f"{symbol} 선지 이미지 경로 삭제")
+            answer_index = self.answerCombo.findData(number)
+            if answer_index >= 0:
+                self.answerCombo.setItemText(answer_index, f"{symbol} ({number}번)")
 
     def _add_choice_row(self, number):
         symbol = self._choice_symbol(number)
@@ -547,6 +600,8 @@ class QuestionEditor(QDialog):
             self.choiceLayout.removeWidget(row)
             row.deleteLater()
         self.choiceInputs.pop(number, None)
+        self.choiceLabels.pop(number, None)
+        self.choiceOverlineButtons.pop(number, None)
         self.choiceImagePaths.pop(number, None)
         self.choiceImageLabels.pop(number, None)
         self.choiceImagePreviews.pop(number, None)
@@ -987,7 +1042,7 @@ class QuestionEditor(QDialog):
                 choice_text, choice_format_json = self._choice_text_and_format_json(number)
                 choices.append({
                     'choice_number': number,
-                    'choice_symbol': self._choice_symbol(number),
+                    'choice_symbol': self._stored_choice_symbol(number),
                     'choice_text': choice_text,
                     'choice_format_json': choice_format_json,
                     'choice_image_path': self.choiceImagePaths.get(number),

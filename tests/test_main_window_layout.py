@@ -64,20 +64,18 @@ def test_practice_interface_is_registered_in_main_window():
 def test_main_window_passes_and_refreshes_question_repository_for_practice():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 
-    assert (
-        "PracticeInterface(self.db_path, self, repository=question_repository)"
-        in source
-    )
+    assert "self.practice_interface = PracticeInterface(" in source
+    assert "repository=question_repository" in source
+    assert "choice_marker_style=self.choice_marker_style" in source
     assert "self.practice_interface.set_repository(repository)" in source
 
 
 def test_main_window_passes_and_refreshes_question_repository_for_export():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 
-    assert (
-        "ExportInterface(self.db_path, self, repository=question_repository)"
-        in source
-    )
+    assert "self.export_interface = ExportInterface(" in source
+    assert "repository=question_repository" in source
+    assert "choice_marker_style=self.choice_marker_style" in source
     assert "self.export_interface.set_repository(repository)" in source
 
 
@@ -112,6 +110,17 @@ def test_main_window_settings_action_loads_saves_and_applies_menu_locale():
     assert "save_menu_locale" in source
     assert "onClick=self.open_settings" in source
     assert "apply_menu_pack(self.navigationInterface" in source
+
+
+def test_main_window_loads_and_applies_choice_marker_style_to_feature_interfaces():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert "load_choice_marker_style" in source
+    assert "save_choice_marker_style" in source
+    assert "current_choice_marker_style=self.choice_marker_style" in source
+    assert "self.browser_interface.set_choice_marker_style(style)" in source
+    assert "self.practice_interface.set_choice_marker_style(style)" in source
+    assert "self.export_interface.set_choice_marker_style(style)" in source
 
 
 def test_main_window_applies_opaque_background_fallback_at_startup():

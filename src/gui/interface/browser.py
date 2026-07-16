@@ -11,16 +11,27 @@ from qfluentwidgets import (
 )
 from ...database.repository import ExamRepository
 from ...database.validator import QuestionValidator
+from ...choice_markers import (
+    DEFAULT_CHOICE_MARKER_STYLE,
+    normalize_choice_marker_style,
+)
 from .editor import QuestionEditor
 
 class BrowserInterface(QWidget):
-    def __init__(self, db_path=None, parent=None, repository=None):
+    def __init__(
+        self,
+        db_path=None,
+        parent=None,
+        repository=None,
+        choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+    ):
         super().__init__(parent)
         if repository is None:
             if db_path is None:
                 raise ValueError("db_path or repository is required")
             repository = ExamRepository(db_path)
         self.repo = repository
+        self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.validator = QuestionValidator(self.repo)
         self.validation_mode = False
         self.current_explanation_question_id = None
@@ -49,6 +60,11 @@ class BrowserInterface(QWidget):
         self.examFilter.clear()
         self.subjectFilter.clear()
         self.load_data()
+
+    def set_choice_marker_style(self, style):
+        self.choice_marker_style = normalize_choice_marker_style(style)
+        for editor in tuple(self._open_editors.values()):
+            editor.set_choice_marker_style(self.choice_marker_style)
 
     def init_ui(self):
         # Header
@@ -411,7 +427,8 @@ class BrowserInterface(QWidget):
         dialog = QuestionEditor(
             self.window(),
             editor_question,
-            subject_options=repository.get_subject_options(editor_question.get('exam_code'))
+            subject_options=repository.get_subject_options(editor_question.get('exam_code')),
+            choice_marker_style=self.choice_marker_style,
         )
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -474,6 +491,7 @@ class BrowserInterface(QWidget):
             self.repo.get_manual_question_template(),
             subject_options=self.repo.get_manual_subject_options(),
             create_mode=True,
+            choice_marker_style=self.choice_marker_style,
         )
         if not dialog.exec():
             return
@@ -508,6 +526,7 @@ class BrowserInterface(QWidget):
             self.repo.get_manual_descriptive_question_template(),
             subject_options=self.repo.get_manual_subject_options(),
             create_mode=True,
+            choice_marker_style=self.choice_marker_style,
         )
         if not dialog.exec():
             return
@@ -551,6 +570,7 @@ class BrowserInterface(QWidget):
             template,
             subject_options=self.repo.get_manual_subject_options(),
             create_mode=True,
+            choice_marker_style=self.choice_marker_style,
         )
         if not dialog.exec():
             return

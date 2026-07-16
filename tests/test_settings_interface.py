@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication
 
+from src.choice_markers import CIRCLED_NUMBER_STYLE, LEGACY_KOREAN_STYLE
 from src.gui.interface.settings import SettingsDialog
 from src.gui.main import MENU_ROUTE_KEYS, apply_menu_pack
 from src.gui.menu_language import MenuLanguagePack
@@ -70,6 +71,28 @@ def test_settings_dialog_shows_pack_warning_without_disabling_selection():
     assert dialog.warningLabel.isVisibleTo(dialog)
     assert "broken.json" in dialog.warningLabel.text()
     assert dialog.applyButton.isEnabled()
+
+    dialog.deleteLater()
+    APP.processEvents()
+
+
+def test_settings_dialog_lists_choice_marker_styles_and_returns_selection():
+    dialog = SettingsDialog(
+        packs={"ko": _pack("ko", "한국어"), "en": _pack("en", "English")},
+        current_locale="ko",
+        warnings=[],
+        current_choice_marker_style=CIRCLED_NUMBER_STYLE,
+    )
+
+    assert [
+        dialog.choiceMarkerCombo.itemData(index)
+        for index in range(dialog.choiceMarkerCombo.count())
+    ] == [LEGACY_KOREAN_STYLE, CIRCLED_NUMBER_STYLE]
+    assert dialog.selected_choice_marker_style() == CIRCLED_NUMBER_STYLE
+    assert "① ② ③ ④" in dialog.choiceMarkerCombo.currentText()
+
+    dialog.choiceMarkerCombo.setCurrentIndex(0)
+    assert dialog.selected_choice_marker_style() == LEGACY_KOREAN_STYLE
 
     dialog.deleteLater()
     APP.processEvents()

@@ -39,6 +39,11 @@ from ...database.selection import (
     select_group_aware_questions,
 )
 from ...database.validator import QuestionValidator
+from ...choice_markers import (
+    DEFAULT_CHOICE_MARKER_STYLE,
+    choice_marker,
+    normalize_choice_marker_style,
+)
 from ...parser.question import ALL_CHOICES_CORRECT
 
 
@@ -122,11 +127,18 @@ def save_practice_result(repo, mock_exam_id, questions, answers, duration_second
 
 
 class PracticeInterface(QWidget):
-    def __init__(self, db_path=None, parent=None, repository=None):
+    def __init__(
+        self,
+        db_path=None,
+        parent=None,
+        repository=None,
+        choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+    ):
         super().__init__(parent)
         if repository is None and db_path is None:
             raise ValueError("db_path or repository is required")
         self.repo = repository or ExamRepository(db_path)
+        self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.pending_repository = None
         self.validator = QuestionValidator(self.repo)
         self.questions = []
@@ -153,6 +165,11 @@ class PracticeInterface(QWidget):
             self.pending_repository = repository
             return
         self._apply_repository(repository)
+
+    def set_choice_marker_style(self, style):
+        self.choice_marker_style = normalize_choice_marker_style(style)
+        if self.questions:
+            self.render_question()
 
     def _apply_repository(self, repository):
         self.repo = repository
@@ -753,7 +770,13 @@ class PracticeInterface(QWidget):
         self.explanationBox.setVisible(expanded)
 
     def _format_choice_text(self, choice):
-        symbol = choice.get("symbol") or choice.get("choice_symbol") or ""
+        number = choice.get("number") or choice.get("choice_number")
+        stored_symbol = choice.get("symbol") or choice.get("choice_symbol") or ""
+        symbol = choice_marker(
+            number,
+            self.choice_marker_style,
+            fallback=stored_symbol,
+        )
         text = choice.get("text") or choice.get("choice_text") or ""
         return f"{symbol} {text}".strip()
 
@@ -887,8 +910,17 @@ class PracticeInterface(QWidget):
         for choice in question.get("choices") or []:
             number = int(choice.get("number") or choice.get("choice_number") or 0)
             if number == int(answer_number):
-                return choice.get("symbol") or choice.get("choice_symbol") or str(answer_number)
-        return str(answer_number)
+                stored_symbol = choice.get("symbol") or choice.get("choice_symbol") or ""
+                return choice_marker(
+                    answer_number,
+                    self.choice_marker_style,
+                    fallback=stored_symbol,
+                )
+        return choice_marker(
+            answer_number,
+            self.choice_marker_style,
+            fallback=str(answer_number),
+        )
 
     def review_first_wrong(self):
         result = evaluate_answers(self.questions, self.answers)

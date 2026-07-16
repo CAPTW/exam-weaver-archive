@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication
 
+from src.choice_markers import CIRCLED_NUMBER_STYLE, LEGACY_KOREAN_STYLE
 from src.gui.interface.practice import (
     CHOICE_CORRECT_STYLE,
     CHOICE_WRONG_STYLE,
@@ -38,6 +39,24 @@ def test_practice_setup_uses_problem_bank_and_hashtag_language(repo):
 
     widget.deleteLater()
     APP.processEvents()
+
+
+def test_practice_choice_and_answer_labels_use_configured_marker_style():
+    widget = PracticeInterface.__new__(PracticeInterface)
+    widget.choice_marker_style = CIRCLED_NUMBER_STYLE
+    question = {
+        "choices": [
+            {"choice_number": 1, "choice_symbol": "㉮", "choice_text": "첫 선지"},
+            {"choice_number": 2, "choice_symbol": "㉯", "choice_text": "둘째 선지"},
+        ]
+    }
+
+    assert widget._format_choice_text(question["choices"][0]) == "① 첫 선지"
+    assert widget._answer_label(question, 2) == "②"
+
+    widget.questions = []
+    widget.set_choice_marker_style(LEGACY_KOREAN_STYLE)
+    assert widget._format_choice_text(question["choices"][0]) == "㉮ 첫 선지"
 
 
 def test_evaluate_answers_scores_by_question_and_subject(sample_question, repo, sample_metadata):

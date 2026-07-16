@@ -1,4 +1,4 @@
-"""Small Korean settings dialog for menu-only language selection."""
+"""Application settings dialog."""
 
 from __future__ import annotations
 
@@ -14,6 +14,12 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from ...choice_markers import (
+    CHOICE_MARKER_STYLE_LABELS,
+    CIRCLED_NUMBER_STYLE,
+    DEFAULT_CHOICE_MARKER_STYLE,
+    LEGACY_KOREAN_STYLE,
+)
 from ..menu_language import MenuLanguagePack
 
 
@@ -24,6 +30,7 @@ class SettingsDialog(QDialog):
         current_locale: str,
         warnings: Sequence[str],
         parent=None,
+        current_choice_marker_style: str = DEFAULT_CHOICE_MARKER_STYLE,
     ):
         super().__init__(parent)
         self.packs = dict(packs)
@@ -56,6 +63,18 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.languageLabel)
         layout.addWidget(self.languageCombo)
 
+        self.choiceMarkerLabel = BodyLabel("선지 번호 표시", self)
+        self.choiceMarkerCombo = ComboBox(self)
+        for style in (LEGACY_KOREAN_STYLE, CIRCLED_NUMBER_STYLE):
+            self.choiceMarkerCombo.addItem(
+                CHOICE_MARKER_STYLE_LABELS[style],
+                userData=style,
+            )
+        marker_index = self.choiceMarkerCombo.findData(current_choice_marker_style)
+        self.choiceMarkerCombo.setCurrentIndex(max(marker_index, 0))
+        layout.addWidget(self.choiceMarkerLabel)
+        layout.addWidget(self.choiceMarkerCombo)
+
         warning_text = "\n".join(str(warning) for warning in warnings if warning)
         self.warningLabel = BodyLabel(
             f"일부 언어 팩을 불러오지 못했습니다.\n{warning_text}" if warning_text else "",
@@ -77,9 +96,15 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(self.applyButton)
         layout.addLayout(button_layout)
 
-        self.setTabOrder(self.languageCombo, self.cancelButton)
+        self.setTabOrder(self.languageCombo, self.choiceMarkerCombo)
+        self.setTabOrder(self.choiceMarkerCombo, self.cancelButton)
         self.setTabOrder(self.cancelButton, self.applyButton)
         self.languageCombo.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def selected_locale(self) -> str:
         return str(self.languageCombo.currentData() or "ko")
+
+    def selected_choice_marker_style(self) -> str:
+        return str(
+            self.choiceMarkerCombo.currentData() or DEFAULT_CHOICE_MARKER_STYLE
+        )

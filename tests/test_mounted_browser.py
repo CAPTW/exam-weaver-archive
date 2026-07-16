@@ -93,7 +93,14 @@ def _mounted_fixture_with_user_workspace(tmp_path):
 
 
 class _AutoAcceptManualEditor:
-    def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+    def __init__(
+        self,
+        _parent,
+        question_data,
+        subject_options=None,
+        create_mode=False,
+        choice_marker_style=None,
+    ):
         self.question_data = dict(question_data)
         self.subject_options = list(subject_options or [])
         self.create_mode = create_mode

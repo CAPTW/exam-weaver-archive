@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtWidgets import QApplication, QDialog
 from PyQt5.QtGui import QImage
 
+from src.choice_markers import CIRCLED_NUMBER_STYLE, LEGACY_KOREAN_STYLE
 from src.gui.interface.browser import BrowserInterface
 import src.gui.interface.browser as browser_module
 from src.gui.interface.editor import QuestionEditor
@@ -97,6 +98,36 @@ def test_question_editor_uses_hashtag_and_explicit_image_action_labels():
     assert editor.btnPasteImage.text() == '붙여넣기'
     assert editor.btnCopyImage.text() == '클립보드에 복사'
     assert editor.btnClearImage.text() == '삭제'
+
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_question_editor_applies_numeric_markers_without_rewriting_stored_symbols():
+    question = _question_editor_data()
+    stored_symbols = ["㉮", "㉯", "㉴", "㉵"]
+    for choice, symbol in zip(question["choices"], stored_symbols):
+        choice["choice_symbol"] = symbol
+
+    editor = QuestionEditor(
+        question_data=question,
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+        choice_marker_style=CIRCLED_NUMBER_STYLE,
+    )
+
+    assert [editor.choiceLabels[number].text() for number in range(1, 5)] == [
+        "①",
+        "②",
+        "③",
+        "④",
+    ]
+    assert editor.choiceInputs[1].placeholderText() == "① 선지 내용"
+    assert editor.answerCombo.itemText(editor.answerCombo.findData(1)) == "① (1번)"
+    assert [choice["choice_symbol"] for choice in editor.get_data()["choices"]] == stored_symbols
+
+    editor.set_choice_marker_style(LEGACY_KOREAN_STYLE)
+    assert editor.choiceLabels[1].text() == "㉮"
+    assert editor.answerCombo.itemText(editor.answerCombo.findData(1)) == "㉮ (1번)"
 
     editor.deleteLater()
     APP.processEvents()
@@ -420,7 +451,14 @@ def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
         captured_question_data = None
         captured_subject_options = None
 
-        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+        def __init__(
+            self,
+            _parent,
+            question_data,
+            subject_options=None,
+            create_mode=False,
+            choice_marker_style=None,
+        ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options
             self.create_mode = create_mode
@@ -503,7 +541,14 @@ def test_browser_clone_button_creates_customized_personal_question(repo, monkeyp
         captured_question_data = None
         captured_subject_options = None
 
-        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+        def __init__(
+            self,
+            _parent,
+            question_data,
+            subject_options=None,
+            create_mode=False,
+            choice_marker_style=None,
+        ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options
             self.create_mode = create_mode
@@ -551,7 +596,14 @@ def test_browser_descriptive_add_button_creates_model_answer_question(repo, monk
         captured_question_data = None
         captured_subject_options = None
 
-        def __init__(self, _parent, question_data, subject_options=None, create_mode=False):
+        def __init__(
+            self,
+            _parent,
+            question_data,
+            subject_options=None,
+            create_mode=False,
+            choice_marker_style=None,
+        ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options
             self.create_mode = create_mode

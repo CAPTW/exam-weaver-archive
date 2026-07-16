@@ -7,6 +7,7 @@ from lxml import etree
 from docx import Document
 from PIL import Image
 
+from src.choice_markers import CIRCLED_NUMBER_STYLE
 from src.exporter.docx import DocxExporter
 
 
@@ -60,6 +61,40 @@ def test_export_renders_descriptive_question_with_model_answer(tmp_path):
 
     assert "1. 복원성을 설명하시오." in paragraph_texts
     assert "모범답안: 기울어진 선박이 원래 자세로 돌아가려는 성질이다." in paragraph_texts
+
+
+def test_export_uses_circled_number_markers_in_choices_and_answer_key(tmp_path):
+    output_path = tmp_path / "circled-number-choices.docx"
+    questions = [
+        {
+            "question_text": "숫자 원문자 표기 문제",
+            "correct_answer": 2,
+            "choices": [
+                {"choice_number": 1, "choice_symbol": "㉮", "choice_text": "첫 번째"},
+                {"choice_number": 2, "choice_symbol": "㉯", "choice_text": "두 번째"},
+                {"choice_number": 3, "choice_symbol": "㉴", "choice_text": "세 번째"},
+                {"choice_number": 4, "choice_symbol": "㉵", "choice_text": "네 번째"},
+            ],
+        }
+    ]
+
+    DocxExporter(choice_marker_style=CIRCLED_NUMBER_STYLE).export(
+        "숫자 원문자",
+        questions,
+        str(output_path),
+        include_answer_key=True,
+    )
+
+    document_xml = _read_document_xml(output_path)
+    paragraph_texts = [_paragraph_text(p) for p in _paragraphs(document_xml)]
+    combined_text = "\n".join(paragraph_texts)
+
+    assert "① 첫 번째" in paragraph_texts
+    assert "② 두 번째" in paragraph_texts
+    assert "③ 세 번째" in paragraph_texts
+    assert "④ 네 번째" in paragraph_texts
+    assert "1. ②" in combined_text
+    assert all(symbol not in combined_text for symbol in ("㉮", "㉯", "㉴", "㉵"))
 
 
 def test_export_renders_grouped_subject_sections_for_multi_subject_mock(tmp_path):

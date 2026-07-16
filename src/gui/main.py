@@ -82,6 +82,10 @@ from .interface.import_view import ImportInterface
 from .interface.db_mount import DbMountInterface
 from .interface.codex_panel import CodexInterface
 from .interface.settings import SettingsDialog
+from .choice_marker_settings import (
+    load_choice_marker_style,
+    save_choice_marker_style,
+)
 from .menu_language import (
     MenuLanguagePack,
     discover_menu_language_packs,
@@ -180,6 +184,7 @@ class MainWindow(FluentWindow):
             BASE_DIR,
             self.menu_language_packs,
         )
+        self.choice_marker_style = load_choice_marker_style(BASE_DIR)
 
         # Use the writable user DB. Packaged builds create it from seed_exam_bank.db
         # when exam_bank.db is absent.
@@ -194,9 +199,24 @@ class MainWindow(FluentWindow):
 
         # Interfaces
         self.home_interface = HomeInterface(self)
-        self.browser_interface = BrowserInterface(self.db_path, self, repository=question_repository)
-        self.practice_interface = PracticeInterface(self.db_path, self, repository=question_repository)
-        self.export_interface = ExportInterface(self.db_path, self, repository=question_repository)
+        self.browser_interface = BrowserInterface(
+            self.db_path,
+            self,
+            repository=question_repository,
+            choice_marker_style=self.choice_marker_style,
+        )
+        self.practice_interface = PracticeInterface(
+            self.db_path,
+            self,
+            repository=question_repository,
+            choice_marker_style=self.choice_marker_style,
+        )
+        self.export_interface = ExportInterface(
+            self.db_path,
+            self,
+            repository=question_repository,
+            choice_marker_style=self.choice_marker_style,
+        )
         self.import_interface = ImportInterface(self.db_path, self)
         self.db_mount_interface = DbMountInterface(BASE_DIR, self, db_path=self.db_path)
         self.db_mount_interface.mountsChanged.connect(self.refresh_question_repository)
@@ -239,29 +259,39 @@ class MainWindow(FluentWindow):
         self.menu_locale = locale
         apply_menu_pack(self.navigationInterface, pack)
 
+    def apply_choice_marker_style(self, style: str) -> None:
+        self.choice_marker_style = style
+        self.browser_interface.set_choice_marker_style(style)
+        self.practice_interface.set_choice_marker_style(style)
+        self.export_interface.set_choice_marker_style(style)
+
     def open_settings(self) -> None:
         dialog = SettingsDialog(
             packs=self.menu_language_packs,
             current_locale=self.menu_locale,
             warnings=self.menu_pack_warnings,
             parent=self,
+            current_choice_marker_style=self.choice_marker_style,
         )
         if dialog.exec_() != dialog.Accepted:
             return
         locale = dialog.selected_locale()
+        choice_marker_style = dialog.selected_choice_marker_style()
         try:
             save_menu_locale(BASE_DIR, locale, self.menu_language_packs)
+            save_choice_marker_style(BASE_DIR, choice_marker_style)
         except (OSError, ValueError) as exc:
             InfoBar.error(
                 title="설정 저장 실패",
-                content=f"메뉴 언어를 저장하지 못했습니다. {exc}",
+                content=f"앱 설정을 저장하지 못했습니다. {exc}",
                 parent=self,
             )
             return
         self.apply_menu_locale(locale)
+        self.apply_choice_marker_style(choice_marker_style)
         InfoBar.success(
             title="설정 적용 완료",
-            content="메뉴 언어를 변경했습니다.",
+            content="메뉴 언어와 선지 번호 표시를 적용했습니다.",
             parent=self,
             duration=2000,
         )

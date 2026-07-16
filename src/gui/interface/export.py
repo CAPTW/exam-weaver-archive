@@ -21,10 +21,20 @@ from ...database.selection import (
 )
 from ...database.validator import QuestionValidator
 from ...exporter.docx import DocxExporter
+from ...choice_markers import (
+    DEFAULT_CHOICE_MARKER_STYLE,
+    normalize_choice_marker_style,
+)
 
 
 class ExportInterface(QScrollArea):
-    def __init__(self, db_path=None, parent=None, repository=None):
+    def __init__(
+        self,
+        db_path=None,
+        parent=None,
+        repository=None,
+        choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+    ):
         super().__init__(parent)
         if repository is None:
             if db_path is None:
@@ -32,7 +42,8 @@ class ExportInterface(QScrollArea):
             repository = ExamRepository(db_path)
         self.repo = repository
         self.validator = QuestionValidator(self.repo)
-        self.exporter = DocxExporter()
+        self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
+        self.exporter = DocxExporter(choice_marker_style=self.choice_marker_style)
         self.setObjectName("ExportInterface")
 
         self.setFrameShape(QFrame.NoFrame)
@@ -48,6 +59,10 @@ class ExportInterface(QScrollArea):
         self.repo = repository
         self.validator = QuestionValidator(repository)
         self.load_options()
+
+    def set_choice_marker_style(self, style):
+        self.choice_marker_style = normalize_choice_marker_style(style)
+        self.exporter.set_choice_marker_style(self.choice_marker_style)
 
     def init_ui(self):
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)

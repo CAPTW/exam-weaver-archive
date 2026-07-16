@@ -6,10 +6,27 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QScrollArea
 
+from src.choice_markers import CIRCLED_NUMBER_STYLE
 from src.gui.interface.export import ExportInterface
 
 
 APP = QApplication.instance() or QApplication([])
+
+
+def test_export_interface_forwards_choice_marker_style_to_docx_exporter():
+    applied = []
+
+    class Exporter:
+        def set_choice_marker_style(self, style):
+            applied.append(style)
+
+    interface = ExportInterface.__new__(ExportInterface)
+    interface.exporter = Exporter()
+
+    interface.set_choice_marker_style(CIRCLED_NUMBER_STYLE)
+
+    assert interface.choice_marker_style == CIRCLED_NUMBER_STYLE
+    assert applied == [CIRCLED_NUMBER_STYLE]
 
 
 class _Combo:

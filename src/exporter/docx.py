@@ -17,6 +17,11 @@ import re
 from ..parser.formatting import normalize_private_math_glyphs, repair_extracted_text_artifacts
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL, CHOICE_SYMBOL_TO_NUMBER
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..choice_markers import (
+    DEFAULT_CHOICE_MARKER_STYLE,
+    choice_marker,
+    normalize_choice_marker_style,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +30,11 @@ class DocxExporter:
     BODY_LINE_TWIPS = '160'
     COLUMN_SPACE_TWIPS = '425'
 
-    def __init__(self):
-        pass
+    def __init__(self, choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE):
+        self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
+
+    def set_choice_marker_style(self, style):
+        self.choice_marker_style = normalize_choice_marker_style(style)
 
     def export(
         self,
@@ -224,7 +232,12 @@ class DocxExporter:
             for choice in choices:
                 p = doc.add_paragraph()
                 self._format_paragraph(p)
-                symbol = choice.get('choice_symbol') or NUMBER_TO_CHOICE_SYMBOL.get(choice.get('choice_number')) or ''
+                stored_symbol = choice.get('choice_symbol') or ''
+                symbol = choice_marker(
+                    choice.get('choice_number'),
+                    self.choice_marker_style,
+                    fallback=stored_symbol,
+                )
                 is_correct = (
                     answer_number == ALL_CHOICES_CORRECT
                     or choice.get('choice_number') == answer_number
@@ -250,7 +263,11 @@ class DocxExporter:
         if answer_number == ALL_CHOICES_CORRECT:
             return "전원 정답"
 
-        return NUMBER_TO_CHOICE_SYMBOL.get(answer_number, str(answer_number))
+        return choice_marker(
+            answer_number,
+            self.choice_marker_style,
+            fallback=NUMBER_TO_CHOICE_SYMBOL.get(answer_number, str(answer_number)),
+        )
 
     def _normalize_choice(self, choice):
         """Normalize choice object to a dict."""
