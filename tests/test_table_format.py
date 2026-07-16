@@ -147,3 +147,35 @@ def test_normalization_clamps_confidence_and_positive_cell_spans():
     assert table["confidence"]["score"] == 1.0
     assert table["cells"][0]["row_span"] == 1
     assert table["cells"][0]["col_span"] == 1
+
+
+def test_normalization_infers_source_width_mode_from_legacy_widths():
+    table = normalize_table_spec({
+        "rows": [["A", "B"]],
+        "column_widths": [3, 1],
+    })
+
+    assert table["column_widths"] == [0.75, 0.25]
+    assert table["layout"]["width_mode"] == "source"
+
+
+def test_invalid_widths_fall_back_to_auto_mode():
+    table = normalize_table_spec({
+        "rows": [["A", "B"]],
+        "column_widths": [1, 0],
+        "layout": {"width_mode": "manual", "wide": True},
+    })
+
+    assert table["column_widths"] == []
+    assert table["layout"] == {"width_mode": "auto", "wide": True}
+
+
+def test_explicit_auto_mode_preserves_non_authoritative_width_metadata():
+    table = normalize_table_spec({
+        "rows": [["A", "B"]],
+        "column_widths": [0.4, 0.6],
+        "layout": {"width_mode": "auto"},
+    })
+
+    assert table["column_widths"] == [0.4, 0.6]
+    assert table["layout"]["width_mode"] == "auto"

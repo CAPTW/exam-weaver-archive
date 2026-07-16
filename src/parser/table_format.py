@@ -12,6 +12,7 @@ from typing import Any, Optional
 SCHEMA_VERSION = 2
 AUTO_RENDER_THRESHOLD = 0.90
 TABLE_RENDER_MODES = {"auto", "image", "native"}
+TABLE_WIDTH_MODES = {"auto", "source", "manual"}
 COMPLEXITY_FLAGS = (
     "has_formula",
     "has_embedded_image",
@@ -74,6 +75,20 @@ def _clean_numbers(value: Any) -> list[float]:
     return numbers
 
 
+def _normalized_widths(value: Any, column_count: int) -> list[float]:
+    numbers = _clean_numbers(value)
+    if (
+        column_count < 1
+        or len(numbers) != column_count
+        or any(number <= 0 for number in numbers)
+    ):
+        return []
+    total = sum(numbers)
+    if total <= 0:
+        return []
+    return [number / total for number in numbers]
+
+
 def normalize_table_spec(table: Any, index: int = 0) -> dict:
     """Upgrade a legacy or partial table spec without discarding unknown fields."""
     normalized = _as_dict(table)
@@ -102,9 +117,23 @@ def normalize_table_spec(table: Any, index: int = 0) -> dict:
         cells.append(cell)
     normalized["cells"] = cells
 
-    normalized["column_widths"] = _clean_numbers(normalized.get("column_widths"))
+    column_count = max((len(row) for row in normalized["rows"]), default=0)
+    normalized["column_widths"] = _normalized_widths(
+        normalized.get("column_widths"),
+        column_count,
+    )
     normalized["row_heights"] = _clean_numbers(normalized.get("row_heights"))
     normalized["borders"] = list(normalized.get("borders") or [])
+
+    layout = _as_dict(normalized.get("layout"))
+    width_mode = str(layout.get("width_mode") or "").lower()
+    if width_mode not in TABLE_WIDTH_MODES:
+        width_mode = "source" if normalized["column_widths"] else "auto"
+    if width_mode in {"manual", "source"} and not normalized["column_widths"]:
+        width_mode = "auto"
+    layout["width_mode"] = width_mode
+    layout["wide"] = bool(layout.get("wide", False))
+    normalized["layout"] = layout
 
     anchor = _as_dict(normalized.get("anchor"))
     try:
