@@ -70,7 +70,7 @@ if __package__ is None or __package__ == "":
 from PyQt5.QtWidgets import (
     QApplication,
     QHBoxLayout,
-    QStackedWidget,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -233,6 +233,10 @@ class MainWindow(FluentWindow):
         self.codex_sidecar_expanded = True
         self.right_sidecar_expanded = True
         self.right_sidecar_page = "codex"
+        self.right_sidecar_sections = {
+            "explanation": False,
+            "codex": True,
+        }
 
         # Navigation
         self.init_navigation()
@@ -417,87 +421,113 @@ class MainWindow(FluentWindow):
         rail_layout.addWidget(self.codex_toggle_button)
         rail_layout.addStretch(1)
 
-        self.right_sidecar_stack = QStackedWidget(self.codex_sidecar_container)
-        self.right_sidecar_stack.setMinimumWidth(340)
-        self.right_sidecar_stack.setMaximumWidth(RIGHT_SIDECAR_PANEL_WIDTH)
+        self.right_sidecar_splitter = QSplitter(
+            Qt.Orientation.Vertical,
+            self.codex_sidecar_container,
+        )
+        self.right_sidecar_splitter.setMinimumWidth(340)
+        self.right_sidecar_splitter.setMaximumWidth(RIGHT_SIDECAR_PANEL_WIDTH)
+        self.right_sidecar_splitter.setChildrenCollapsible(False)
+        self.right_sidecar_splitter.setHandleWidth(6)
         self.explanation_sidecar_panel = (
             self.browser_interface.take_explanation_panel()
         )
-        self.right_sidecar_stack.addWidget(self.explanation_sidecar_panel)
-        self.right_sidecar_stack.addWidget(self.codex_interface)
+        self.right_sidecar_splitter.addWidget(self.explanation_sidecar_panel)
+        self.right_sidecar_splitter.addWidget(self.codex_interface)
+        self.right_sidecar_splitter.setStretchFactor(0, 1)
+        self.right_sidecar_splitter.setStretchFactor(1, 1)
 
         self.codex_interface.collapse_requested.connect(
-            lambda: self.set_right_sidecar_expanded(False)
+            lambda: self.set_right_sidecar_section_expanded("codex", False)
         )
         self.browser_interface.explanation_panel_requested.connect(
             self._on_explanation_panel_requested
         )
         self.codex_sidecar_layout.addWidget(self.right_sidecar_rail)
-        self.codex_sidecar_layout.addWidget(self.right_sidecar_stack)
+        self.codex_sidecar_layout.addWidget(self.right_sidecar_splitter)
         self.widgetLayout.addWidget(self.codex_sidecar_container)
         self.widgetLayout.setStretchFactor(self.stackedWidget, 1)
         self.widgetLayout.setStretchFactor(self.codex_sidecar_container, 0)
-        self.set_right_sidecar_page("codex")
-        self.set_right_sidecar_expanded(True)
+        self.set_right_sidecar_section_expanded("explanation", False)
+        self.set_right_sidecar_section_expanded("codex", True)
 
     def _on_explanation_panel_requested(self, expanded: bool):
-        if expanded:
-            self.set_right_sidecar_page("explanation")
-            self.set_right_sidecar_expanded(True)
-        elif self.right_sidecar_page == "explanation":
-            self.set_right_sidecar_expanded(False)
+        self.set_right_sidecar_section_expanded("explanation", expanded)
 
-    def activate_right_sidecar(self, page: str):
-        if self.right_sidecar_expanded and self.right_sidecar_page == page:
-            self.set_right_sidecar_expanded(False)
-            return
-        self.set_right_sidecar_page(page)
-        self.set_right_sidecar_expanded(True)
+    def activate_right_sidecar(self, section: str):
+        if section not in self.right_sidecar_sections:
+            raise ValueError(f"unknown right sidecar section: {section}")
+        self.set_right_sidecar_section_expanded(
+            section,
+            not self.right_sidecar_sections[section],
+        )
 
-    def set_right_sidecar_page(self, page: str):
-        if page not in {"explanation", "codex"}:
-            raise ValueError(f"unknown right sidecar page: {page}")
-        self.right_sidecar_page = page
+    def set_right_sidecar_page(self, section: str):
+        """Compatibility wrapper: open a section without hiding the other one."""
+        self.set_right_sidecar_section_expanded(section, True)
+
+    def set_right_sidecar_section_expanded(self, section: str, expanded: bool):
+        if section not in self.right_sidecar_sections:
+            raise ValueError(f"unknown right sidecar section: {section}")
+        self.right_sidecar_page = section
+        self.right_sidecar_sections[section] = bool(expanded)
         widget = (
             self.explanation_sidecar_panel
-            if page == "explanation"
+            if section == "explanation"
             else self.codex_interface
         )
-        self.right_sidecar_stack.setCurrentWidget(widget)
-        self.explanation_sidecar_button.setChecked(page == "explanation")
-        self.codex_toggle_button.setChecked(page == "codex")
+        widget.setVisible(bool(expanded))
+        self._sync_right_sidecar_state()
+        if expanded and all(self.right_sidecar_sections.values()):
+            QTimer.singleShot(0, self._ensure_right_sidecar_split)
 
-    def toggle_codex_sidecar(self):
-        self.activate_right_sidecar("codex")
+    def _ensure_right_sidecar_split(self):
+        if not all(self.right_sidecar_sections.values()):
+            return
+        sizes = self.right_sidecar_splitter.sizes()
+        if len(sizes) == 2 and min(sizes) > 0:
+            return
+        available = max(self.right_sidecar_splitter.height(), 600)
+        first = available // 2
+        self.right_sidecar_splitter.setSizes([first, available - first])
 
-    def set_codex_sidecar_expanded(self, expanded: bool):
-        if expanded:
-            self.set_right_sidecar_page("codex")
-        self.set_right_sidecar_expanded(expanded)
-
-    def set_right_sidecar_expanded(self, expanded: bool):
-        self.right_sidecar_expanded = bool(expanded)
-        self.codex_sidecar_expanded = (
-            self.right_sidecar_expanded and self.right_sidecar_page == "codex"
-        )
-        self.right_sidecar_stack.setVisible(self.right_sidecar_expanded)
-        self.explanation_sidecar_button.setChecked(
-            self.right_sidecar_expanded
-            and self.right_sidecar_page == "explanation"
-        )
-        self.codex_toggle_button.setChecked(
-            self.right_sidecar_expanded and self.right_sidecar_page == "codex"
+    def _sync_right_sidecar_state(self):
+        explanation_expanded = self.right_sidecar_sections["explanation"]
+        codex_expanded = self.right_sidecar_sections["codex"]
+        self.right_sidecar_expanded = explanation_expanded or codex_expanded
+        self.codex_sidecar_expanded = codex_expanded
+        self.right_sidecar_splitter.setVisible(self.right_sidecar_expanded)
+        self.explanation_sidecar_button.setChecked(explanation_expanded)
+        self.codex_toggle_button.setChecked(codex_expanded)
+        self.explanation_sidecar_button.setToolTip(
+            "문제 해설 접기" if explanation_expanded else "문제 해설 펼치기"
         )
         self.codex_toggle_button.setToolTip(
-            "Codex 패널 접기"
-            if self.codex_sidecar_expanded
-            else "Codex 패널 펼치기"
+            "Codex 패널 접기" if codex_expanded else "Codex 패널 펼치기"
         )
         self.codex_sidecar_container.setMaximumWidth(
             RIGHT_SIDECAR_RAIL_WIDTH + RIGHT_SIDECAR_PANEL_WIDTH + 4
             if self.right_sidecar_expanded
             else RIGHT_SIDECAR_RAIL_WIDTH
         )
+
+    def toggle_codex_sidecar(self):
+        self.activate_right_sidecar("codex")
+
+    def set_codex_sidecar_expanded(self, expanded: bool):
+        self.set_right_sidecar_section_expanded("codex", expanded)
+
+    def set_right_sidecar_expanded(self, expanded: bool):
+        if expanded:
+            if not any(self.right_sidecar_sections.values()):
+                self.right_sidecar_sections["codex"] = True
+                self.codex_interface.setVisible(True)
+        else:
+            self.right_sidecar_sections["explanation"] = False
+            self.right_sidecar_sections["codex"] = False
+            self.explanation_sidecar_panel.setVisible(False)
+            self.codex_interface.setVisible(False)
+        self._sync_right_sidecar_state()
 
 def main() -> int:
     _install_crash_logging()

@@ -57,19 +57,105 @@ def test_codex_panel_is_attached_as_sidecar():
     assert hasattr(gui_main.MainWindow, "set_codex_sidecar_expanded")
     assert hasattr(gui_main.MainWindow, "activate_right_sidecar")
     assert hasattr(gui_main.MainWindow, "set_right_sidecar_page")
+    assert hasattr(gui_main.MainWindow, "set_right_sidecar_section_expanded")
     assert hasattr(gui_main.MainWindow, "set_right_sidecar_expanded")
 
 
-def test_explanation_and_codex_share_one_labelled_right_sidecar_stack():
+def test_explanation_and_codex_share_one_labelled_vertical_splitter():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 
-    assert "QStackedWidget" in source
+    assert "QSplitter" in source
+    assert "Qt.Orientation.Vertical" in source
     assert 'external_explanation_host=True' in source
     assert 'self.explanation_sidecar_button = PushButton(' in source
     assert 'self.codex_toggle_button = PushButton("Codex"' in source
-    assert 'self.right_sidecar_stack.addWidget(self.explanation_sidecar_panel)' in source
-    assert 'self.right_sidecar_stack.addWidget(self.codex_interface)' in source
+    assert 'self.right_sidecar_splitter.addWidget(self.explanation_sidecar_panel)' in source
+    assert 'self.right_sidecar_splitter.addWidget(self.codex_interface)' in source
+    assert 'self.right_sidecar_splitter.setChildrenCollapsible(False)' in source
     assert 'self.activate_right_sidecar("explanation")' in source
+
+
+class _VisibilityStub:
+    def __init__(self):
+        self.visible = True
+
+    def setVisible(self, visible):
+        self.visible = bool(visible)
+
+
+class _ButtonStub:
+    def __init__(self):
+        self.checked = False
+        self.tooltip = ""
+
+    def setChecked(self, checked):
+        self.checked = bool(checked)
+
+    def setToolTip(self, tooltip):
+        self.tooltip = tooltip
+
+
+class _SplitterStub(_VisibilityStub):
+    def __init__(self):
+        super().__init__()
+        self.current_sizes = [0, 600]
+
+    def sizes(self):
+        return list(self.current_sizes)
+
+    def height(self):
+        return 800
+
+    def setSizes(self, sizes):
+        self.current_sizes = list(sizes)
+
+
+class _ContainerStub:
+    def __init__(self):
+        self.maximum_width = None
+
+    def setMaximumWidth(self, width):
+        self.maximum_width = width
+
+
+class _SidecarStateHarness:
+    set_right_sidecar_section_expanded = (
+        gui_main.MainWindow.set_right_sidecar_section_expanded
+    )
+    _sync_right_sidecar_state = gui_main.MainWindow._sync_right_sidecar_state
+    _ensure_right_sidecar_split = gui_main.MainWindow._ensure_right_sidecar_split
+
+    def __init__(self):
+        self.right_sidecar_page = "codex"
+        self.right_sidecar_sections = {"explanation": False, "codex": True}
+        self.explanation_sidecar_panel = _VisibilityStub()
+        self.codex_interface = _VisibilityStub()
+        self.right_sidecar_splitter = _SplitterStub()
+        self.explanation_sidecar_button = _ButtonStub()
+        self.codex_toggle_button = _ButtonStub()
+        self.codex_sidecar_container = _ContainerStub()
+
+
+def test_explanation_and_codex_sections_can_be_expanded_together(monkeypatch):
+    monkeypatch.setattr(gui_main.QTimer, "singleShot", lambda _delay, callback: callback())
+    host = _SidecarStateHarness()
+
+    host.set_right_sidecar_section_expanded("explanation", True)
+    assert host.explanation_sidecar_panel.visible is True
+    assert host.codex_interface.visible is True
+    assert host.explanation_sidecar_button.checked is True
+    assert host.codex_toggle_button.checked is True
+    assert host.right_sidecar_expanded is True
+    assert min(host.right_sidecar_splitter.current_sizes) > 0
+
+    host.set_right_sidecar_section_expanded("codex", False)
+    assert host.explanation_sidecar_panel.visible is True
+    assert host.codex_interface.visible is False
+    assert host.right_sidecar_expanded is True
+
+    host.set_right_sidecar_section_expanded("explanation", False)
+    assert host.right_sidecar_splitter.visible is False
+    assert host.codex_sidecar_container.maximum_width == gui_main.RIGHT_SIDECAR_RAIL_WIDTH
 
 
 def test_practice_interface_is_registered_in_main_window():

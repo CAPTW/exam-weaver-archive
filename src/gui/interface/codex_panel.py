@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import shutil
@@ -50,6 +51,7 @@ PROGRESS_MESSAGES = [
     "프로젝트 문맥을 확인하고 있습니다.",
     "응답 이벤트를 기다리고 있습니다.",
 ]
+MODEL_CATALOG_CACHE_FILENAME = "codex_model_catalog.json"
 USER_BLOCK_TITLE = "사용자"
 SYSTEM_BLOCK_TITLE = "시스템"
 ERROR_BLOCK_TITLE = "오류"
@@ -694,6 +696,87 @@ def prepare_panel_codex_home(
     return panel_home
 
 
+def _model_catalog_cache_path(base_dir: str | Path) -> Path:
+    return Path(base_dir).resolve() / "data" / MODEL_CATALOG_CACHE_FILENAME
+
+
+def normalize_codex_model_catalog(response) -> list[dict[str, object]]:
+    """Convert the SDK model/list response into stable picker metadata."""
+    options: list[dict[str, object]] = []
+    for raw_model in getattr(response, "data", ()) or ():
+        if hasattr(raw_model, "model_dump"):
+            data = raw_model.model_dump(mode="json", by_alias=True)
+        elif isinstance(raw_model, dict):
+            data = dict(raw_model)
+        else:
+            continue
+        if data.get("hidden"):
+            continue
+        model = str(data.get("model") or data.get("id") or "").strip()
+        if not model:
+            continue
+        display_name = str(data.get("displayName") or model).strip()
+        description = str(data.get("description") or "").strip()
+        modalities = {
+            str(modality).strip().lower()
+            for modality in (data.get("inputModalities") or ["text"])
+        }
+        options.append(
+            {
+                "label": display_name,
+                "model": model,
+                "service_tier": data.get("defaultServiceTier"),
+                "image": "image" in modalities,
+                "is_default": bool(data.get("isDefault")),
+                "description": description,
+            }
+        )
+    return options
+
+
+def load_cached_model_catalog(base_dir: str | Path) -> list[dict[str, object]]:
+    path = _model_catalog_cache_path(base_dir)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    options = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        model = str(item.get("model") or "").strip()
+        label = str(item.get("label") or model).strip()
+        if not model or not label:
+            continue
+        options.append(
+            {
+                "label": label,
+                "model": model,
+                "service_tier": item.get("service_tier"),
+                "image": bool(item.get("image", False)),
+                "is_default": bool(item.get("is_default", False)),
+                "description": str(item.get("description") or "").strip(),
+            }
+        )
+    return options
+
+
+def save_cached_model_catalog(
+    base_dir: str | Path,
+    options: list[dict[str, object]],
+) -> None:
+    path = _model_catalog_cache_path(base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(options, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 class CodexChatView(QWidget):
     def __init__(self, base_dir: str | Path, parent=None):
         super().__init__(parent)
@@ -943,6 +1026,37 @@ class CodexRunWorker(QThread):
             self.error.emit(str(exc))
 
 
+class CodexModelListWorker(QThread):
+    result = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, cwd: str, parent=None):
+        super().__init__(parent)
+        self.cwd = cwd
+
+    def run(self):
+        try:
+            from openai_codex import Codex, CodexConfig
+
+            apply_hidden_codex_process_patch()
+            codex_home = prepare_panel_codex_home(self.cwd)
+            config = CodexConfig(
+                cwd=self.cwd,
+                client_name="exam_generator_codex_panel",
+                client_title="Exam Generator Codex Panel",
+                client_version="0.1.0",
+                env={"CODEX_HOME": str(codex_home)},
+            )
+            with Codex(config=config) as codex:
+                options = normalize_codex_model_catalog(codex.models())
+            if not options:
+                raise RuntimeError("Codex가 사용 가능한 모델을 반환하지 않았습니다.")
+            self.result.emit(options)
+        except Exception as exc:  # noqa: BLE001 - surfaced to UI
+            traceback.print_exc()
+            self.error.emit(str(exc))
+
+
 class CodexStatusWorker(QThread):
     result = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -1036,8 +1150,11 @@ class CodexInterface(QWidget):
         self.thread_id: str | None = None
         self.image_paths: list[str] = []
         self.worker: CodexRunWorker | None = None
+        self.model_worker: CodexModelListWorker | None = None
         self.status_worker: CodexStatusWorker | None = None
         self.login_worker: CodexLoginWorker | None = None
+        self._model_refresh_started = False
+        self._manual_model_refresh = False
         self.progress_timer = QTimer(self)
         self.progress_timer.setInterval(2500)
         self.progress_timer.timeout.connect(self._append_progress_tick)
@@ -1086,9 +1203,18 @@ class CodexInterface(QWidget):
         self.vBoxLayout.addLayout(header_layout)
 
         controls_layout = QVBoxLayout() if self.side_panel else QHBoxLayout()
+        self.modelInfoLabel = BodyLabel("모델 기능 정보 확인 중", self)
+        self.modelInfoLabel.setWordWrap(True)
+        self.modelInfoLabel.setTextColor(Qt.darkGray, Qt.white)
         self.modelCombo = QComboBox(self)
         self._populate_model_combo()
         self._apply_combo_item_height(self.modelCombo)
+        self.modelCombo.currentIndexChanged.connect(self._update_model_info)
+        self.refreshModelsButton = PushButton("갱신", self)
+        self.refreshModelsButton.setToolTip("Codex에서 사용 가능한 모델 목록 다시 불러오기")
+        self.refreshModelsButton.clicked.connect(
+            lambda: self.refresh_models(manual=True)
+        )
 
         self.sandboxCombo = QComboBox(self)
         self.sandboxCombo.addItem("읽기 전용", "read-only")
@@ -1111,6 +1237,10 @@ class CodexInterface(QWidget):
         self.newThreadButton.clicked.connect(self.new_thread)
 
         if self.side_panel:
+            model_row = QHBoxLayout()
+            model_row.addWidget(self.modelCombo, 1)
+            model_row.addWidget(self.refreshModelsButton)
+
             option_row = QHBoxLayout()
             option_row.addWidget(self.sandboxCombo)
             option_row.addWidget(self.approvalCombo)
@@ -1120,13 +1250,16 @@ class CodexInterface(QWidget):
             button_row.addWidget(self.loginButton)
             button_row.addWidget(self.newThreadButton)
 
-            controls_layout.addWidget(self.modelCombo)
+            controls_layout.addLayout(model_row)
+            controls_layout.addWidget(self.modelInfoLabel)
             controls_layout.addLayout(option_row)
             controls_layout.addLayout(button_row)
         else:
             self.modelLabel = BodyLabel("모델", self)
             controls_layout.addWidget(self.modelLabel)
             controls_layout.addWidget(self.modelCombo)
+            controls_layout.addWidget(self.refreshModelsButton)
+            controls_layout.addWidget(self.modelInfoLabel)
             controls_layout.addWidget(self.sandboxCombo)
             controls_layout.addWidget(self.approvalCombo)
             controls_layout.addStretch(1)
@@ -1134,6 +1267,7 @@ class CodexInterface(QWidget):
             controls_layout.addWidget(self.loginButton)
             controls_layout.addWidget(self.newThreadButton)
         self.vBoxLayout.addLayout(controls_layout)
+        self._update_model_info()
 
         self.chatView = CodexChatView(self.base_dir, self)
         self.vBoxLayout.addWidget(self.chatView, 1)
@@ -1184,6 +1318,12 @@ class CodexInterface(QWidget):
         if self.side_panel:
             self._apply_side_panel_compact_sizes()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._model_refresh_started:
+            self._model_refresh_started = True
+            QTimer.singleShot(0, self.refresh_models)
+
     def _apply_combo_item_height(self, combo, height=44):
         view = combo.view()
         view.setStyleSheet(f"QListView::item {{ height: {height}px; }}")
@@ -1196,8 +1336,10 @@ class CodexInterface(QWidget):
     def _apply_side_panel_compact_sizes(self):
         for widget in (
             self.statusLabel,
+            self.modelInfoLabel,
             self.imageStatusLabel,
             self.modelCombo,
+            self.refreshModelsButton,
             self.sandboxCombo,
             self.approvalCombo,
             self.chatView,
@@ -1230,6 +1372,7 @@ class CodexInterface(QWidget):
             self.checkStatusButton: 76,
             self.loginButton: 58,
             self.newThreadButton: 78,
+            self.refreshModelsButton: 54,
         }
         for button, width in button_widths.items():
             button.setFixedHeight(SIDE_PANEL_BUTTON_HEIGHT)
@@ -1239,31 +1382,144 @@ class CodexInterface(QWidget):
         self.imageStatusLabel.setMaximumWidth(78)
 
     def _populate_model_combo(self):
+        self._apply_model_options(load_cached_model_catalog(self.base_dir))
+
+    def _apply_model_options(self, options: list[dict[str, object]]):
+        current_model = self._selected_model() if self.modelCombo.count() else None
+        default_option = next(
+            (option for option in options if option.get("is_default")),
+            None,
+        )
+        default_image = (
+            bool(default_option.get("image", False))
+            if default_option is not None
+            else True
+        )
+        self.modelCombo.blockSignals(True)
         self.modelCombo.clear()
-        options = [
-            (
-                "GPT-5.3 Spark - 가장 빠름, 텍스트",
-                {"model": "gpt-5.3-codex-spark", "service_tier": None, "image": False},
-            ),
-            (
-                "GPT-5.4 Mini - 빠름, 이미지 가능",
-                {"model": "gpt-5.4-mini", "service_tier": None, "image": True},
-            ),
-            (
-                "GPT-5.4 Fast - 균형",
-                {"model": "gpt-5.4", "service_tier": "priority", "image": True},
-            ),
-            (
-                "GPT-5.5 Fast - 고성능",
-                {"model": "gpt-5.5", "service_tier": "priority", "image": True},
-            ),
-            (
-                "기본값 사용",
-                {"model": None, "service_tier": None, "image": True},
-            ),
-        ]
-        for label, data in options:
-            self.modelCombo.addItem(label, data)
+        self.modelCombo.addItem(
+            "Codex 기본값 (자동)",
+            {
+                "model": None,
+                "service_tier": None,
+                "image": default_image,
+                "capability_known": default_option is not None,
+                "default_model_label": (
+                    str(default_option.get("label") or "")
+                    if default_option is not None
+                    else ""
+                ),
+            },
+        )
+        self.modelCombo.setItemData(
+            0,
+            "Codex 런타임이 현재 기본 모델을 자동 선택합니다.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
+        selected_index = 0
+        for option in options:
+            data = {
+                "model": option.get("model"),
+                "service_tier": option.get("service_tier"),
+                "image": bool(option.get("image", False)),
+                "capability_known": True,
+            }
+            capability = "이미지 가능" if data["image"] else "텍스트 전용"
+            label = str(option.get("label") or data["model"])
+            self.modelCombo.addItem(f"{label} · {capability}", data)
+            index = self.modelCombo.count() - 1
+            description = str(option.get("description") or "").strip()
+            details = [description] if description else []
+            details.append("이미지 지원" if data["image"] else "텍스트 전용")
+            if option.get("is_default"):
+                details.append("현재 Codex 기본 모델")
+            self.modelCombo.setItemData(
+                index,
+                " · ".join(details),
+                Qt.ItemDataRole.ToolTipRole,
+            )
+            if current_model and data["model"] == current_model:
+                selected_index = index
+        self.modelCombo.setCurrentIndex(selected_index)
+        self.modelCombo.blockSignals(False)
+        if hasattr(self, "modelInfoLabel"):
+            self._update_model_info()
+
+    def _update_model_info(self, *_args):
+        data = self.modelCombo.currentData()
+        if not isinstance(data, dict):
+            self.modelInfoLabel.setText("모델 기능 정보를 확인할 수 없습니다.")
+            return
+        capability_known = bool(data.get("capability_known", False))
+        if capability_known:
+            capability = (
+                "이미지 입력 가능"
+                if data.get("image")
+                else "텍스트 전용 · 이미지 입력 불가"
+            )
+        else:
+            capability = "기능은 선택된 기본 모델에 따라 자동 결정"
+        if data.get("model") is None:
+            default_label = str(data.get("default_model_label") or "").strip()
+            prefix = (
+                f"자동 선택 · 현재 기본: {default_label}"
+                if default_label
+                else "Codex가 실행 시 모델을 자동 선택"
+            )
+            self.modelInfoLabel.setText(f"{prefix} · {capability}")
+            return
+        self.modelInfoLabel.setText(capability)
+
+    def refresh_models(self, manual: bool = False):
+        if self.model_worker is not None and self.model_worker.isRunning():
+            return
+        self._manual_model_refresh = bool(manual)
+        self.refreshModelsButton.setEnabled(False)
+        self.refreshModelsButton.setText("확인 중")
+        self.refreshModelsButton.setToolTip("Codex 모델 카탈로그를 확인하고 있습니다.")
+        self.modelInfoLabel.setText("사용 가능한 모델과 기능을 확인하는 중...")
+        self.model_worker = CodexModelListWorker(self.base_dir, self)
+        self.model_worker.result.connect(self._on_model_catalog_result)
+        self.model_worker.error.connect(self._on_model_catalog_error)
+        self.model_worker.finished.connect(self._on_model_catalog_finished)
+        self.model_worker.start()
+
+    def _on_model_catalog_result(self, options: list[dict[str, object]]):
+        self._apply_model_options(options)
+        try:
+            save_cached_model_catalog(self.base_dir, options)
+        except OSError:
+            pass
+        self.modelCombo.setToolTip(
+            f"Codex에서 사용 가능한 모델 {len(options)}개를 불러왔습니다."
+        )
+        if self._manual_model_refresh:
+            InfoBar.success(
+                title="모델 목록 갱신",
+                content=f"사용 가능한 Codex 모델 {len(options)}개를 불러왔습니다.",
+                parent=self,
+                duration=2500,
+            )
+
+    def _on_model_catalog_error(self, message: str):
+        self.modelCombo.setToolTip(
+            "모델 목록을 갱신하지 못해 마지막 목록 또는 Codex 기본값을 사용합니다."
+        )
+        self._update_model_info()
+        if self._manual_model_refresh:
+            InfoBar.warning(
+                title="모델 목록 갱신 실패",
+                content=message,
+                parent=self,
+                duration=4000,
+            )
+
+    def _on_model_catalog_finished(self):
+        self.refreshModelsButton.setEnabled(True)
+        self.refreshModelsButton.setText("갱신")
+        self.refreshModelsButton.setToolTip(
+            "Codex에서 사용 가능한 모델 목록 다시 불러오기"
+        )
 
     def _selected_model(self) -> str | None:
         data = self.modelCombo.currentData()
@@ -1306,7 +1562,7 @@ class CodexInterface(QWidget):
         if self.image_paths and not self._selected_model_supports_images():
             InfoBar.error(
                 title="이미지 모델 필요",
-                content="이미지를 보낼 때는 GPT-5.4 Mini, GPT-5.4 Fast, GPT-5.5 Fast 중 하나를 선택하세요.",
+                content="이미지를 지원하는 Codex 모델을 선택하세요.",
                 parent=self,
                 duration=4000,
             )
@@ -1499,6 +1755,7 @@ class CodexInterface(QWidget):
 
     def _on_login_result(self, message: str):
         self._set_status(message)
+        self.refresh_models()
         InfoBar.success(
             title="Codex 로그인 완료",
             content=message,
@@ -1585,6 +1842,8 @@ class CodexInterface(QWidget):
         if self.worker is not None and self.worker.isRunning():
             self.worker.interrupt()
             self.worker.wait(1500)
+        if self.model_worker is not None and self.model_worker.isRunning():
+            self.model_worker.wait(3000)
         if self.status_worker is not None and self.status_worker.isRunning():
             self.status_worker.wait(1500)
         if self.login_worker is not None and self.login_worker.isRunning():

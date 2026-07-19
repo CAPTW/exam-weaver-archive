@@ -250,6 +250,7 @@ class BrowserInterface(QWidget):
         self.explanationSidecar.setParent(None)
         self.explanationSidecar.setMinimumWidth(340)
         self.explanationSidecar.setMaximumWidth(430)
+        self.explanationEditor.setMinimumHeight(140)
         return self.explanationSidecar
 
     def _apply_combo_item_height(self, combo, height=44):

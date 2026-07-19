@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("EXAM_GENERATOR_DISABLE_WEBENGINE", "1")
@@ -12,12 +13,15 @@ from src.gui.interface.codex_panel import (
     USER_BLOCK_TITLE,
     apply_hidden_codex_process_patch,
     find_mathjax_script_path,
+    load_cached_model_catalog,
     mathjax_script_url,
+    normalize_codex_model_catalog,
     prepare_panel_codex_home,
     progress_message_for_event_method,
     render_codex_chat_html,
     render_codex_inline_html,
     render_codex_text_to_html,
+    save_cached_model_catalog,
 )
 
 
@@ -68,15 +72,108 @@ def test_full_codex_panel_labels_model_in_korean(tmp_path):
 def test_codex_panel_keeps_model_optional(tmp_path):
     widget = CodexInterface(tmp_path, side_panel=True)
 
+    assert widget._selected_model() is None
+    assert widget._selected_model_supports_images() is True
+
+    widget._apply_model_options(
+        [
+            {
+                "label": "GPT-5.6-Sol",
+                "model": "gpt-5.6-sol",
+                "service_tier": None,
+                "image": True,
+                "is_default": True,
+                "description": "Latest frontier agentic coding model.",
+            },
+            {
+                "label": "GPT-5.3-Codex-Spark",
+                "model": "gpt-5.3-codex-spark",
+                "service_tier": None,
+                "image": False,
+                "is_default": False,
+                "description": "Ultra-fast coding model.",
+            },
+        ]
+    )
+    widget.modelCombo.setCurrentIndex(2)
     assert widget._selected_model() == "gpt-5.3-codex-spark"
     assert widget._selected_model_supports_images() is False
+    assert "텍스트 전용" in widget.modelCombo.currentText()
+    assert widget.modelInfoLabel.text() == "텍스트 전용 · 이미지 입력 불가"
 
     widget.modelCombo.setCurrentIndex(1)
-    assert widget._selected_model() == "gpt-5.4-mini"
-    assert widget._selected_model_supports_images() is True
+    assert widget._selected_model() == "gpt-5.6-sol"
+    assert "이미지 가능" in widget.modelCombo.currentText()
+    assert widget.modelInfoLabel.text() == "이미지 입력 가능"
+
+    widget.modelCombo.setCurrentIndex(0)
+    assert "GPT-5.6-Sol" in widget.modelInfoLabel.text()
+    assert "이미지 입력 가능" in widget.modelInfoLabel.text()
+    assert widget.refreshModelsButton.text() == "갱신"
 
     widget.deleteLater()
     APP.processEvents()
+
+
+def test_codex_model_catalog_uses_runtime_metadata_and_filters_hidden_models():
+    class _Model:
+        def __init__(self, data):
+            self.data = data
+
+        def model_dump(self, **_kwargs):
+            return dict(self.data)
+
+    response = SimpleNamespace(
+        data=[
+            _Model(
+                {
+                    "model": "gpt-5.6-sol",
+                    "displayName": "GPT-5.6-Sol",
+                    "description": "Latest frontier agentic coding model.",
+                    "inputModalities": ["text", "image"],
+                    "isDefault": True,
+                    "defaultServiceTier": None,
+                    "hidden": False,
+                }
+            ),
+            _Model(
+                {
+                    "model": "internal-model",
+                    "displayName": "Internal",
+                    "inputModalities": ["text"],
+                    "hidden": True,
+                }
+            ),
+        ]
+    )
+
+    assert normalize_codex_model_catalog(response) == [
+        {
+            "label": "GPT-5.6-Sol",
+            "model": "gpt-5.6-sol",
+            "service_tier": None,
+            "image": True,
+            "is_default": True,
+            "description": "Latest frontier agentic coding model.",
+        }
+    ]
+
+
+def test_codex_model_catalog_cache_round_trip(tmp_path):
+    options = [
+        {
+            "label": "GPT-5.6-Terra",
+            "model": "gpt-5.6-terra",
+            "service_tier": None,
+            "image": True,
+            "is_default": False,
+            "description": "Balanced agentic coding model for everyday work.",
+        }
+    ]
+
+    save_cached_model_catalog(tmp_path, options)
+
+    assert load_cached_model_catalog(tmp_path) == options
 
 
 def test_codex_panel_tracks_attached_images(tmp_path):
