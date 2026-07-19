@@ -364,13 +364,18 @@ class TableEditorDialog(QDialog):
         groups = (
             ("편집", ("undo", "redo")),
             (
-                "행·열",
+                "행",
                 (
                     "row_above",
                     "row_below",
+                    "delete_rows",
+                ),
+            ),
+            (
+                "열",
+                (
                     "column_left",
                     "column_right",
-                    "delete_rows",
                     "delete_columns",
                 ),
             ),

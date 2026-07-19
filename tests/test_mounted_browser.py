@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
@@ -222,3 +223,38 @@ def test_question_repository_builder_uses_mounts_and_falls_back_safely(tmp_path)
     repository, error = build_question_repository(first_db, manifest)
     assert isinstance(repository, ExamRepository)
     assert error is None
+
+
+def test_table_payload_edit_is_written_only_to_owning_mount(tmp_path, monkeypatch):
+    repository, first_db, second_db = _mounted_fixture(tmp_path)
+    widget = BrowserInterface(repository=repository)
+    existing = repository.get_question("second::1")
+    edited = dict(existing)
+    edited["question_format_json"] = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "edited-table",
+            "rows": [["A", "B"]],
+            "cells": [
+                {"row": 0, "col": 0, "text": "A"},
+                {"row": 0, "col": 1, "text": "B"},
+            ],
+            "column_widths": [0.3, 0.7],
+            "layout": {"width_mode": "manual", "wide": False},
+        }],
+    }, ensure_ascii=False)
+    editor = SimpleNamespace(get_data=lambda: edited)
+    monkeypatch.setattr(
+        browser_module.InfoBar,
+        "success",
+        lambda **_kwargs: None,
+    )
+
+    widget._save_open_editor("second::1", editor, repository)
+
+    second = ExamRepository(str(second_db)).get_question(1)
+    first = ExamRepository(str(first_db)).get_question(1)
+    assert second["question_format_json"] == edited["question_format_json"]
+    assert first["question_format_json"] is None
+    widget.deleteLater()
+    APP.processEvents()

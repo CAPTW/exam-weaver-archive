@@ -7,7 +7,7 @@ import pytest
 from PyQt5.QtCore import QItemSelectionModel, Qt
 from PyQt5.QtGui import QImage
 from PyQt5.QtTest import QTest
-from PyQt5.QtWidgets import QApplication, QPlainTextEdit
+from PyQt5.QtWidgets import QApplication, QFrame, QPlainTextEdit
 
 from src.gui.table_editor import TableEditorDialog
 from src.parser.table_format import parse_format_payload, serialize_format_payload
@@ -468,6 +468,25 @@ def test_command_groups_wrap_and_primary_actions_remain_accessible():
     assert dialog.cancelButton.minimumHeight() >= 32
     assert dialog.minimumWidth() == 980
     assert dialog.minimumHeight() == 640
+    _close(dialog)
+
+
+def test_command_groups_fit_inside_minimum_dialog_width():
+    dialog = _dialog({"rows": [["A", "B"]]})
+    dialog.resize(dialog.minimumWidth(), dialog.minimumHeight())
+    APP.processEvents()
+
+    groups = [
+        group
+        for group in dialog.commandBar.findChildren(QFrame)
+        if group.objectName() == "TableCommandGroup"
+    ]
+
+    assert groups
+    assert all(
+        group.geometry().right() < dialog.commandBar.width()
+        for group in groups
+    )
     _close(dialog)
 
 

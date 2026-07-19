@@ -10,6 +10,7 @@ import pytest
 
 from src.choice_markers import CIRCLED_NUMBER_STYLE
 from src.exporter.docx import DocxExporter
+from src.gui.table_edit_session import TableEditSession
 from src.parser.view_table import promote_view_block
 
 
@@ -717,6 +718,51 @@ def test_native_table_writes_fixed_grid_widths_from_manual_layout(tmp_path):
     ]
     assert len(grid_widths) == 2
     assert grid_widths[1] / grid_widths[0] == pytest.approx(3.0, rel=0.03)
+
+
+def test_editor_session_alignment_and_widths_survive_docx_export(tmp_path):
+    output = tmp_path / "editor-table.docx"
+    session = TableEditSession({
+        "id": "edited",
+        "rows": [["왼쪽", "오른쪽"], ["위", "아래"]],
+        "render_mode": "native",
+    })
+    session.align_cells({(0, 1)}, horizontal="right")
+    session.align_cells({(1, 0)}, horizontal="center", vertical="top")
+    session.align_cells({(1, 1)}, horizontal="center", vertical="bottom")
+    session.set_manual_widths([30, 70])
+    payload = json.dumps({
+        "schema_version": 2,
+        "tables": [session.result()],
+    }, ensure_ascii=False)
+
+    DocxExporter().export(
+        "편집 표",
+        _single_table_question(payload),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    assert xml.xpath(
+        "string(//w:tbl/w:tr[1]/w:tc[2]/w:p/w:pPr/w:jc/@w:val)",
+        namespaces=NS,
+    ) == "right"
+    assert xml.xpath(
+        "string(//w:tbl/w:tr[2]/w:tc[1]/w:tcPr/w:vAlign/@w:val)",
+        namespaces=NS,
+    ) == "top"
+    assert xml.xpath(
+        "string(//w:tbl/w:tr[2]/w:tc[2]/w:tcPr/w:vAlign/@w:val)",
+        namespaces=NS,
+    ) == "bottom"
+    grid_widths = [
+        int(value)
+        for value in xml.xpath(
+            "//w:tbl/w:tblGrid/w:gridCol/@w:w",
+            namespaces=NS,
+        )
+    ]
+    assert grid_widths[1] / grid_widths[0] == pytest.approx(7 / 3, rel=0.03)
 
 
 def test_content_heavy_table_switches_to_one_column_and_restores_two_columns(tmp_path):

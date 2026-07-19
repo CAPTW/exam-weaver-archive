@@ -162,3 +162,43 @@ def test_normalize_database_preserves_multicell_layout_and_merge_backup(tmp_path
     assert stored["column_widths"] == [0.3, 0.7]
     assert stored["cells"][0]["merge_backup"][1]["text"] == "B"
     assert stored["custom_table"] == {"keep": True}
+
+
+def test_normalize_database_preserves_editor_alignment_spans_and_widths(tmp_path):
+    payload = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "editor-table",
+            "rows": [["AB", ""], ["C", "D"]],
+            "cells": [
+                {
+                    "row": 0,
+                    "col": 0,
+                    "text": "AB",
+                    "row_span": 1,
+                    "col_span": 2,
+                    "horizontal_alignment": "center",
+                    "vertical_alignment": "top",
+                },
+                {"row": 1, "col": 0, "text": "C"},
+                {"row": 1, "col": 1, "text": "D"},
+            ],
+            "column_widths": [0.4, 0.6],
+            "layout": {"width_mode": "manual", "wide": False},
+        }],
+    }, ensure_ascii=False)
+    db_path = tmp_path / "bank.db"
+    _database(db_path, payload, None)
+
+    normalize_database(db_path, source_root=tmp_path)
+
+    with sqlite3.connect(db_path) as conn:
+        table = json.loads(
+            conn.execute(
+                "SELECT question_format_json FROM questions"
+            ).fetchone()[0]
+        )["tables"][0]
+    assert table["cells"][0]["col_span"] == 2
+    assert table["cells"][0]["horizontal_alignment"] == "center"
+    assert table["cells"][0]["vertical_alignment"] == "top"
+    assert table["column_widths"] == [0.4, 0.6]
