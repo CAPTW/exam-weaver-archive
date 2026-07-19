@@ -4,11 +4,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt5.QtCore import QItemSelectionModel
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QItemSelectionModel, Qt
+from PyQt5.QtTest import QTest
+from PyQt5.QtWidgets import QApplication, QPlainTextEdit
 
 from src.gui.table_editor import TableEditorDialog
 from src.parser.table_format import parse_format_payload, serialize_format_payload
+from src.parser.table_structure import insert_column
 from src.parser.view_table import add_one_cell_table
 
 
@@ -218,4 +220,123 @@ def test_manual_view_table_expands_without_losing_view_metadata():
     assert result["anchor"]["offset"] == 1
     assert result["source"]["kind"] == "view_block_text"
     assert result["render_mode"] == "native"
+    _close(dialog)
+
+
+def test_direct_cell_change_is_one_undoable_command():
+    dialog = _dialog({"rows": [["A"]]})
+
+    dialog.grid.item(0, 0).setText("수정")
+    APP.processEvents()
+
+    assert dialog.result_table_spec()["rows"] == [["수정"]]
+    assert dialog.session.undo_stack.count() == 1
+    dialog.session.undo_stack.undo()
+    assert dialog.result_table_spec()["rows"] == [["A"]]
+    _close(dialog)
+
+
+def test_multiline_enter_and_tab_commit_one_edit_command():
+    dialog = _dialog({"rows": [["A"]]})
+    dialog.grid.setCurrentCell(0, 0)
+    dialog.grid.editItem(dialog.grid.item(0, 0))
+    APP.processEvents()
+    editor = dialog.grid.findChild(QPlainTextEdit)
+
+    assert editor is not None
+    editor.selectAll()
+    QTest.keyClicks(editor, "first")
+    QTest.keyClick(editor, Qt.Key_Return)
+    QTest.keyClicks(editor, "second")
+    QTest.keyClick(editor, Qt.Key_Tab)
+    APP.processEvents()
+
+    assert dialog.result_table_spec()["rows"] == [["first\nsecond"]]
+    assert dialog.session.undo_stack.count() == 1
+    _close(dialog)
+
+
+def test_escape_cancels_uncommitted_cell_text():
+    dialog = _dialog({"rows": [["A"]]})
+    dialog.grid.setCurrentCell(0, 0)
+    dialog.grid.editItem(dialog.grid.item(0, 0))
+    APP.processEvents()
+    editor = dialog.grid.findChild(QPlainTextEdit)
+
+    assert editor is not None
+    editor.selectAll()
+    QTest.keyClicks(editor, "discard")
+    QTest.keyClick(editor, Qt.Key_Escape)
+    APP.processEvents()
+
+    assert dialog.result_table_spec()["rows"] == [["A"]]
+    assert dialog.session.undo_stack.count() == 0
+    _close(dialog)
+
+
+def test_delete_clears_text_without_removing_structure():
+    dialog = _dialog({"rows": [["A", "B"], ["C", "D"]]})
+    dialog.grid.setCurrentCell(0, 0)
+
+    QTest.keyClick(dialog.grid, Qt.Key_Delete)
+    APP.processEvents()
+
+    assert dialog.result_table_spec()["rows"] == [["", "B"], ["C", "D"]]
+    assert dialog.grid.rowCount() == 2
+    assert dialog.grid.columnCount() == 2
+    assert dialog.session.undo_stack.count() == 1
+    _close(dialog)
+
+
+def test_alignment_applies_to_selection_and_is_undoable():
+    dialog = _dialog({"rows": [["A", "B"]]})
+    selection = dialog.grid.selectionModel()
+    for column in range(2):
+        selection.select(
+            dialog.grid.model().index(0, column),
+            QItemSelectionModel.Select,
+        )
+
+    dialog.apply_horizontal_alignment("center")
+    dialog.apply_vertical_alignment("top")
+
+    cells = dialog.result_table_spec()["cells"]
+    assert {cell["horizontal_alignment"] for cell in cells} == {"center"}
+    assert {cell["vertical_alignment"] for cell in cells} == {"top"}
+    assert dialog.session.undo_stack.count() == 2
+    dialog.session.undo_stack.undo()
+    assert {
+        cell["vertical_alignment"]
+        for cell in dialog.result_table_spec()["cells"]
+    } == {"center"}
+    _close(dialog)
+
+
+def test_command_state_disables_invalid_merge_split_and_dimension_delete():
+    dialog = _dialog({"rows": [["A"]]})
+    dialog.grid.setCurrentCell(0, 0)
+    dialog._update_command_state()
+
+    assert dialog.actions["merge"].isEnabled() is False
+    assert dialog.actions["split"].isEnabled() is False
+    assert dialog.actions["delete_rows"].isEnabled() is False
+    assert dialog.actions["delete_columns"].isEnabled() is False
+    assert "최소 1개" in dialog.actions["delete_rows"].toolTip()
+    _close(dialog)
+
+
+def test_structure_error_uses_status_instead_of_modal():
+    dialog = _dialog({
+        "rows": [["AB", ""]],
+        "cells": [{"row": 0, "col": 0, "text": "AB", "col_span": 2}],
+    })
+    result = dialog._apply_structure(
+        "열 삽입",
+        insert_column,
+        1,
+        current=(0, 1),
+    )
+
+    assert result is False
+    assert "병합된 셀" in dialog.statusLabel.text()
     _close(dialog)
