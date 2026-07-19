@@ -40,6 +40,7 @@ from ...choice_markers import (
     normalize_choice_marker_style,
 )
 from ..table_editor import TableEditorDialog
+from ..table_preview import TablePreviewCard
 
 
 MIN_CHOICE_COUNT = 4
@@ -368,19 +369,10 @@ class QuestionEditor(QDialog):
         self.tableCardsWidget = QWidget(self)
         self.tableCardsLayout = QVBoxLayout(self.tableCardsWidget)
         self.tableCardsLayout.setContentsMargins(0, 0, 0, 0)
-        self.tableCardsLayout.setSpacing(6)
+        self.tableCardsLayout.setSpacing(10)
+        self.tablePreviewCards = {}
         self.tableRenderModeCombos = {}
         self._rebuild_table_cards()
-
-    @staticmethod
-    def _table_preview(table, limit=72):
-        value = ' / '.join(
-            ' | '.join(str(cell or '') for cell in row)
-            for row in table.get('rows') or []
-            if isinstance(row, list)
-        )
-        value = re.sub(r'\s+', ' ', value).strip()
-        return value if len(value) <= limit else f"{value[:limit - 1]}…"
 
     def _clear_table_cards(self):
         while self.tableCardsLayout.count():
@@ -393,6 +385,7 @@ class QuestionEditor(QDialog):
     def _rebuild_table_cards(self):
         """Recreate table controls after add, edit, or deletion."""
         self._clear_table_cards()
+        self.tablePreviewCards = {}
         self.tableRenderModeCombos = {}
 
         owners = [("question", self.question_data.get('question_format_json'))]
@@ -403,66 +396,26 @@ class QuestionEditor(QDialog):
                 choice.get('choice_format_json') or choice.get('format_json'),
             ))
 
-        card_count = 0
         for owner, format_json in owners:
             payload = parse_format_payload(format_json)
             for table in payload.get('tables', []):
-                table_id = table['id']
-                card = QWidget(self.tableCardsWidget)
-                row = QHBoxLayout(card)
-                row.setContentsMargins(8, 4, 8, 4)
-                row.setSpacing(8)
-                owner_label = "발문" if owner == "question" else f"{owner.split(':')[1]}번 선지"
-                row.addWidget(BodyLabel(
-                    f"{owner_label} · {table_id} · {self._table_preview(table)}",
-                    card,
-                ), 1)
-                source_button = PushButton("원본 보기", card)
-                structure_button = PushButton("구조 보기", card)
-                edit_button = PushButton("표 편집", card)
-                delete_button = PushButton("표 삭제", card)
-                mode_combo = ComboBox(card)
-                for label, value in (
-                    ("자동", "auto"),
-                    ("원본 이미지", "image"),
-                    ("편집 가능한 표", "native"),
-                ):
-                    mode_combo.addItem(label, userData=value)
-                mode_combo.setCurrentIndex(
-                    max(0, mode_combo.findData(table.get('render_mode') or 'auto'))
+                table_id = str(table['id'])
+                card = TablePreviewCard(
+                    owner,
+                    table,
+                    self.tableCardsWidget,
                 )
-                source_button.setEnabled(bool((table.get('source') or {}).get('image_path')))
-                structure_button.setEnabled(bool(table.get('rows') or table.get('cells')))
-                edit_button.setEnabled(bool(table.get('rows') or table.get('cells')))
-                source_button.clicked.connect(
-                    lambda _checked=False, o=owner, i=table_id: self._show_table_source(o, i)
-                )
-                structure_button.clicked.connect(
-                    lambda _checked=False, o=owner, i=table_id: self._show_table_structure(o, i)
-                )
-                edit_button.clicked.connect(
-                    lambda _checked=False, o=owner, i=table_id: self._edit_table_structure(o, i)
-                )
-                delete_button.clicked.connect(
-                    lambda _checked=False, o=owner, i=table_id:
-                    self._delete_table(o, i)
-                )
-                mode_combo.currentIndexChanged.connect(
-                    lambda _index, o=owner, i=table_id, c=mode_combo:
-                    self._set_table_render_mode(o, i, c.currentData())
-                )
-                row.addWidget(source_button)
-                row.addWidget(structure_button)
-                row.addWidget(edit_button)
-                row.addWidget(delete_button)
-                row.addWidget(mode_combo)
+                card.editRequested.connect(self._edit_table_structure)
+                card.sourceRequested.connect(self._compare_table_source)
+                card.deleteRequested.connect(self._delete_table)
+                card.renderModeChanged.connect(self._set_table_render_mode)
                 self.tableCardsLayout.addWidget(card)
-                key_owner = "question" if owner == "question" else owner
-                self.tableRenderModeCombos[(key_owner, table_id)] = mode_combo
-                card_count += 1
+                key = (owner, table_id)
+                self.tablePreviewCards[key] = card
+                self.tableRenderModeCombos[key] = card.mode_combo
 
         self.tableSectionLabel.setVisible(True)
-        self.tableCardsWidget.setVisible(card_count > 0)
+        self.tableCardsWidget.setVisible(bool(self.tablePreviewCards))
 
     def _owner_format_payload(self, owner):
         if owner == 'question':
@@ -581,25 +534,24 @@ class QuestionEditor(QDialog):
             return True
         return False
 
-    def _show_table_source(self, owner, table_id):
-        table = self._find_owner_table(owner, table_id) or {}
-        path = str((table.get('source') or {}).get('image_path') or '')
-        QMessageBox.information(self, "표 원본", path or "저장된 원본 이미지가 없습니다.")
-
-    def _show_table_structure(self, owner, table_id):
-        table = self._find_owner_table(owner, table_id) or {}
-        rows = table.get('rows') or []
-        text = '\n'.join(' | '.join(str(cell) for cell in row) for row in rows)
-        QMessageBox.information(self, "표 구조", text or "저장된 표 구조가 없습니다.")
-
-    def _edit_table_structure(self, owner, table_id):
+    def _open_table_editor(self, owner, table_id, *, show_source=False):
         table = self._find_owner_table(owner, table_id)
         if not table:
             return
-        dialog = TableEditorDialog(table, self)
+        dialog = TableEditorDialog(
+            table,
+            self,
+            show_source=show_source,
+        )
         if dialog.exec() != QDialog.Accepted:
             return
         self._replace_table_spec(owner, table_id, dialog.result_table_spec())
+
+    def _edit_table_structure(self, owner, table_id):
+        self._open_table_editor(owner, table_id, show_source=False)
+
+    def _compare_table_source(self, owner, table_id):
+        self._open_table_editor(owner, table_id, show_source=True)
 
     def _update_table_rows(self, owner, table_id, rows):
         table = self._find_owner_table(owner, table_id)

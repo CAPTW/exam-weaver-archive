@@ -4,9 +4,11 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtGui import QTextCursor
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QDialog
+from qfluentwidgets import PushButton
 
 from src.gui.interface.editor import QuestionEditor
+from src.gui.table_preview import ReadOnlyTablePreview, TablePreviewCard
 
 
 APP = QApplication.instance() or QApplication([])
@@ -215,5 +217,139 @@ def test_deleting_table_restores_cell_text_and_removes_card():
     assert saved["question_text"] == "질문?\n<보기>\n① A"
     assert saved["question_format_json"] is None
     assert editor.tableCardsLayout.count() == 0
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_question_editor_uses_visual_preview_instead_of_flat_structure_row():
+    editor = QuestionEditor(
+        question_data=_editor_data(),
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+
+    card = editor.tablePreviewCards[("question", "table-1")]
+
+    assert isinstance(card, TablePreviewCard)
+    assert isinstance(card.preview, ReadOnlyTablePreview)
+    assert card.preview.rowCount() == 2
+    assert card.preview.columnCount() == 2
+    assert not any(
+        button.text() == "구조 보기"
+        for button in editor.tableCardsWidget.findChildren(PushButton)
+    )
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_accepting_table_editor_replaces_payload_and_refreshes_preview(monkeypatch):
+    editor = QuestionEditor(
+        question_data=_editor_data(),
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+
+    class AcceptedDialog:
+        def __init__(self, table, parent, show_source=False):
+            self.table = table
+            self.show_source = show_source
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def result_table_spec(self):
+            result = dict(self.table)
+            result["rows"] = [["변경", "완료"]]
+            result["cells"] = []
+            return result
+
+    monkeypatch.setattr(
+        "src.gui.interface.editor.TableEditorDialog",
+        AcceptedDialog,
+    )
+    editor._edit_table_structure("question", "table-1")
+
+    card = editor.tablePreviewCards[("question", "table-1")]
+    table = json.loads(editor.question_data["question_format_json"])["tables"][0]
+    assert table["rows"] == [["변경", "완료"]]
+    assert table["source"]["sha256"] == "abc123"
+    assert card.preview.item(0, 0).text() == "변경"
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_canceling_table_editor_keeps_payload_unchanged(monkeypatch):
+    editor = QuestionEditor(
+        question_data=_editor_data(),
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+    before = editor.question_data["question_format_json"]
+
+    class RejectedDialog:
+        def __init__(self, table, parent, show_source=False):
+            self.table = table
+            self.show_source = show_source
+
+        def exec(self):
+            return QDialog.Rejected
+
+    monkeypatch.setattr(
+        "src.gui.interface.editor.TableEditorDialog",
+        RejectedDialog,
+    )
+    editor._edit_table_structure("question", "table-1")
+
+    assert editor.question_data["question_format_json"] == before
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_source_compare_opens_table_editor_with_source_panel_requested(monkeypatch):
+    editor = QuestionEditor(
+        question_data=_editor_data(),
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+    requested = []
+
+    class SourceDialog:
+        def __init__(self, table, parent, show_source=False):
+            requested.append(show_source)
+
+        def exec(self):
+            return QDialog.Rejected
+
+    monkeypatch.setattr(
+        "src.gui.interface.editor.TableEditorDialog",
+        SourceDialog,
+    )
+    editor._compare_table_source("question", "table-1")
+
+    assert requested == [True]
+    editor.deleteLater()
+    APP.processEvents()
+
+
+def test_large_visual_preview_is_bounded_and_bottom_actions_remain_visible():
+    data = _editor_data()
+    data["question_format_json"] = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "large",
+            "rows": [
+                [f"R{row}C{column}" for column in range(6)]
+                for row in range(12)
+            ],
+        }],
+    }, ensure_ascii=False)
+    editor = QuestionEditor(
+        question_data=data,
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+    editor.resize(960, 780)
+    editor.show()
+    APP.processEvents()
+
+    card = editor.tablePreviewCards[("question", "large")]
+    assert card.preview.maximumHeight() == 180
+    assert editor.buttonBar.isVisibleTo(editor) is True
+    assert editor.saveButton.isVisibleTo(editor) is True
     editor.deleteLater()
     APP.processEvents()
