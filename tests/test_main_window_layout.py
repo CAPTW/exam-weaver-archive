@@ -55,6 +55,21 @@ def test_codex_panel_is_attached_as_sidecar():
     assert hasattr(gui_main.MainWindow, "init_codex_sidecar")
     assert hasattr(gui_main.MainWindow, "toggle_codex_sidecar")
     assert hasattr(gui_main.MainWindow, "set_codex_sidecar_expanded")
+    assert hasattr(gui_main.MainWindow, "activate_right_sidecar")
+    assert hasattr(gui_main.MainWindow, "set_right_sidecar_page")
+    assert hasattr(gui_main.MainWindow, "set_right_sidecar_expanded")
+
+
+def test_explanation_and_codex_share_one_labelled_right_sidecar_stack():
+    source = gui_main.__loader__.get_source(gui_main.__name__)
+
+    assert "QStackedWidget" in source
+    assert 'external_explanation_host=True' in source
+    assert 'self.explanation_sidecar_button = PushButton(' in source
+    assert 'self.codex_toggle_button = PushButton("Codex"' in source
+    assert 'self.right_sidecar_stack.addWidget(self.explanation_sidecar_panel)' in source
+    assert 'self.right_sidecar_stack.addWidget(self.codex_interface)' in source
+    assert 'self.activate_right_sidecar("explanation")' in source
 
 
 def test_practice_interface_is_registered_in_main_window():

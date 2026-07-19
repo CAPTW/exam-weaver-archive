@@ -2,9 +2,9 @@ import sqlite3
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QHeaderView, QTableWidgetItem,
-    QAbstractItemView, QCheckBox, QComboBox, QMessageBox, QTextEdit
+    QAbstractItemView, QCheckBox, QComboBox, QMessageBox, QTextEdit, QSizePolicy
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from qfluentwidgets import (
     TableWidget, PrimaryPushButton, PushButton, LineEdit,
     SubtitleLabel, BodyLabel, InfoBar, InfoBarPosition
@@ -18,12 +18,15 @@ from ...choice_markers import (
 from .editor import QuestionEditor
 
 class BrowserInterface(QWidget):
+    explanation_panel_requested = pyqtSignal(bool)
+
     def __init__(
         self,
         db_path=None,
         parent=None,
         repository=None,
         choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+        external_explanation_host=False,
     ):
         super().__init__(parent)
         if repository is None:
@@ -36,6 +39,7 @@ class BrowserInterface(QWidget):
         self.validation_mode = False
         self.current_explanation_question_id = None
         self.explanation_sidecar_expanded = False
+        self.external_explanation_host = bool(external_explanation_host)
         self._open_editors = {}
         self.setObjectName("BrowserInterface")
 
@@ -47,7 +51,8 @@ class BrowserInterface(QWidget):
         self.init_ui()
         self.rootLayout.addWidget(self.contentWidget, 1)
         self._init_explanation_sidecar()
-        self.rootLayout.addWidget(self.explanationDock, 0)
+        if not self.external_explanation_host:
+            self.rootLayout.addWidget(self.explanationDock, 0)
         self.load_data()
 
     def set_repository(self, repository):
@@ -74,7 +79,11 @@ class BrowserInterface(QWidget):
         self.searchLayout.setContentsMargins(0, 0, 0, 0)
         self.titleLabel = SubtitleLabel("문제 관리", self)
         self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
-        self.repositoryStatusLabel.setMaximumWidth(190)
+        self.repositoryStatusLabel.setWordWrap(True)
+        self.repositoryStatusLabel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.titleBlockLayout = QVBoxLayout()
         self.titleBlockLayout.setContentsMargins(0, 0, 0, 0)
         self.titleBlockLayout.setSpacing(0)
@@ -235,6 +244,14 @@ class BrowserInterface(QWidget):
         self.explanationDockLayout.addWidget(self.explanationSidecar)
         self.set_explanation_sidecar_expanded(False)
 
+    def take_explanation_panel(self):
+        """Detach the explanation editor for the main window's shared sidecar."""
+        self.explanationDockLayout.removeWidget(self.explanationSidecar)
+        self.explanationSidecar.setParent(None)
+        self.explanationSidecar.setMinimumWidth(340)
+        self.explanationSidecar.setMaximumWidth(430)
+        return self.explanationSidecar
+
     def _apply_combo_item_height(self, combo, height=44):
         view = combo.view()
         view.setStyleSheet(f"QListView::item {{ height: {height}px; }}")
@@ -244,6 +261,9 @@ class BrowserInterface(QWidget):
 
     def set_explanation_sidecar_expanded(self, expanded: bool):
         self.explanation_sidecar_expanded = bool(expanded)
+        if self.external_explanation_host:
+            self.explanation_panel_requested.emit(self.explanation_sidecar_expanded)
+            return
         self.explanationSidecar.setVisible(self.explanation_sidecar_expanded)
         self.explanationToggleButton.setText(">" if self.explanation_sidecar_expanded else "<")
         self.explanationToggleButton.setToolTip(

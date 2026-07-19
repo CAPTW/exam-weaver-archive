@@ -11,6 +11,7 @@ from ..parser.text_quality import (
     has_unbalanced_delimiters,
     text_quality_issue_codes,
 )
+from ..parser.view_table import has_misplaced_view_boundary
 
 
 class QuestionValidator:
@@ -77,6 +78,15 @@ class QuestionValidator:
                 issues.append(self._issue('ocr_placeholder', 'OCR 누락 placeholder', 'error'))
             if has_suspicious_text_artifact(question_text):
                 issues.append(self._issue('suspicious_text_artifact', '발문 텍스트 순서 의심', 'error'))
+            if has_misplaced_view_boundary(
+                question_text,
+                question.get('question_format_json'),
+            ):
+                issues.append(self._issue(
+                    'misplaced_view_reference',
+                    '발문과 <보기> 표 경계 이상',
+                    'error',
+                ))
             self._validate_text_quality(question_text, '발문', issues)
 
         if not self._valid_session(question.get('session')):

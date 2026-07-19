@@ -30,6 +30,8 @@ APP_ICON_FILENAME = "exam_generator_icon.ico"
 APP_USER_MODEL_ID = "CAPTW.ExamWeaverArchive.QuestionBankManager"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 WINDOW_WORK_AREA_MARGIN = 32
+RIGHT_SIDECAR_PANEL_WIDTH = 430
+RIGHT_SIDECAR_RAIL_WIDTH = 72
 
 
 def calculate_initial_window_size(
@@ -65,7 +67,13 @@ if __package__ is None or __package__ == "":
     # Allow running as a script by adding repo root to sys.path for package imports.
     sys.path.insert(0, BASE_DIR)
     __package__ = "src.gui"
-from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget
+from PyQt5.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon
 from qfluentwidgets import (
@@ -204,6 +212,7 @@ class MainWindow(FluentWindow):
             self,
             repository=question_repository,
             choice_marker_style=self.choice_marker_style,
+            external_explanation_host=True,
         )
         self.practice_interface = PracticeInterface(
             self.db_path,
@@ -222,6 +231,8 @@ class MainWindow(FluentWindow):
         self.db_mount_interface.mountsChanged.connect(self.refresh_question_repository)
         self.codex_interface = CodexInterface(BASE_DIR, self, side_panel=True)
         self.codex_sidecar_expanded = True
+        self.right_sidecar_expanded = True
+        self.right_sidecar_page = "codex"
 
         # Navigation
         self.init_navigation()
@@ -373,42 +384,119 @@ class MainWindow(FluentWindow):
         )
 
     def init_codex_sidecar(self):
+        """Build one labelled right-side rail shared by explanation and Codex."""
         self.codex_sidecar_container = QWidget(self)
         self.codex_sidecar_layout = QHBoxLayout(self.codex_sidecar_container)
         self.codex_sidecar_layout.setContentsMargins(0, 0, 0, 0)
         self.codex_sidecar_layout.setSpacing(4)
 
-        self.codex_toggle_button = PushButton(">", self.codex_sidecar_container)
-        self.codex_toggle_button.setFixedSize(30, 86)
-        self.codex_toggle_button.setToolTip("Codex 패널 접기")
+        self.right_sidecar_rail = QWidget(self.codex_sidecar_container)
+        self.right_sidecar_rail.setFixedWidth(RIGHT_SIDECAR_RAIL_WIDTH)
+        rail_layout = QVBoxLayout(self.right_sidecar_rail)
+        rail_layout.setContentsMargins(4, 4, 4, 4)
+        rail_layout.setSpacing(6)
+
+        self.explanation_sidecar_button = PushButton(
+            "해설",
+            self.right_sidecar_rail,
+        )
+        self.explanation_sidecar_button.setCheckable(True)
+        self.explanation_sidecar_button.setFixedSize(64, 36)
+        self.explanation_sidecar_button.setToolTip("문제 해설 열기/접기")
+        self.explanation_sidecar_button.clicked.connect(
+            lambda: self.activate_right_sidecar("explanation")
+        )
+
+        self.codex_toggle_button = PushButton("Codex", self.right_sidecar_rail)
+        self.codex_toggle_button.setCheckable(True)
+        self.codex_toggle_button.setFixedSize(64, 36)
+        self.codex_toggle_button.setToolTip("Codex 열기/접기")
         self.codex_toggle_button.clicked.connect(self.toggle_codex_sidecar)
 
+        rail_layout.addWidget(self.explanation_sidecar_button)
+        rail_layout.addWidget(self.codex_toggle_button)
+        rail_layout.addStretch(1)
+
+        self.right_sidecar_stack = QStackedWidget(self.codex_sidecar_container)
+        self.right_sidecar_stack.setMinimumWidth(340)
+        self.right_sidecar_stack.setMaximumWidth(RIGHT_SIDECAR_PANEL_WIDTH)
+        self.explanation_sidecar_panel = (
+            self.browser_interface.take_explanation_panel()
+        )
+        self.right_sidecar_stack.addWidget(self.explanation_sidecar_panel)
+        self.right_sidecar_stack.addWidget(self.codex_interface)
+
         self.codex_interface.collapse_requested.connect(
-            lambda: self.set_codex_sidecar_expanded(False)
+            lambda: self.set_right_sidecar_expanded(False)
         )
-        self.codex_sidecar_layout.addWidget(
-            self.codex_toggle_button,
-            0,
-            Qt.AlignmentFlag.AlignTop
+        self.browser_interface.explanation_panel_requested.connect(
+            self._on_explanation_panel_requested
         )
-        self.codex_sidecar_layout.addWidget(self.codex_interface)
+        self.codex_sidecar_layout.addWidget(self.right_sidecar_rail)
+        self.codex_sidecar_layout.addWidget(self.right_sidecar_stack)
         self.widgetLayout.addWidget(self.codex_sidecar_container)
         self.widgetLayout.setStretchFactor(self.stackedWidget, 1)
         self.widgetLayout.setStretchFactor(self.codex_sidecar_container, 0)
-        self.set_codex_sidecar_expanded(True)
+        self.set_right_sidecar_page("codex")
+        self.set_right_sidecar_expanded(True)
+
+    def _on_explanation_panel_requested(self, expanded: bool):
+        if expanded:
+            self.set_right_sidecar_page("explanation")
+            self.set_right_sidecar_expanded(True)
+        elif self.right_sidecar_page == "explanation":
+            self.set_right_sidecar_expanded(False)
+
+    def activate_right_sidecar(self, page: str):
+        if self.right_sidecar_expanded and self.right_sidecar_page == page:
+            self.set_right_sidecar_expanded(False)
+            return
+        self.set_right_sidecar_page(page)
+        self.set_right_sidecar_expanded(True)
+
+    def set_right_sidecar_page(self, page: str):
+        if page not in {"explanation", "codex"}:
+            raise ValueError(f"unknown right sidecar page: {page}")
+        self.right_sidecar_page = page
+        widget = (
+            self.explanation_sidecar_panel
+            if page == "explanation"
+            else self.codex_interface
+        )
+        self.right_sidecar_stack.setCurrentWidget(widget)
+        self.explanation_sidecar_button.setChecked(page == "explanation")
+        self.codex_toggle_button.setChecked(page == "codex")
 
     def toggle_codex_sidecar(self):
-        self.set_codex_sidecar_expanded(not self.codex_sidecar_expanded)
+        self.activate_right_sidecar("codex")
 
     def set_codex_sidecar_expanded(self, expanded: bool):
-        self.codex_sidecar_expanded = bool(expanded)
-        self.codex_interface.setVisible(self.codex_sidecar_expanded)
-        self.codex_toggle_button.setText(">" if self.codex_sidecar_expanded else "<")
+        if expanded:
+            self.set_right_sidecar_page("codex")
+        self.set_right_sidecar_expanded(expanded)
+
+    def set_right_sidecar_expanded(self, expanded: bool):
+        self.right_sidecar_expanded = bool(expanded)
+        self.codex_sidecar_expanded = (
+            self.right_sidecar_expanded and self.right_sidecar_page == "codex"
+        )
+        self.right_sidecar_stack.setVisible(self.right_sidecar_expanded)
+        self.explanation_sidecar_button.setChecked(
+            self.right_sidecar_expanded
+            and self.right_sidecar_page == "explanation"
+        )
+        self.codex_toggle_button.setChecked(
+            self.right_sidecar_expanded and self.right_sidecar_page == "codex"
+        )
         self.codex_toggle_button.setToolTip(
-            "Codex 패널 접기" if self.codex_sidecar_expanded else "Codex 패널 펼치기"
+            "Codex 패널 접기"
+            if self.codex_sidecar_expanded
+            else "Codex 패널 펼치기"
         )
         self.codex_sidecar_container.setMaximumWidth(
-            470 if self.codex_sidecar_expanded else 34
+            RIGHT_SIDECAR_RAIL_WIDTH + RIGHT_SIDECAR_PANEL_WIDTH + 4
+            if self.right_sidecar_expanded
+            else RIGHT_SIDECAR_RAIL_WIDTH
         )
 
 def main() -> int:

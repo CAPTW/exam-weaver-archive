@@ -40,6 +40,7 @@ STAGING_BLOCKING_QUALITY_CODES = frozenset(
         "empty_question_text",
         "ocr_placeholder",
         "suspicious_text_artifact",
+        "misplaced_view_reference",
         "ocr_noise_text",
         "broken_unit_text",
         "unbalanced_delimiter",

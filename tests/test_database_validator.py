@@ -181,6 +181,32 @@ def test_question_validator_accepts_legacy_choice_symbols(repo, sample_metadata,
     assert QuestionValidator(repo).scan() == []
 
 
+def test_question_validator_blocks_prompt_text_misplaced_in_view_table(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    from src.parser.view_table import add_one_cell_table
+
+    sample_question.text = "다음"
+    sample_question.format_json = add_one_cell_table(
+        "다음",
+        None,
+        "<보기>\n중 법률상 옳은 것은? 보 기 > ㉠ 첫째 ㉡ 둘째",
+        len("다음"),
+        reason="explicit_view_marker",
+    )
+    repo.save_questions([sample_question], sample_metadata)
+
+    codes = {
+        issue["code"]
+        for finding in QuestionValidator(repo).scan()
+        for issue in finding["issues"]
+    }
+
+    assert "misplaced_view_reference" in codes
+
+
 def test_question_validator_accepts_matching_numeric_choice_symbols(
     repo,
     sample_metadata,

@@ -228,6 +228,20 @@ def test_source_repair_builds_labeled_choice_formats_for_future_reparse():
     ]
 
 
+def test_bundled_view_boundary_repairs_restore_source_confirmed_content():
+    from src.parser.offline_repairs import load_audited_source_repairs
+
+    load_audited_source_repairs.cache_clear()
+    repairs = load_audited_source_repairs()
+    law = repairs[("[기출문제]해사법규(24년 하반기-25년 하반기).pdf".casefold(), 8, 17)]
+    navigation = repairs[("[기출문제]경찰직 항해학(24년-13년).pdf".casefold(), 27, 9)]
+
+    assert "㉧ 잠수기어업" in law["repaired_stem"]
+    assert law["repaired_choices"] == ["2개", "3개", "4개", "5개"]
+    assert "옳은 것은 모두 몇 개인가? <보기>" in navigation["repaired_stem"]
+    assert navigation["repaired_choices"] == ["없음", "1개", "2개", "3개"]
+
+
 def test_offline_candidate_ingestion_preserves_view_and_choice_tables():
     from src.database.staging import _question_from_offline_candidate
     from src.parser.aligned_choice_table import build_aligned_choice_format

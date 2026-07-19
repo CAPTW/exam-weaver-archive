@@ -331,6 +331,18 @@ def test_repairs_other_proven_standard_korean_question_terminator_damage():
     } == repairs
 
 
+def test_repairs_question_mark_before_damaged_view_header():
+    stem = (
+        "다음 <보기> 중 법률상 해당하는 것을 모두 고른 것은9 "
+        "< 보기 ㉠ 첫째 ㉡ 둘째"
+    )
+
+    assert OfflineExamParser._repair_stem_ocr_damage(stem) == (
+        "다음 <보기> 중 법률상 해당하는 것을 모두 고른 것은? "
+        "< 보기 ㉠ 첫째 ㉡ 둘째"
+    )
+
+
 def test_does_not_rewrite_complete_question_terminator_with_exception_clause():
     stem = "가장 옳지 않은 것은? (단, 예외규정은 고려하지 않는다.)"
 

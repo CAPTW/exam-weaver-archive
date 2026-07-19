@@ -12,7 +12,8 @@
     "src\\parser\\audits\\final_core_maritime_repairs.json",
     "src\\parser\\audits\\final_english_repairs.json",
     "src\\parser\\audits\\final_missing_image_repairs.json",
-    "src\\parser\\audits\\aligned_choice_repairs.json"
+    "src\\parser\\audits\\aligned_choice_repairs.json",
+    "src\\parser\\audits\\view_boundary_repairs.json"
   ],
   "repairs": [
     {
@@ -4849,6 +4850,24 @@
       "subject": "항해학"
     },
     {
+      "question_id": 2229,
+      "subject": "항해학",
+      "year": 2022,
+      "session": 3,
+      "question_number": 9,
+      "source_page": 27,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 27쪽 직접 대조: OCR에서 누락된 질문 종결부와 <보기> 경계 복원",
+      "repaired_stem": "다음 <보기> 중 자이로 컴퍼스의 오차에 대한 설명으로 옳은 것은 모두 몇 개인가? <보기> ㉠ 위도오차는 제진 세차운동과 지북 세차운동이 동시에 발생하는 경사제진식 제품에만 생기며, 적도에서 가장 많은 오차가 생긴다. ㉡ 속도오차는 선속이 빠를수록 커지고 북항일 때는 편동오차, 남항일 때는 편서오차가 생긴다. ㉢ 가속도오차는 항해 중인 선박의 속도나 침로가 변경될 때 발생하고 작동 후 3시간 정도 경과 시 최대오차가 된다. ㉣ 액체의 유동에 의해 지북작용을 하는 자이로 컴퍼스에서 동요오차가 발생할 수 있으며, 이를 예방하기 위해 NS축 선상에 보정추를 부착한다.",
+      "repaired_choices": [
+        "없음",
+        "1개",
+        "2개",
+        "3개"
+      ]
+    },
+    {
       "question_id": 2230,
       "year": 2022,
       "session": 3,
@@ -9227,6 +9246,24 @@
         "해양수산부장관 / 시·도지사 / 시장·군수·구청장",
         "해양수산부장관 / 지방해양수산청장 / 시장·군수·구청장",
         "해양수산부장관 / 시·도지사 / 지방해양수산청장"
+      ]
+    },
+    {
+      "question_id": 697,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 2,
+      "question_number": 17,
+      "source_page": 8,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 8쪽 직접 대조: 누락된 <보기> 8개 항목과 실제 숫자형 선지 복원",
+      "repaired_stem": "다음 <보기> 중 「수산업법(시행령 및 시행규칙 포함)」상 연안어업의 종류는 모두 몇 개인가? <보기> ㉠ 소형선망어업 ㉡ 낚시어업 ㉢ 건망어업 ㉣ 기선권현망어업 ㉤ 새우조망어업 ㉥ 지인망어업 ㉦ 문어단지어업 ㉧ 잠수기어업",
+      "repaired_choices": [
+        "2개",
+        "3개",
+        "4개",
+        "5개"
       ]
     },
     {

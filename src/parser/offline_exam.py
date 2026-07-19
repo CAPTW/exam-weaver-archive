@@ -3097,6 +3097,13 @@ class OfflineExamParser:
         """Restore a standard Korean question ending lost by raster OCR."""
 
         value = re.sub(
+            r"((?:것은|것인가|무엇인가|누구인가|몇\s*개\s*인가|"
+            r"몇\s*명\s*인가|나열한\s*것은|고른\s*것은))\s*[279]"
+            r"(?=\s*(?:<|＜|〈|《|\[|【|보\s*기|[㉠-㉭]|$))",
+            r"\1?",
+            value,
+        )
+        value = re.sub(
             r"가장\s+옳지\s*\n\s*[0O°아야오으][^\n]{0,24}$",
             "가장 옳지 않은 것은?",
             value,

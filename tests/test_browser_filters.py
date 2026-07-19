@@ -45,6 +45,8 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
     assert widget.btnAddDescriptive.text() == '서술형 문제 추가'
     assert widget.btnDeleteSelected.text() == '선택 문제 삭제'
     assert '문제은행' in widget.repositoryStatusLabel.text()
+    assert widget.repositoryStatusLabel.wordWrap() is True
+    assert widget.repositoryStatusLabel.maximumWidth() > 1000
     assert widget.minimumSizeHint().width() <= 1050
 
     exam_index = widget.examFilter.findData('3급기관사')
@@ -60,6 +62,28 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
     assert '기관2' in widget.table.item(0, 2).text()
     assert '기관2 전용 문제' in widget.table.item(0, 3).text()
 
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_browser_can_delegate_explanation_panel_to_shared_main_sidecar(repo):
+    widget = BrowserInterface(
+        repo.db_path,
+        external_explanation_host=True,
+    )
+    requests = []
+    widget.explanation_panel_requested.connect(requests.append)
+
+    assert widget.rootLayout.indexOf(widget.explanationDock) == -1
+    panel = widget.take_explanation_panel()
+    assert panel is widget.explanationSidecar
+
+    widget.set_explanation_sidecar_expanded(True)
+    APP.processEvents()
+    assert requests == [True]
+    assert widget.explanation_sidecar_expanded is True
+
+    panel.deleteLater()
     widget.deleteLater()
     APP.processEvents()
 

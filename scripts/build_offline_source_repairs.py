@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DEFAULT_AUDIT_DIR = ROOT / "outputs" / "ocr_repair_audit"
 DEFAULT_OUTPUT = ROOT / "src" / "parser" / "offline_source_repairs.json"
 SUBJECT_BY_INPUT = {
@@ -165,6 +168,7 @@ def main() -> int:
             ROOT / "src" / "parser" / "audits" / "final_english_repairs.json",
             ROOT / "src" / "parser" / "audits" / "final_missing_image_repairs.json",
             ROOT / "src" / "parser" / "audits" / "aligned_choice_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "view_boundary_repairs.json",
         ],
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
