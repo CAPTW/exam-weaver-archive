@@ -137,6 +137,129 @@ def test_applies_exact_source_repairs_transactionally_to_staging_database(tmp_pa
     assert choices == ["갑", "을", "병", "정"]
 
 
+def test_applies_audited_labeled_choice_fields_with_editable_table_formats(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    _database(database, [_question(1)])
+    repairs = tmp_path / "repairs.json"
+    fields = {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+            ["해양사고", "표류물", "구난"],
+            ["조난사고", "표류물", "구난"],
+            ["해양사고", "난파물", "구조"],
+            ["조난사고", "난파물", "구조"],
+        ],
+    }
+    repairs.write_text(
+        json.dumps(
+            {
+                "repairs": [
+                    {
+                        "subject": "항해",
+                        "year": 2024,
+                        "session": 2,
+                        "question_number": 1,
+                        "source_page": 1,
+                        "repaired_choice_fields": fields,
+                        "confidence": "exact_source",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_audited_repairs(database, repairs)
+
+    assert result.changed_choice_sets == 1
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            "SELECT choice_text, choice_format_json FROM question_choices "
+            "ORDER BY choice_number"
+        ).fetchall()
+    assert [row[0] for row in rows] == [
+        "(가) 해양사고 / (나) 표류물 / (다) 구난",
+        "(가) 조난사고 / (나) 표류물 / (다) 구난",
+        "(가) 해양사고 / (나) 난파물 / (다) 구조",
+        "(가) 조난사고 / (나) 난파물 / (다) 구조",
+    ]
+    payload = json.loads(rows[0][1])
+    assert payload["tables"][0]["rows"] == [
+        ["(가)", "(나)", "(다)"],
+        ["해양사고", "표류물", "구난"],
+    ]
+
+
+def test_source_repair_builds_labeled_choice_formats_for_future_reparse():
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    candidate = ParsedOfflineQuestion(
+        9,
+        "문제",
+        ["깨짐 1", "깨짐 2", "깨짐 3", "깨짐 4"],
+        27,
+        0.99,
+        (),
+    )
+    key = ("source.pdf", 27, 9)
+    repairs = {
+        key: {
+            "confidence": "exact_source",
+            "repaired_choice_fields": {
+                "headers": ["(가)", "(나)"],
+                "rows": [["A", "B"], ["C", "D"], ["E", "F"], ["G", "H"]],
+            },
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("source.pdf"),
+        repairs=repairs,
+    )
+
+    assert repaired.choices[0] == "(가) A / (나) B"
+    assert json.loads(repaired.choice_format_jsons[3])["tables"][0]["rows"] == [
+        ["(가)", "(나)"],
+        ["G", "H"],
+    ]
+
+
+def test_offline_candidate_ingestion_preserves_view_and_choice_tables():
+    from src.database.staging import _question_from_offline_candidate
+    from src.parser.aligned_choice_table import build_aligned_choice_format
+
+    formats = tuple(
+        build_aligned_choice_format(["(가)", "(나)"], row, number)
+        for number, row in enumerate(
+            (["A", "B"], ["C", "D"], ["E", "F"], ["G", "H"]),
+            start=1,
+        )
+    )
+    candidate = ParsedOfflineQuestion(
+        1,
+        "질문은? <보기> ㉠ 첫째 ㉡ 둘째",
+        ["(가) A / (나) B", "(가) C / (나) D", "(가) E / (나) F", "(가) G / (나) H"],
+        1,
+        1.0,
+        (),
+        formats,
+    )
+
+    question = _question_from_offline_candidate(
+        candidate,
+        {"subject_name": "항해", "year": 2024, "session": 2, "exam_type": "해경"},
+        1,
+    )
+
+    assert question.text == "질문은?"
+    assert json.loads(question.format_json)["tables"][0]["source"]["kind"] == "view_block_text"
+    assert question.choices[0].format_json == formats[0]
+
+
 def test_applies_id_based_repair_only_when_source_document_matches(tmp_path):
     from src.database.ocr_repairs import apply_audited_repairs
 

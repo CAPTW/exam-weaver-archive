@@ -5,11 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.parser.aligned_choice_table import build_aligned_choice_payloads  # noqa: E402
+from src.parser.view_table import promote_view_block  # noqa: E402
+
 DEFAULT_REPAIRS = ROOT / "src" / "parser" / "offline_source_repairs.json"
 
 
@@ -47,8 +54,8 @@ def validate_database(
                 )
             rows = connection.execute(
                 f"""
-                SELECT q.id, q.question_text, q.source_page, q.has_image,
-                       q.image_path, qs.source_url
+                SELECT q.id, q.question_text, q.question_format_json,
+                       q.source_page, q.has_image, q.image_path, qs.source_url
                 FROM questions q
                 JOIN exam_subjects es ON es.id = q.exam_subject_id
                 JOIN subjects s ON s.id = es.subject_id
@@ -102,29 +109,48 @@ def validate_database(
                         }
                     )
             expected_stem = repair.get("repaired_stem")
-            if expected_stem is not None and row["question_text"] != expected_stem:
-                mismatches.append(
-                    {
-                        **identity,
-                        "question_id": int(row["id"]),
-                        "field": "stem",
-                        "expected": expected_stem,
-                        "actual": row["question_text"],
-                    }
+            if expected_stem is not None:
+                promoted_text, promoted_format, promoted = promote_view_block(
+                    str(expected_stem)
                 )
+                plain_match = row["question_text"] == expected_stem
+                promoted_match = (
+                    promoted
+                    and row["question_text"] == promoted_text
+                    and row["question_format_json"] == promoted_format
+                )
+                if not plain_match and not promoted_match:
+                    mismatches.append(
+                        {
+                            **identity,
+                            "question_id": int(row["id"]),
+                            "field": "stem",
+                            "expected": expected_stem,
+                            "expected_promoted_text": promoted_text,
+                            "actual": row["question_text"],
+                            "actual_format": row["question_format_json"],
+                        }
+                    )
             expected_choices = repair.get("repaired_choices")
             expected_choice_overrides = repair.get("repaired_choice_overrides")
+            expected_choice_fields = repair.get("repaired_choice_fields")
+            expected_formats = None
+            if expected_choice_fields is not None:
+                expected_choices, expected_formats = build_aligned_choice_payloads(
+                    expected_choice_fields
+                )
             if expected_choices is not None:
-                choices = [
-                    str(choice[0])
+                stored_choices = [
+                    (str(choice[0]), choice[1])
                     for choice in connection.execute(
                         """
-                        SELECT choice_text FROM question_choices
+                        SELECT choice_text, choice_format_json FROM question_choices
                         WHERE question_id = ? ORDER BY choice_number
                         """,
                         (int(row["id"]),),
                     )
                 ]
+                choices = [choice[0] for choice in stored_choices]
                 if choices != expected_choices:
                     mismatches.append(
                         {
@@ -135,6 +161,18 @@ def validate_database(
                             "actual": choices,
                         }
                     )
+                if expected_formats is not None:
+                    actual_formats = [choice[1] for choice in stored_choices]
+                    if actual_formats != expected_formats:
+                        mismatches.append(
+                            {
+                                **identity,
+                                "question_id": int(row["id"]),
+                                "field": "choice_formats",
+                                "expected": expected_formats,
+                                "actual": actual_formats,
+                            }
+                        )
             elif expected_choice_overrides is not None:
                 choices = {
                     str(choice[0]): str(choice[1])

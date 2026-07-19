@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "generated_from": [
+    "2026-07-19 whole-database labeled-choice scan and direct review of every source page"
+  ],
+  "repairs": [
+    {
+      "question_id": 555,
+      "subject": "해사법규",
+      "year": 2015,
+      "session": 1,
+      "question_number": 15,
+      "source_page": 91,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 91쪽 15번의 4행×3열 선지표를 직접 대조했다.",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["10년", "30년", "5년"],
+          ["10년", "영구", "5년"],
+          ["7년", "영구", "3년"],
+          ["7년", "30년", "3년"]
+        ]
+      }
+    },
+    {
+      "question_id": 785,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 5,
+      "source_page": 26,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 26쪽 5번의 발문과 4행×3열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 <보기>는 「해양과학조사법(시행령 및 시행규칙 포함)」에 관한 설명이다. 괄호 안에 들어갈 내용으로 가장 옳은 것은? <보기> ㉠ 대한민국의 영해에서 해양과학조사를 실시하려는 외국인등은 해양수산부장관의 (가)를 받아야 한다. ㉡ 대한민국의 배타적 경제수역 또는 대륙붕에서 해양과학조사를 실시하려는 외국인등은 해양수산부장관의 (나)를(을) 받아야 한다. ㉢ 해양과학조사의 정지 및 중지는 해양수산부장관이 외국인 등에게 (다) 그 효력이 발생한다. (가) (나) (다)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["허가", "승인", "알린 때부터"],
+          ["동의", "승인", "알린 때부터 3일 경과 후"],
+          ["허가", "동의", "알린 때부터"],
+          ["허가", "동의", "알린 때부터 3일 경과 후"]
+        ]
+      }
+    },
+    {
+      "question_id": 789,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 9,
+      "source_page": 27,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 27쪽 9번의 <보기>와 4행×3열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 <보기>는 「수상에서의 수색·구조 등에 관한 법률(시행령 및 시행규칙 포함)」상 용어의 정의와 관련된 사례이다. 괄호 안에 들어가는 내용으로 가장 옳게 나열한 것은? <보기> [사례] 컨테이너선이 인천 연안을 항해하던 중에 수중 암초에 좌초되어 선원과 선박의 안전이 위험에 처한 상태이고, 컨테이너 3개가 해수면으로 떨어져 떠 있다. ㉠ 컨테이너선은 (가)를 당한 상태이다. ㉡ 해수면에 떠 있는 컨테이너 3개는 (나)에 해당한다. ㉢ 컨테이너선에 관한 원조를 위하여 행하여진 행위 또는 활동을 (다)(이)라고 말한다. (가) (나) (다)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["해양사고", "표류물", "구난"],
+          ["조난사고", "표류물", "구난"],
+          ["해양사고", "난파물", "구조"],
+          ["조난사고", "난파물", "구조"]
+        ]
+      }
+    },
+    {
+      "question_id": 803,
+      "subject": "해사법규",
+      "year": 2025,
+      "session": 5,
+      "question_number": 23,
+      "source_page": 30,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 30쪽 23번의 발문과 4행×3열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음은 「선박의 입항 및 출항 등에 관한 법률(시행령 및 시행규칙 포함)」에 대한 설명이다. 괄호 안에 들어갈 내용을 가장 옳게 나열한 것은? ㉠ (가)(이)란 선박이 해상에서 일시적으로 운항을 멈추는 것을 말한다. ㉡ 예인선은 한꺼번에 최대 (나)척의 피예인선을 끌 수 있다. ㉢ 총톤수 (다)톤 이상의 선박을 무역항의 수상구역등에 계선하려는 자는 해양수산부령으로 정하는 바에 따라 관리청에 신고하여야 한다. (가) (나) (다)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["정류", "2", "20"],
+          ["정박", "2", "20"],
+          ["정류", "3", "20"],
+          ["정박", "3", "100"]
+        ]
+      }
+    },
+    {
+      "question_id": 1047,
+      "subject": "해사법규",
+      "year": 2023,
+      "session": 3,
+      "question_number": 7,
+      "source_page": 32,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 32쪽 7번의 OCR 손상 발문과 4행×3열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 <보기>는 「수상에서의 수색·구조 등에 관한 법률(시행령 및 시행규칙 포함)」에 관한 설명이다. ( ) 안에 들어가는 내용으로 가장 옳게 나열한 것은? <보기> 컨테이너선이 인천 연안을 항행 중 수중 암초에 좌초되어 선원과 선박의 안전이 위험에 처해있는 상태이고, 컨테이너 2개가 바다로 떨어져 떠 있다. ㉠ 컨테이너선에 관한 원조를 위하여 행하여진 행위 또는 활동을 (가)(이)라고 말한다. ㉡ 컨테이너선은 (나)를 당한 상태이다. ㉢ 바다에 떠 있는 컨테이너 2개는 (다)에 해당한다. (가) (나) (다)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["구난", "조난사고", "표류물"],
+          ["구조", "조난사고", "난파물"],
+          ["구난", "해양사고", "표류물"],
+          ["구조", "해양사고", "난파물"]
+        ]
+      }
+    },
+    {
+      "question_id": 1126,
+      "subject": "해사법규",
+      "year": 2022,
+      "session": 1,
+      "question_number": 26,
+      "source_page": 44,
+      "source_pdf_relative_path": "[기출문제]해사법규(24년-21년 경장).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 44쪽 26번의 4행×3열 선지표를 직접 대조했다.",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["감정", "검수", "검량"],
+          ["검량", "검수", "감정"],
+          ["검수", "감정", "검량"],
+          ["검량", "감정", "검수"]
+        ]
+      }
+    },
+    {
+      "question_id": 2671,
+      "subject": "기관학",
+      "year": 2023,
+      "session": 2,
+      "question_number": 31,
+      "source_page": 12,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 12쪽 31번의 OCR 손상 발문과 4행×2열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 <보기>는 조수장치에 대한 설명이다. 괄호 안에 들어갈 말을 가장 옳은 순서로 나열한 것은? <보기> ㉠ 역삼투식 조수장치는 농도가 진한 용액에 높은 압력을 가하면 농도가 진한 용액 속의 용매가 (가)을 통해 묽은 용액 속으로 이동하는 역삼투 원리를 이용한 것이다. ㉡ 침관식 조수장치에서 (나)는(은) 히터에서 과도하게 비등된 수증기와 물이 직접 응축기까지 올라가지 못하도록 차단 및 분리시키는 역할을 한다. (가) (나)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)"],
+        "rows": [
+          ["반투막", "디플렉터"],
+          ["분리판", "디플렉터"],
+          ["반투막", "기수 분리판"],
+          ["역삼투막", "기수 분리판"]
+        ]
+      }
+    },
+    {
+      "question_id": 2969,
+      "subject": "기관학",
+      "year": 2017,
+      "session": 2,
+      "question_number": 9,
+      "source_page": 51,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 51쪽 9번의 4행×2열 선지표를 직접 대조했다.",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)"],
+        "rows": [
+          ["720", "동기"],
+          ["900", "동기"],
+          ["1,200", "등가"],
+          ["1,500", "등가"]
+        ]
+      }
+    },
+    {
+      "question_id": 2997,
+      "subject": "기관학",
+      "year": 2016,
+      "session": 1,
+      "question_number": 17,
+      "source_page": 54,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관술(학)(24-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 54쪽 17번의 OCR 손상 발문과 4행×2열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 괄호 안에 들어갈 용어로 알맞게 짝지어진 것은? 피스톤 링과 홈 사이의 옆 틈이 너무 클 때, 고속이 됨에 따라 링의 관성력이 가스의 압력보다 크게 되어 링이 홈의 중간에 뜨게 되면, 윤활유가 연소실로 올라가 장해를 일으키는데, 이와 같이 링이 홈 안에서 진동하는 현상을 (가)이라 하고, 윤활유가 연소실로 올라가는 현상을 (나)이라 한다. (가) (나)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)"],
+        "rows": [
+          ["링의 펌프 작용", "플러터(flutter) 현상"],
+          ["플러터(flutter) 현상", "링의 펌프 작용"],
+          ["소결(stick) 작용", "링의 펌프 작용"],
+          ["플러터(flutter) 현상", "소결(stick) 작용"]
+        ]
+      }
+    },
+    {
+      "question_id": 3231,
+      "subject": "기관학",
+      "year": 2024,
+      "session": 3,
+      "question_number": 31,
+      "source_page": 23,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 23쪽 31번의 OCR 손상 발문과 4행×3열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 중 <보기>의 (가), (나) 및 (다) 부분에 들어갈 내용으로 가장 옳게 짝지어진 것은? <보기> (가): 펌프의 송출밸브가 열린 상태에서 펌프를 정지시키면 관 속에 흐르는 유체의 속도가 변화하게 되어 관로에 급격히 압력이 높아지는 부분이 생기고, 관로 속에서 압력파가 되어 반복하며 왕복하는 현상 (나): 송출 압력과 유량이 주기적으로 변화하여 펌프의 흡입구와 배출구 쪽의 진공계와 압력계의 지침이 흔들리고 송출 유량이 변화하는 현상 (다): 유체가 관 속을 흐를 때 압력이 저하되는 부분이 있으면 그 부분에서 액체가 기화되어 기포가 생기는 현상 (가) (나) (다)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)", "(다)"],
+        "rows": [
+          ["수격현상(Water Hammer)", "맥동현상(Surging)", "공동현상(Cavitation)"],
+          ["수격현상(Water Hammer)", "공동현상(Cavitation)", "맥동현상(Surging)"],
+          ["맥동현상(Surging)", "수격현상(Water Hammer)", "공동현상(Cavitation)"],
+          ["맥동현상(Surging)", "공동현상(Cavitation)", "수격현상(Water Hammer)"]
+        ]
+      }
+    },
+    {
+      "question_id": 3233,
+      "subject": "기관학",
+      "year": 2024,
+      "session": 3,
+      "question_number": 33,
+      "source_page": 23,
+      "source_pdf_relative_path": "[기출문제]경찰직 기관학(24년 하반기-25년 하반기).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원문 PDF 23쪽 33번의 OCR 손상 발문과 4행×2열 선지표를 직접 대조했다.",
+      "repaired_stem": "다음 중 <보기>의 (가) 및 (나) 부분에 들어갈 내용으로 가장 옳게 짝지어진 것은? <보기> ㉠ 기관 청수 냉각계통 중에 (가) 분리기를 설치하여 혼입된 (가)를 배출한다. ㉡ 기관 상부 쪽에는 냉각수 온도가 변할 때 물의 부피 변화를 흡수하기 위한 (나)를 설치한다. (가) (나)",
+      "repaired_choice_fields": {
+        "headers": ["(가)", "(나)"],
+        "rows": [
+          ["해수(Sea Water)", "캐스케이드 탱크(Cascade Tank)"],
+          ["해수(Sea Water)", "팽창 탱크(Expansion Tank)"],
+          ["공기(Air)", "캐스케이드 탱크(Cascade Tank)"],
+          ["공기(Air)", "팽창 탱크(Expansion Tank)"]
+        ]
+      }
+    }
+  ]
+}

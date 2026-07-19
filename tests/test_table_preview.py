@@ -74,6 +74,25 @@ def test_preview_is_read_only_and_renders_spans_alignment_and_tooltip():
     _close(preview)
 
 
+def test_preview_keeps_long_one_cell_content_scrollable_instead_of_clipping_row():
+    table = {
+        "id": "long-view",
+        "rows": [["<보기>\n" + "긴 설명 문장입니다. " * 35]],
+        "cells": [],
+        "layout": {"width_mode": "auto", "wide": False},
+        "render_mode": "native",
+    }
+    preview = ReadOnlyTablePreview(table)
+    preview.resize(520, 180)
+    preview.show()
+    APP.processEvents()
+
+    assert preview.rowHeight(0) > 64
+    assert preview.verticalScrollBar().maximum() > 0
+    assert preview.height() <= preview.maximumHeight()
+    _close(preview)
+
+
 def test_card_emits_actions_and_disables_missing_source():
     card = TablePreviewCard("question", _table())
     edits = []

@@ -34,6 +34,7 @@ _QUESTION_TEXT_IN_CHOICE = re.compile(
 )
 _OUTER_DAMAGED_MARKER = re.compile(r"^[㉦㉨㉭]")
 _NON_BLOCKING_DIAGNOSTICS = {
+    "aligned_choice_table_recovery",
     "coordinate_choice_recovery",
     "document_noise_removed",
     "damaged_choice_recovery",

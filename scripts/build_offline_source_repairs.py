@@ -43,17 +43,22 @@ def _validated_records(path: Path) -> list[dict[str, object]]:
             stem = record.get("repaired_stem")
             choices = record.get("repaired_choices")
             choice_overrides = record.get("repaired_choice_overrides")
+            choice_fields = record.get("repaired_choice_fields")
             question_image = record.get("repaired_question_image_path")
             if (
                 stem is None
                 and choices is None
                 and choice_overrides is None
+                and choice_fields is None
                 and question_image is None
             ):
                 raise ValueError(f"empty exact repair: {path}: {record!r}")
             if question_image is not None and not str(question_image).strip():
                 raise ValueError(f"invalid exact question image: {path}: {record!r}")
-            if choices is not None and choice_overrides is not None:
+            if sum(
+                value is not None
+                for value in (choices, choice_overrides, choice_fields)
+            ) > 1:
                 raise ValueError(f"ambiguous audited choices: {path}: {record!r}")
             if choices is not None and (
                 not isinstance(choices, list)
@@ -72,6 +77,12 @@ def _validated_records(path: Path) -> list[dict[str, object]]:
                 )
             ):
                 raise ValueError(f"invalid exact choice overrides: {path}: {record!r}")
+            if choice_fields is not None:
+                from src.parser.aligned_choice_table import (
+                    normalize_aligned_choice_fields,
+                )
+
+                normalize_aligned_choice_fields(choice_fields)
         records.append(record)
     return records
 
@@ -153,6 +164,7 @@ def main() -> int:
             ROOT / "src" / "parser" / "audits" / "final_core_maritime_repairs.json",
             ROOT / "src" / "parser" / "audits" / "final_english_repairs.json",
             ROOT / "src" / "parser" / "audits" / "final_missing_image_repairs.json",
+            ROOT / "src" / "parser" / "audits" / "aligned_choice_repairs.json",
         ],
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from src.parser.aligned_choice_table import build_aligned_choice_payloads
+
 
 CHOICE_SYMBOLS = ("㉮", "㉯", "㉴", "㉵", "⑤")
 
@@ -177,8 +179,21 @@ def apply_audited_repairs(
 
             repaired_choices = repair.get("repaired_choices")
             repaired_choice_overrides = repair.get("repaired_choice_overrides")
-            if repaired_choices is not None and repaired_choice_overrides is not None:
+            repaired_choice_fields = repair.get("repaired_choice_fields")
+            if sum(
+                value is not None
+                for value in (
+                    repaired_choices,
+                    repaired_choice_overrides,
+                    repaired_choice_fields,
+                )
+            ) > 1:
                 raise ValueError(f"ambiguous audited choices: {identity!r}")
+            repaired_choice_formats = None
+            if repaired_choice_fields is not None:
+                repaired_choices, repaired_choice_formats = (
+                    build_aligned_choice_payloads(repaired_choice_fields)
+                )
             if repaired_choices is not None:
                 if not isinstance(repaired_choices, list) or len(repaired_choices) not in (
                     4,
@@ -193,14 +208,16 @@ def apply_audited_repairs(
                     raise ValueError(f"invalid audited choice images: {identity!r}")
                 rows = connection.execute(
                     """
-                    SELECT choice_number, choice_text, choice_image_path
+                    SELECT choice_number, choice_text, choice_symbol,
+                           choice_image_path, choice_format_json
                     FROM question_choices
                     WHERE question_id = ? ORDER BY choice_number
                     """,
                     (int(question_id),),
                 ).fetchall()
                 expected = [str(value) for value in repaired_choices]
-                current_images = {int(row[0]): row[2] for row in rows}
+                current_symbols = {int(row[0]): row[2] for row in rows}
+                current_images = {int(row[0]): row[3] for row in rows}
                 if repaired_choice_images is None:
                     expected_images = [
                         current_images.get(number)
@@ -220,12 +237,25 @@ def apply_audited_repairs(
                     )
                 current_numbers = [int(row[0]) for row in rows]
                 current_text = [str(row[1]) for row in rows]
-                current_image_list = [row[2] for row in rows]
+                current_symbol_list = [row[2] for row in rows]
+                current_image_list = [row[3] for row in rows]
+                current_formats = [row[4] for row in rows]
                 expected_numbers = list(range(1, len(expected) + 1))
+                expected_symbols = [
+                    current_symbols.get(number, CHOICE_SYMBOLS[number - 1])
+                    for number in expected_numbers
+                ]
+                expected_formats = (
+                    list(repaired_choice_formats)
+                    if repaired_choice_formats is not None
+                    else [None] * len(expected)
+                )
                 if (
                     current_numbers != expected_numbers
                     or current_text != expected
+                    or current_symbol_list != expected_symbols
                     or current_image_list != expected_images
+                    or current_formats != expected_formats
                 ):
                     connection.execute(
                         """
@@ -239,20 +269,21 @@ def apply_audited_repairs(
                         INSERT INTO question_choices (
                             question_id, choice_number, choice_symbol,
                             choice_text, choice_image_path, choice_format_json
-                        ) VALUES (?, ?, ?, ?, ?, NULL)
+                        ) VALUES (?, ?, ?, ?, ?, ?)
                         ON CONFLICT(question_id, choice_number) DO UPDATE SET
                             choice_symbol = excluded.choice_symbol,
                             choice_text = excluded.choice_text,
                             choice_image_path = excluded.choice_image_path,
-                            choice_format_json = NULL
+                            choice_format_json = excluded.choice_format_json
                         """,
                         [
                             (
                                 int(question_id),
                                 number,
-                                CHOICE_SYMBOLS[number - 1],
+                                expected_symbols[number - 1],
                                 text,
                                 expected_images[number - 1],
+                                expected_formats[number - 1],
                             )
                             for number, text in enumerate(expected, start=1)
                         ],

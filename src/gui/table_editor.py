@@ -170,6 +170,7 @@ class TableEditorDialog(QDialog):
         self._rendering = False
         self._header_touched = False
         self._resize_active = False
+        self._view_refit_pending = False
 
         self._build_actions()
         self._build_command_bar()
@@ -178,7 +179,16 @@ class TableEditorDialog(QDialog):
         self.grid.setAccessibleName("표 셀 편집 영역")
         self.grid.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.grid.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.grid.setWordWrap(True)
         self.grid.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.grid.horizontalHeader().setToolTip(
+            "열 경계를 드래그해 셀 폭을 직접 조절할 수 있습니다."
+        )
+        self.grid.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.grid.verticalHeader().setMinimumSectionSize(28)
+        self.grid.verticalHeader().setToolTip(
+            "행 경계를 드래그해 셀 높이를 직접 조절할 수 있습니다."
+        )
         self.grid.horizontalHeader().sectionResized.connect(
             self._on_header_resized
         )
@@ -274,6 +284,12 @@ class TableEditorDialog(QDialog):
             ("merge", "셀 병합", self.merge_selected_cells, FIF.EDIT),
             ("split", "셀 분할", self.split_current_cell, FIF.EDIT),
             ("auto_width", "폭 자동 맞춤", self.auto_fit_widths, FIF.FIT_PAGE),
+            (
+                "auto_height",
+                "행 높이 자동 맞춤",
+                self.auto_fit_row_heights,
+                FIF.FIT_PAGE,
+            ),
         ]
         for key, label, callback, icon in structure:
             self._create_action(key, label, callback, icon=icon)
@@ -382,7 +398,7 @@ class TableEditorDialog(QDialog):
             ("셀", ("merge", "split")),
             ("가로", ("align_left", "align_center", "align_right")),
             ("세로", ("align_top", "align_middle", "align_bottom")),
-            ("배치", ("auto_width", "toggle_source")),
+            ("배치", ("auto_width", "auto_height", "toggle_source")),
         )
         for title, keys in groups:
             self.commandFlow.addWidget(self._create_command_group(title, keys))
@@ -466,6 +482,7 @@ class TableEditorDialog(QDialog):
         self.gridScroll.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.gridScroll.setWidgetResizable(True)
         self.gridScroll.setWidget(self.grid)
+        self.gridScroll.viewport().installEventFilter(self)
         canvas_layout.addWidget(self.gridScroll)
         self.editorSplitter.addWidget(self.editorCanvas)
         self.editorSplitter.addWidget(self.sourcePanel)
@@ -496,6 +513,25 @@ class TableEditorDialog(QDialog):
         self.setTabOrder(self.grid, self.sourcePanel)
         self.setTabOrder(self.sourcePanel, self.saveButton)
         self.setTabOrder(self.saveButton, self.cancelButton)
+
+    def eventFilter(self, watched, event):
+        if (
+            hasattr(self, "gridScroll")
+            and watched is self.gridScroll.viewport()
+            and event.type() == QEvent.Resize
+        ):
+            self._queue_view_refit()
+        return super().eventFilter(watched, event)
+
+    def _queue_view_refit(self) -> None:
+        if self._view_refit_pending:
+            return
+        self._view_refit_pending = True
+        QTimer.singleShot(0, self._run_queued_view_refit)
+
+    def _run_queued_view_refit(self) -> None:
+        self._view_refit_pending = False
+        self._apply_view_widths()
 
     def _on_header_resized(self, _logical_index, _old_size, _new_size):
         if not self._rendering:
@@ -545,13 +581,12 @@ class TableEditorDialog(QDialog):
                 f"{int(layout.total_width_mm)}mm"
             )
         else:
-            viewport_width = (
-                self.gridScroll.viewport().width()
-                if hasattr(self, "gridScroll")
-                else self.grid.viewport().width()
+            viewport_width = self.grid.viewport().width()
+            total_pixels = max(
+                36 * self.grid.columnCount(),
+                viewport_width,
             )
-            total_pixels = max(480, viewport_width - 4)
-            status = "편집 맞춤"
+            status = "편집 맞춤 · 창에 맞춤 · 헤더 드래그로 셀 크기 조정"
 
         self._rendering = True
         try:
@@ -578,6 +613,7 @@ class TableEditorDialog(QDialog):
                 total_pixels + chrome,
                 max(360, self.grid.sizeHint().height()),
             )
+        self.grid.resizeRowsToContents()
         self._set_status(status)
 
     def _load_source_image(self) -> None:
@@ -877,6 +913,11 @@ class TableEditorDialog(QDialog):
     def auto_fit_widths(self):
         self._commit_pending_editor()
         return self.session.set_auto_widths()
+
+    def auto_fit_row_heights(self):
+        self._commit_pending_editor()
+        self.grid.resizeRowsToContents()
+        self._set_status("행 높이를 셀 내용에 맞췄습니다.")
 
     def apply_horizontal_alignment(self, alignment: str):
         self._commit_pending_editor()

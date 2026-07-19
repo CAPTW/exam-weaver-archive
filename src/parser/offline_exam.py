@@ -7,6 +7,10 @@ from dataclasses import dataclass, replace
 from statistics import fmean
 from typing import Iterable, Sequence
 
+from .aligned_choice_table import (
+    build_aligned_choice_format,
+    canonical_aligned_choice_text,
+)
 from .layout import LayoutLine, LayoutWord, StructuredPage
 
 
@@ -63,6 +67,18 @@ class ParsedOfflineQuestion:
     source_page: int
     confidence: float
     diagnostics: tuple[str, ...]
+    choice_format_jsons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _AlignedChoiceRecovery:
+    indexes: frozenset[int]
+    headers: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+    @property
+    def choices(self) -> list[str]:
+        return [canonical_aligned_choice_text(self.headers, row) for row in self.rows]
 
 
 @dataclass(frozen=True)
@@ -626,8 +642,17 @@ class OfflineExamParser:
             and len(explicit_records_for_precedence) <= 2
         )
         underlined_recovery = self._recover_underlined_choice_phrases(region)
+        aligned_choice_recovery = self._recover_aligned_labeled_choice_table(
+            region[1:]
+        )
+        aligned_choice_tuple = (
+            (set(aligned_choice_recovery.indexes), aligned_choice_recovery.choices)
+            if aligned_choice_recovery is not None
+            else None
+        )
         numeric_table_recovery = (
-            self._recover_labeled_numeric_table(region[1:])
+            aligned_choice_tuple
+            or self._recover_labeled_numeric_table(region[1:])
             or self._recover_two_column_numeric_table(region[1:])
             or self._recover_two_by_two_numeric_grid(region[1:])
         )
@@ -934,6 +959,34 @@ class OfflineExamParser:
                 for choice_number, choice in enumerate(choices, start=1)
             ]
         choices = [self._repair_choice_ocr_spacing(choice) for choice in choices]
+        choice_format_jsons: tuple[str, ...] = ()
+        if (
+            aligned_choice_recovery is not None
+            and labeled_numeric_choices
+            and len(choices) == len(aligned_choice_recovery.rows)
+        ):
+            repaired_rows = tuple(
+                tuple(self._repair_choice_ocr_spacing(value) for value in row)
+                for row in aligned_choice_recovery.rows
+            )
+            aligned_choices = [
+                canonical_aligned_choice_text(aligned_choice_recovery.headers, row)
+                for row in repaired_rows
+            ]
+            if [re.sub(r"\s+", " ", value).strip() for value in choices] == [
+                re.sub(r"\s+", " ", value).strip()
+                for value in aligned_choice_recovery.choices
+            ]:
+                choices = aligned_choices
+                choice_format_jsons = tuple(
+                    build_aligned_choice_format(
+                        aligned_choice_recovery.headers,
+                        row,
+                        number,
+                    )
+                    for number, row in enumerate(repaired_rows, start=1)
+                )
+                diagnostics.append("aligned_choice_table_recovery")
         if explicit_sequence_valid and len(set(choices)) != len(choices):
             diagnostics.append("source_duplicate_choices")
         if len(choices) not in (4, 5):
@@ -1011,6 +1064,7 @@ class OfflineExamParser:
             source_page=region[0].page,
             confidence=confidence,
             diagnostics=tuple(diagnostics),
+            choice_format_jsons=choice_format_jsons,
         )
 
     def _visual_choice_sequence_start(
@@ -1987,6 +2041,153 @@ class OfflineExamParser:
                 ))
             if valid and len(choices) == 4:
                 return set(range(header_index, payload_indexes[-1] + 1)), choices
+        return None
+
+    def _recover_aligned_labeled_choice_table(
+        self, records: Sequence[_LineRecord]
+    ) -> _AlignedChoiceRecovery | None:
+        """Recover four answer rows below ``(가)/(나)/(다)`` column labels.
+
+        Raster PDFs do not expose real table cells.  The label positions are
+        therefore treated as stable column anchors and the following four
+        visual rows are reconstructed without flattening their field mapping.
+        """
+
+        expected = tuple(f"({letter})" for letter in "가나다라")
+
+        def normalized_label(text: str) -> str:
+            return re.sub(r"\s+", "", str(text or ""))
+
+        for header_index, header in enumerate(records):
+            header_words = sorted(header.words, key=lambda word: word.bbox[0])
+            header_tokens = tuple(
+                normalized_label(word.text)
+                for word in header_words
+                if normalized_label(word.text) in expected
+            )
+            column_count = len(header_tokens)
+            if (
+                not 2 <= column_count <= 4
+                or header_tokens != expected[:column_count]
+                or len(header_words) != column_count
+            ):
+                continue
+
+            payload_indexes: list[int] = []
+            for index in range(header_index + 1, len(records)):
+                record = records[index]
+                if record.page != header.page or record.column != header.column:
+                    break
+                if _QUESTION_START.match(record.text):
+                    break
+                vertical_offset = float(record.bbox[1]) - float(header.bbox[1])
+                if vertical_offset <= 0:
+                    continue
+                if vertical_offset > 0.32:
+                    break
+                payload_indexes.append(index)
+            if len(payload_indexes) < 4:
+                continue
+
+            payload = [records[index] for index in payload_indexes]
+            if len(payload) == 4:
+                row_groups = [[record] for record in payload]
+            else:
+                gaps = [
+                    float(right.bbox[1]) - float(left.bbox[1])
+                    for left, right in zip(payload, payload[1:])
+                ]
+                if len(gaps) < 3:
+                    continue
+                split_offsets = sorted(
+                    sorted(
+                        range(len(gaps)),
+                        key=lambda index: gaps[index],
+                        reverse=True,
+                    )[:3]
+                )
+                if any(gaps[index] < 0.012 for index in split_offsets):
+                    continue
+                boundaries = [0, *(index + 1 for index in split_offsets), len(payload)]
+                row_groups = [
+                    payload[left:right]
+                    for left, right in zip(boundaries, boundaries[1:])
+                ]
+            if len(row_groups) != 4 or any(not row for row in row_groups):
+                continue
+
+            header_x = [float(word.bbox[0]) for word in header_words]
+            boundaries_x = [
+                (left + right) / 2
+                for left, right in zip(header_x, header_x[1:])
+            ]
+            rows: list[tuple[str, ...]] = []
+            valid = True
+            for group in row_groups:
+                cells: list[list[LayoutWord]] = [[] for _ in range(column_count)]
+                for record in group:
+                    for word in sorted(
+                        record.words,
+                        key=lambda item: (float(item.bbox[1]), float(item.bbox[0])),
+                    ):
+                        text = str(word.text).strip()
+                        word_x = float(word.bbox[0])
+                        if (
+                            not text
+                            or getattr(word, "visual_choice_marker", False)
+                            or _DAMAGED_MARKER.fullmatch(text)
+                            or (
+                                re.fullmatch(r"(?:[1-5]|[①-⑤])", text)
+                                and word_x < header_x[0] - 0.02
+                            )
+                        ):
+                            continue
+                        stripped = _LEGACY_CHOICE_PREFIX.sub("", text, count=1).strip()
+                        if stripped:
+                            text = stripped
+                        column = sum(word_x >= boundary for boundary in boundaries_x)
+                        column = min(column_count - 1, max(0, column))
+                        cells[column].append(replace(word, text=text))
+                if any(not cell for cell in cells):
+                    valid = False
+                    break
+                values = tuple(
+                    re.sub(
+                        r"\s+",
+                        " ",
+                        " ".join(
+                            str(word.text).strip()
+                            for word in sorted(
+                                cell,
+                                key=lambda item: (
+                                    float(item.bbox[1]),
+                                    float(item.bbox[0]),
+                                ),
+                            )
+                        ),
+                    ).strip()
+                    for cell in cells
+                )
+                if any(not value for value in values):
+                    valid = False
+                    break
+                rows.append(values)
+            if valid and len(rows) == 4:
+                # Preserve the established unit-aware numeric recovery (for
+                # example 1200 -> 120° in engine interval tables).
+                if all(
+                    re.fullmatch(r"\d+(?:\.\d+)?(?:[%°도])?", value)
+                    for row in rows
+                    for value in row
+                ):
+                    continue
+                return _AlignedChoiceRecovery(
+                    indexes=frozenset(
+                        range(header_index, payload_indexes[-1] + 1)
+                    ),
+                    headers=header_tokens,
+                    rows=tuple(rows),
+                )
         return None
 
     def _recover_sparse_comparison_table(

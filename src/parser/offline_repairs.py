@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
+from .aligned_choice_table import build_aligned_choice_payloads
 from .offline_exam import ParsedOfflineQuestion
 
 
@@ -71,14 +72,27 @@ def apply_audited_source_repair(
     stem = str(raw_stem).strip() if raw_stem is not None else candidate.stem
     raw_choices = repair.get("repaired_choices")
     raw_choice_overrides = repair.get("repaired_choice_overrides")
-    if raw_choices is not None and raw_choice_overrides is not None:
+    raw_choice_fields = repair.get("repaired_choice_fields")
+    if sum(
+        value is not None
+        for value in (raw_choices, raw_choice_overrides, raw_choice_fields)
+    ) > 1:
         raise ValueError(f"ambiguous audited choices for {key!r}")
     choices = candidate.choices
+    choice_format_jsons = candidate.choice_format_jsons
     diagnostics = list(candidate.diagnostics)
-    if raw_choices is not None:
+    if raw_choice_fields is not None:
+        choices, formats = build_aligned_choice_payloads(raw_choice_fields)
+        choice_format_jsons = tuple(formats)
+        diagnostics = [
+            value for value in diagnostics if value not in _CHOICE_DIAGNOSTICS
+        ]
+        diagnostics.append("aligned_choice_table_recovery")
+    elif raw_choices is not None:
         if not isinstance(raw_choices, list) or len(raw_choices) not in (4, 5):
             raise ValueError(f"invalid audited choices for {key!r}")
         choices = [str(value).strip() for value in raw_choices]
+        choice_format_jsons = ()
         if any(not value for value in choices):
             raise ValueError(f"empty audited choice for {key!r}")
         diagnostics = [
@@ -94,6 +108,7 @@ def apply_audited_source_repair(
         if not isinstance(raw_choice_overrides, Mapping) or not raw_choice_overrides:
             raise ValueError(f"invalid audited choice overrides for {key!r}")
         choices = list(candidate.choices)
+        choice_format_jsons = candidate.choice_format_jsons
         for raw_number, raw_value in raw_choice_overrides.items():
             number = int(raw_number)
             value = str(raw_value).strip()
@@ -114,4 +129,5 @@ def apply_audited_source_repair(
         stem=stem,
         choices=list(choices),
         diagnostics=tuple(dict.fromkeys(diagnostics)),
+        choice_format_jsons=tuple(choice_format_jsons),
     )

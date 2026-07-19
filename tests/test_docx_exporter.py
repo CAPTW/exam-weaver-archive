@@ -980,6 +980,39 @@ def test_export_renders_latex_equation_spans_in_latex_style(tmp_path):
     assert document_xml.xpath("//m:rad", namespaces=MATH_NS)
 
 
+def test_export_renders_aligned_choice_fields_without_duplicate_flat_text(tmp_path):
+    from src.parser.aligned_choice_table import build_aligned_choice_format
+
+    output_path = tmp_path / "aligned-choice.docx"
+    headers = ["(가)", "(나)", "(다)"]
+    values = ["해양사고", "표류물", "구난"]
+    canonical = "(가) 해양사고 / (나) 표류물 / (다) 구난"
+    questions = [
+        {
+            "question_text": "빈칸의 조합을 고르시오.",
+            "correct_answer": 1,
+            "choices": [
+                {
+                    "choice_number": 1,
+                    "choice_symbol": "㉮",
+                    "choice_text": canonical,
+                    "choice_format_json": build_aligned_choice_format(headers, values, 1),
+                }
+            ],
+        }
+    ]
+
+    DocxExporter().export("정렬형 선지", questions, str(output_path))
+
+    document_xml = _read_document_xml(output_path)
+    visible = " ".join(document_xml.xpath("//w:t/text()", namespaces=NS))
+    assert canonical not in visible
+    assert visible.count("해양사고") == 1
+    assert visible.count("표류물") == 1
+    assert visible.count("구난") == 1
+    assert len(document_xml.xpath("//w:tbl", namespaces=NS)) == 1
+
+
 def test_export_renders_composite_latex_power_formula_as_word_math(tmp_path):
     output_path = tmp_path / "power-formula.docx"
     latex = r"P=\sqrt{3} \times E \times I \times \cos\theta"

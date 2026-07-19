@@ -137,6 +137,31 @@ def test_replacing_table_spec_keeps_source_anchor_and_unknown_metadata():
     APP.processEvents()
 
 
+def test_editing_aligned_choice_table_keeps_plain_choice_text_in_sync():
+    from src.parser.aligned_choice_table import build_aligned_choice_format
+
+    data = _editor_data()
+    data["choices"][0]["choice_text"] = "(가) 해양사고 / (나) 표류물"
+    data["choices"][0]["choice_format_json"] = build_aligned_choice_format(
+        ["(가)", "(나)"], ["해양사고", "표류물"], 1
+    )
+    editor = QuestionEditor(
+        question_data=data,
+        subject_options=[{"code": "engine1", "name_ko": "기관1"}],
+    )
+
+    editor._replace_table_spec(
+        "choice:1",
+        "aligned-choice-1",
+        {"rows": [["(가)", "(나)"], ["조난사고", "난파물"]], "cells": []},
+    )
+
+    saved = editor.get_data()
+    assert saved["choices"][0]["choice_text"] == "(가) 조난사고 / (나) 난파물"
+    editor.deleteLater()
+    APP.processEvents()
+
+
 def test_plain_view_question_is_promoted_when_editor_opens():
     editor = QuestionEditor(
         question_data=_plain_editor_data("질문? <보기> ① A ② B"),

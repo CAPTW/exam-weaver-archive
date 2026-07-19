@@ -114,6 +114,8 @@ class ReadOnlyTablePreview(QTableWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.setWordWrap(True)
         self.setShowGrid(True)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setMinimumHeight(84)
         self.setMaximumHeight(180)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -149,10 +151,14 @@ class ReadOnlyTablePreview(QTableWidget):
             if row_span > 1 or column_span > 1:
                 self.setSpan(row, column, row_span, column_span)
 
+        self._apply_column_widths()
+        self._resize_rows_to_full_content()
+
+    def _resize_rows_to_full_content(self) -> None:
+        """Keep complete cell text reachable; the bounded widget scrolls if needed."""
         self.resizeRowsToContents()
         for row in range(self.rowCount()):
-            self.setRowHeight(row, min(64, max(28, self.rowHeight(row))))
-        self._apply_column_widths()
+            self.setRowHeight(row, max(28, self.rowHeight(row)))
 
     def _apply_column_widths(self) -> None:
         if not self._column_ratios:
@@ -164,6 +170,7 @@ class ReadOnlyTablePreview(QTableWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_column_widths()
+        self._resize_rows_to_full_content()
 
     def mouseDoubleClickEvent(self, event):
         self.activated.emit()

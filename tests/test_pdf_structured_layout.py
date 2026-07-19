@@ -14,6 +14,7 @@ from src.parser.extractor import PDFExtractor
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
 from src.parser.offline_exam import OfflineExamParser
 from src.parser.offline_quality import validate_offline_question
+from src.parser.table_format import parse_format_payload
 
 
 def _word(x0, y0, x1, text, *, height=12):
@@ -1331,8 +1332,15 @@ def test_vertical_choice_table_recovers_two_missing_first_column_cells(monkeypat
     question = OfflineExamParser().parse_pages([restored])[0]
 
     assert question.choices == [
-        "정류 2 20", "정박 2 20", "정류 3 20", "정박 3 100"
+        "(가) 정류 / (나) 2 / (다) 20",
+        "(가) 정박 / (나) 2 / (다) 20",
+        "(가) 정류 / (나) 3 / (다) 20",
+        "(가) 정박 / (나) 3 / (다) 100",
     ]
+    assert len(question.choice_format_jsons) == 4
+    assert parse_format_payload(question.choice_format_jsons[0])["tables"][0][
+        "rows"
+    ] == [["(가)", "(나)", "(다)"], ["정류", "2", "20"]]
 
 
 def test_vertical_choice_table_replaces_fragment_merged_into_missing_cell(monkeypatch):

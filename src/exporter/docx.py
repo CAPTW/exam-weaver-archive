@@ -19,6 +19,7 @@ import re
 from ..parser.formatting import normalize_private_math_glyphs, repair_extracted_text_artifacts
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL, CHOICE_SYMBOL_TO_NUMBER
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..parser.aligned_choice_table import is_aligned_choice_format
 from ..parser.table_format import (
     effective_table_render_mode,
     parse_format_payload,
@@ -259,10 +260,18 @@ class DocxExporter:
                     answer_number == ALL_CHOICES_CORRECT
                     or choice.get('choice_number') == answer_number
                 )
+                choice_format_json = (
+                    choice.get('choice_format_json') or choice.get('format_json')
+                )
+                choice_text = (
+                    ''
+                    if is_aligned_choice_format(choice_format_json)
+                    else choice.get('choice_text', '')
+                )
                 p = self._add_text_with_format_tables(
                     doc,
-                    choice.get('choice_text', ''),
-                    choice.get('choice_format_json') or choice.get('format_json'),
+                    choice_text,
+                    choice_format_json,
                     prefix=f"{symbol} " if symbol else '',
                     size_pt=10,
                     highlight=is_correct

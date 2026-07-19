@@ -402,6 +402,53 @@ def test_view_mode_and_zoom_do_not_change_undo_stack_or_payload():
     _close(dialog)
 
 
+def test_edit_fit_reflows_columns_and_wrapped_rows_with_dialog_size():
+    dialog = _dialog({
+        "rows": [["팝업 폭에 따라 줄바꿈되어야 하는 긴 셀 내용 " * 30]],
+    })
+    dialog.resize(980, 640)
+    APP.processEvents()
+    QTest.qWait(10)
+    APP.processEvents()
+
+    narrow_column_width = dialog.grid.columnWidth(0)
+    narrow_row_height = dialog.grid.rowHeight(0)
+
+    dialog.resize(1180, 760)
+    APP.processEvents()
+    QTest.qWait(10)
+    APP.processEvents()
+
+    wide_column_width = dialog.grid.columnWidth(0)
+    wide_row_height = dialog.grid.rowHeight(0)
+    expected_width = dialog.grid.viewport().width()
+
+    assert narrow_column_width > 800
+    assert wide_column_width > narrow_column_width + 150
+    assert wide_column_width == pytest.approx(expected_width, abs=4)
+    assert narrow_row_height > dialog.grid.verticalHeader().minimumSectionSize()
+    assert wide_row_height <= narrow_row_height
+    _close(dialog)
+
+
+def test_user_can_resize_row_and_restore_content_fitted_height():
+    dialog = _dialog({
+        "rows": [["직접 조절한 뒤 다시 내용에 맞출 수 있는 셀 " * 20]],
+    })
+    APP.processEvents()
+    fitted_height = dialog.grid.rowHeight(0)
+
+    dialog.grid.setRowHeight(0, 48)
+    assert dialog.grid.rowHeight(0) == 48
+
+    dialog.auto_fit_row_heights()
+
+    assert dialog.grid.rowHeight(0) > 48
+    assert dialog.grid.rowHeight(0) == fitted_height
+    assert dialog.session.undo_stack.count() == 0
+    _close(dialog)
+
+
 def test_one_header_drag_creates_one_undo_command():
     dialog = _dialog({"rows": [["A", "B"]]})
 

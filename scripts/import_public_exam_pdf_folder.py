@@ -48,6 +48,7 @@ from src.parser.offline_sources import (  # noqa: E402
     parse_offline_question_pdf,
 )
 from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question  # noqa: E402
+from src.parser.view_table import promote_view_block  # noqa: E402
 from src.web_import.importer import (  # noqa: E402
     ComcbtImportService,
     QuestionSource,
@@ -1050,12 +1051,25 @@ def build_ocr_required_exam(
     else:
         expected_numbers = []
 
-    questions = [
-        Question(
+    questions = []
+    for candidate in offline.questions:
+        question_text, question_format_json, _promoted = promote_view_block(
+            candidate.stem
+        )
+        questions.append(Question(
             number=candidate.number,
-            text=candidate.stem,
+            text=question_text,
             choices=[
-                Choice(number=index, symbol=str(index), text=text)
+                Choice(
+                    number=index,
+                    symbol=str(index),
+                    text=text,
+                    format_json=(
+                        candidate.choice_format_jsons[index - 1]
+                        if index <= len(candidate.choice_format_jsons)
+                        else None
+                    ),
+                )
                 for index, text in enumerate(candidate.choices, start=1)
             ],
             correct_answer=answer_key.get(candidate.number),
@@ -1064,9 +1078,8 @@ def build_ocr_required_exam(
             year=meta.year,
             session=meta.session,
             exam_type=meta.exam_type,
-        )
-        for candidate in offline.questions
-    ]
+            format_json=question_format_json,
+        ))
     actual_numbers = [question.number for question in questions]
     groups = structured_question_groups(offline.structured_pages, meta, questions)
     return (

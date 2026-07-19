@@ -22,6 +22,10 @@ from ...parser.formatting import (
 )
 from ...parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ...parser.question import ALL_CHOICES_CORRECT
+from ...parser.aligned_choice_table import (
+    aligned_choice_fields,
+    canonical_aligned_choice_text,
+)
 from ...parser.table_format import (
     merge_format_spans,
     parse_format_payload,
@@ -528,8 +532,21 @@ class QuestionEditor(QDialog):
                 if key in replacement:
                     merged[key] = replacement[key]
             merged['id'] = table_id
-            payload['tables'][index] = normalize_rectangular_table(merged)
+            normalized_table = normalize_rectangular_table(merged)
+            payload['tables'][index] = normalized_table
             self._store_owner_format_payload(owner, payload)
+            aligned = aligned_choice_fields(
+                serialize_format_payload({'tables': [normalized_table]})
+            )
+            if aligned is not None and owner.startswith('choice:'):
+                headers, values = aligned
+                canonical = canonical_aligned_choice_text(headers, values)
+                self._set_owner_text(owner, canonical)
+                number = int(owner.split(':', 1)[1])
+                for choice in self.question_data.get('choices') or []:
+                    if int(choice.get('choice_number') or 0) == number:
+                        choice['choice_text'] = canonical
+                        break
             self._rebuild_table_cards()
             return True
         return False

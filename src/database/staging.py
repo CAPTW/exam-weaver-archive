@@ -30,6 +30,7 @@ from src.parser.offline_sources import (
     parse_offline_question_pdf,
 )
 from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question
+from src.parser.view_table import promote_view_block
 
 
 PLACEHOLDER_TEXT = "원문 보기 참조"
@@ -56,6 +57,44 @@ STAGING_BLOCKING_QUALITY_CODES = frozenset(
         "missing_model_answer",
     }
 )
+
+
+def _question_from_offline_candidate(
+    candidate,
+    metadata: Mapping[str, object],
+    correct_answer: int,
+) -> Question:
+    """Preserve view blocks and aligned answer fields during DB ingestion."""
+
+    question_text, question_format_json, _promoted = promote_view_block(
+        candidate.stem
+    )
+    return Question(
+        number=candidate.number,
+        text=question_text,
+        choices=[
+            Choice(
+                number=index,
+                symbol=CHOICE_SYMBOLS[index - 1],
+                text=text,
+                format_json=(
+                    candidate.choice_format_jsons[index - 1]
+                    if index <= len(candidate.choice_format_jsons)
+                    else None
+                ),
+            )
+            for index, text in enumerate(candidate.choices, start=1)
+        ],
+        correct_answer=int(correct_answer),
+        source_page=candidate.source_page,
+        subject_name=str(metadata["subject_name"]),
+        year=int(metadata["year"]),
+        session=int(metadata["session"]),
+        exam_type=str(metadata["exam_type"]),
+        format_json=question_format_json,
+    )
+
+
 REQUIRED_SCHEMA: Mapping[str, frozenset[str]] = {
     "exams": frozenset({"id", "code", "name"}),
     "subjects": frozenset({"id", "code", "name_ko"}),
@@ -474,23 +513,10 @@ def build_staging_database(
                 path, source_root, metadata, expected_numbers
             )
             questions = [
-                Question(
-                    number=item.number,
-                    text=item.stem,
-                    choices=[
-                        Choice(
-                            number=index,
-                            symbol=CHOICE_SYMBOLS[index - 1],
-                            text=text,
-                        )
-                        for index, text in enumerate(item.choices, start=1)
-                    ],
-                    correct_answer=int(answer_key.get(item.number, 0)),
-                    source_page=item.source_page,
-                    subject_name=str(metadata["subject_name"]),
-                    year=int(metadata["year"]),
-                    session=int(metadata["session"]),
-                    exam_type=str(metadata["exam_type"]),
+                _question_from_offline_candidate(
+                    item,
+                    metadata,
+                    int(answer_key.get(item.number, 0)),
                 )
                 for item in parsed.questions
             ]
@@ -1447,16 +1473,10 @@ def _build_registered_corpus_sets(
             answer_path, spec.subject_name, expected_numbers
         )
         questions = tuple(
-            Question(
-                item.number,
-                item.stem,
-                [Choice(index, CHOICE_SYMBOLS[index - 1], text) for index, text in enumerate(item.choices, 1)],
+            _question_from_offline_candidate(
+                item,
+                metadata,
                 int(answers.get(item.number, 0)),
-                source_page=item.source_page,
-                subject_name=str(metadata["subject_name"]),
-                year=int(metadata["year"]),
-                session=int(metadata["session"]),
-                exam_type=str(metadata["exam_type"]),
             )
             for item in parsed.questions
         )

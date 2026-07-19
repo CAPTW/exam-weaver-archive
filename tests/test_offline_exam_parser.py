@@ -1,3 +1,4 @@
+import json
 from typing import get_type_hints
 
 from src.parser.offline_exam import OfflineExamParser, ParsedOfflineQuestion
@@ -2143,6 +2144,37 @@ def test_four_row_two_column_numeric_table_recovers_choices():
     question = OfflineExamParser().parse_pages([page])[0]
 
     assert question.choices == ["120° 60°", "90° 45°", "60° 30°", "30° 15°"]
+    assert validate_offline_question(question).importable is True
+
+
+def test_labeled_choice_matrix_preserves_editable_columns_in_choice_formats():
+    page = _page(
+        _line(["9.", "빈칸의", "조합을", "고르시오?"], y=0.10),
+        _line(["(가)", "(나)", "(다)"], y=0.18, xs=[0.18, 0.35, 0.52]),
+        _line(["해양사고", "표류물", "구난"], y=0.24, xs=[0.18, 0.35, 0.52]),
+        _line(["조난사고", "표류물", "구난"], y=0.30, xs=[0.18, 0.35, 0.52]),
+        _line(["해양사고", "난파물", "구조"], y=0.36, xs=[0.18, 0.35, 0.52]),
+        _line(["조난사고", "난파물", "구조"], y=0.42, xs=[0.18, 0.35, 0.52]),
+    )
+
+    question = OfflineExamParser().parse_pages([page])[0]
+
+    assert question.choices == [
+        "(가) 해양사고 / (나) 표류물 / (다) 구난",
+        "(가) 조난사고 / (나) 표류물 / (다) 구난",
+        "(가) 해양사고 / (나) 난파물 / (다) 구조",
+        "(가) 조난사고 / (나) 난파물 / (다) 구조",
+    ]
+    assert len(question.choice_format_jsons) == 4
+    first = json.loads(question.choice_format_jsons[0])
+    table = first["tables"][0]
+    assert table["source"]["kind"] == "aligned_choice_fields"
+    assert table["rows"] == [
+        ["(가)", "(나)", "(다)"],
+        ["해양사고", "표류물", "구난"],
+    ]
+    assert table["render_mode"] == "native"
+    assert "aligned_choice_table_recovery" in question.diagnostics
     assert validate_offline_question(question).importable is True
 
 
