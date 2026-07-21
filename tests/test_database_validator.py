@@ -1,6 +1,91 @@
+import json
 import sqlite3
 
 from src.database.validator import QuestionValidator
+
+
+def test_validator_checks_question_choice_formats_and_shared_text(
+    repo, sample_metadata, sample_question
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+    question_table = json.dumps({"tables": [{
+        "rows": [["@ Beach (to): text"]],
+        "cells": [{"row": 0, "col": 0, "text": "@ Beach (to): text"}],
+    }]}, ensure_ascii=False)
+    choice_table = json.dumps({"tables": [{
+        "rows": [["Da•elict vessel"]],
+        "cells": [{"row": 0, "col": 0, "text": "Da•elict vessel"}],
+    }]}, ensure_ascii=False)
+    with sqlite3.connect(repo.db_path) as connection:
+        exam_subject_id = connection.execute(
+            "SELECT exam_subject_id FROM questions WHERE id = ?",
+            (question["id"],),
+        ).fetchone()[0]
+        cursor = connection.execute(
+            """
+            INSERT INTO question_groups (
+                exam_subject_id, year, session, group_number, shared_text
+            ) VALUES (?, 2024, 1, 1, ?)
+            """,
+            (exam_subject_id, "공유 지문 HaIf cardinal point"),
+        )
+        connection.execute(
+            """
+            UPDATE questions
+            SET question_format_json = ?, group_id = ?
+            WHERE id = ?
+            """,
+            (question_table, cursor.lastrowid, question["id"]),
+        )
+        connection.execute(
+            """
+            UPDATE question_choices SET choice_format_json = ?
+            WHERE question_id = ? AND choice_number = 1
+            """,
+            (choice_table, question["id"]),
+        )
+
+    issues = QuestionValidator(repo).scan()[0]["issues"]
+    issue_codes = {issue["code"] for issue in issues}
+    assert {"damaged_marker_text", "ocr_noise_text"} <= issue_codes
+    assert any(
+        "question_format_json.tables[0]" in issue["message"]
+        for issue in issues
+    )
+    assert any(
+        "choice_format_json.tables[0]" in issue["message"]
+        for issue in issues
+    )
+    assert any("shared_text" in issue["message"] for issue in issues)
+
+
+def test_validator_rejects_invalid_json_and_rows_cells_divergence(
+    repo, sample_metadata, sample_question
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+    divergent = json.dumps({"tables": [{
+        "rows": [["row value"]],
+        "cells": [{"row": 0, "col": 0, "text": "cell value"}],
+    }]})
+    with sqlite3.connect(repo.db_path) as connection:
+        connection.execute(
+            "UPDATE questions SET question_format_json = ? WHERE id = ?",
+            ("[1, 2]", question["id"]),
+        )
+        connection.execute(
+            """
+            UPDATE question_choices SET choice_format_json = ?
+            WHERE question_id = ? AND choice_number = 1
+            """,
+            (divergent, question["id"]),
+        )
+
+    issues = QuestionValidator(repo).scan()[0]["issues"]
+    assert {"invalid_format_json", "rows_cells_divergence"} <= {
+        issue["code"] for issue in issues
+    }
 
 
 def test_question_validator_flags_invalid_choices_answer_image_and_tags(

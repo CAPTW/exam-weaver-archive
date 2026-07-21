@@ -48,6 +48,11 @@ STAGING_BLOCKING_QUALITY_CODES = frozenset(
         "ocr_noise_text",
         "broken_unit_text",
         "unbalanced_delimiter",
+        "invalid_format_json",
+        "rows_cells_divergence",
+        "invalid_table_cell_coordinate",
+        "empty_table_cell",
+        "damaged_marker_text",
         "invalid_session",
         "invalid_question_number",
         "invalid_correct_answer",
@@ -70,6 +75,7 @@ from src.parser.formatting import (
     normalize_latex_text,
     repair_extracted_text_artifacts,
 )
+from src.parser.rich_text_quality import inspect_rich_text
 from src.parser.text_quality import text_quality_issue_codes
 
 _REGISTERED_PAGE_CACHE_SCHEMA = 1
@@ -1602,6 +1608,18 @@ def _normalize_stored_rich_text(
     """Repair legacy OCR/math while retaining and remapping rich metadata."""
 
     raw = str(text or "")
+    inspection = inspect_rich_text(
+        raw,
+        format_json,
+        owner="question",
+        text_path="text",
+        format_path="format_json",
+    )
+    if inspection.issues:
+        detail = ", ".join(
+            f"{issue.code}:{issue.path}" for issue in inspection.issues
+        )
+        raise ValueError(f"invalid rich text structure: {detail}")
     repaired = repair_extracted_text_artifacts(raw)
     formatted = normalize_latex_text(repaired)
     try:

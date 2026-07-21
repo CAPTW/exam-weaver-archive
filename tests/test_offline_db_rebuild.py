@@ -346,6 +346,18 @@ def test_legacy_baseline_math_is_normalized_with_latex_span():
     ]
 
 
+def test_stored_rich_text_rejects_invalid_json_and_table_divergence():
+    with pytest.raises(ValueError, match="invalid_format_json"):
+        _normalize_stored_rich_text("발문", "[1, 2]")
+
+    divergent = json.dumps({"tables": [{
+        "rows": [["row value"]],
+        "cells": [{"row": 0, "col": 0, "text": "cell value"}],
+    }]})
+    with pytest.raises(ValueError, match="rows_cells_divergence"):
+        _normalize_stored_rich_text("발문", divergent)
+
+
 def test_legacy_baseline_ocr_is_repaired_and_existing_spans_are_remapped():
     raw = "Law 하 the 뒤"
     format_json = json.dumps(
@@ -543,6 +555,168 @@ def test_applies_exact_source_repairs_transactionally_to_staging_database(tmp_pa
         ]
     assert stem == "원문에서 확인한 발문은?"
     assert choices == ["갑", "을", "병", "정"]
+
+
+def test_source_repair_restores_question_format_rows_and_cells():
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    corrupted = json.dumps({"tables": [{
+        "rows": [["@ Beach: HaIf"]],
+        "cells": [{"row": 0, "col": 0, "text": "@ Beach: HaIf"}],
+    }]}, ensure_ascii=False)
+    repaired_payload = {"tables": [{
+        "rows": [["㉠ Beach : Half"]],
+        "cells": [{"row": 0, "col": 0, "text": "㉠ Beach : Half"}],
+    }]}
+    candidate = ParsedOfflineQuestion(
+        number=3,
+        stem="손상된 발문",
+        choices=["A", "B", "C", "D"],
+        source_page=24,
+        confidence=0.9,
+        diagnostics=(),
+        question_format_json=corrupted,
+    )
+    repairs = {
+        ("source.pdf", 24, 3): {
+            "confidence": "exact_source",
+            "repaired_stem": "원문 발문",
+            "repaired_question_format_json": repaired_payload,
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("source.pdf"),
+        repairs=repairs,
+    )
+
+    assert repaired.stem == "원문 발문"
+    payload = json.loads(repaired.question_format_json)
+    assert payload["tables"][0]["rows"][0][0] == "㉠ Beach : Half"
+    assert payload["tables"][0]["cells"][0]["text"] == "㉠ Beach : Half"
+
+
+def test_bundled_2022_maritime_english_question_three_is_source_exact():
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    corrupted_view = (
+        "< 보 기 >\n@ Beach (to): To run a vessel up on a beach\n"
+        "to prevent its sinking in deep water\n"
+        "Located: In navigational warnings; position\n"
+        "of object confirmed\n"
+        "㉢ HaIf cardinal point: The f01그r main points\n"
+        "of the; north, east, south and west\n"
+        "@ Muster List of crew, passengers and\n"
+        "others on board and their functions in a\n"
+        "distress or drill\n"
+        "㉤ Da•elict: A vessel which has been\n"
+        "destroyed, sunk or abandoned at a sea"
+    )
+    candidate = ParsedOfflineQuestion(
+        number=3,
+        stem="다음 <보기> 중 용어에 대한 설명으로 을지 않은 것은 모두 개인가?",
+        choices=["1", "2", "3", "4"],
+        source_page=24,
+        confidence=0.9,
+        diagnostics=(),
+        question_format_json=json.dumps({
+            "schema_version": 2,
+            "tables": [{
+                "id": "view-table-1",
+                "rows": [[corrupted_view]],
+                "cells": [{
+                    "row": 0,
+                    "col": 0,
+                    "text": corrupted_view,
+                    "row_span": 1,
+                    "col_span": 1,
+                    "horizontal_alignment": "left",
+                    "vertical_alignment": "center",
+                    "spans": [],
+                }],
+            }],
+        }, ensure_ascii=False),
+    )
+
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("[기출문제]해사영어(24년-13년).pdf"),
+    )
+
+    assert repaired.stem == (
+        "다음 <보기> 중 용어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가?"
+    )
+    payload = json.loads(repaired.question_format_json)
+    view = payload["tables"][0]["rows"][0][0]
+    assert view == payload["tables"][0]["cells"][0]["text"]
+    assert "㉠ Beach (to) :" in view
+    assert "㉡ Located :" in view
+    assert "㉣ Muster :" in view
+    assert "㉤ Derelict :" in view
+
+
+def test_exact_question_format_repair_enforces_expected_values_and_is_idempotent(
+    tmp_path,
+):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    question = _question(1)
+    question.text = "손상된 발문"
+    question.format_json = json.dumps({"tables": [{
+        "rows": [["@ Beach: HaIf"]],
+        "cells": [{"row": 0, "col": 0, "text": "@ Beach: HaIf"}],
+    }]}, ensure_ascii=False)
+    _database(database, [question])
+    repaired_format = {"tables": [{
+        "rows": [["㉠ Beach : Half"]],
+        "cells": [{"row": 0, "col": 0, "text": "㉠ Beach : Half"}],
+    }]}
+    repair_record = {
+        "subject": "항해",
+        "year": 2024,
+        "session": 2,
+        "question_number": 1,
+        "source_page": 1,
+        "expected_current_stem": "손상된 발문",
+        "repaired_stem": "원문 발문",
+        "expected_current_question_format_json": json.loads(
+            question.format_json
+        ),
+        "repaired_question_format_json": repaired_format,
+        "confidence": "exact_source",
+    }
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(
+        json.dumps({"repairs": [repair_record]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    first = apply_audited_repairs(database, repairs)
+    second = apply_audited_repairs(database, repairs)
+
+    assert first.changed_stems == 1
+    assert first.changed_question_formats == 1
+    assert second.changed_stems == 0
+    assert second.changed_question_formats == 0
+    with sqlite3.connect(database) as connection:
+        stem, format_json = connection.execute(
+            "SELECT question_text, question_format_json FROM questions"
+        ).fetchone()
+    assert stem == "원문 발문"
+    assert json.loads(format_json) == repaired_format
+
+    repair_record["expected_current_stem"] = "허용되지 않은 현재값"
+    repair_record["repaired_stem"] = "두 번째 원문 발문"
+    repairs.write_text(
+        json.dumps({"repairs": [repair_record]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    before = database.read_bytes()
+    with pytest.raises(ValueError, match="stem mismatch"):
+        apply_audited_repairs(database, repairs)
+    assert database.read_bytes() == before
 
 
 def test_applies_audited_labeled_choice_fields_with_editable_table_formats(tmp_path):
@@ -2332,3 +2506,45 @@ def test_plain_database_is_not_replaceable_without_explicit_synthetic_trust(tmp_
 
     assert mounted.read_bytes() == before
     assert not (tmp_path / "backups").exists()
+
+
+def test_maritime_source_repairs_include_verified_2021_2022_residuals():
+    bundle = json.loads(
+        Path("src/parser/maritime_source_repairs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    repairs = {
+        (
+            item.get("exam_code"),
+            item.get("subject_code"),
+            item.get("year"),
+            item.get("session"),
+            item.get("question_number"),
+        ): item
+        for item in bundle["repairs"]
+    }
+
+    assert repairs[
+        ("3급항해사(상선)", "regulation", 2022, 3, 9)
+    ]["repaired_stem"] == "상법상 선박의 종물(從物)로 추정하는 것은?"
+    assert repairs[
+        ("3급항해사(상선)", "regulation", 2021, 2, 9)
+    ]["repaired_stem"] == "상법상 선박의 종물(從物)로 추정하는 것은?"
+    assert repairs[
+        ("3급항해사(상선)", "navigation", 2021, 4, 8)
+    ]["repaired_stem"] == "암암(暗岩)이란?"
+    assert repairs[
+        ("3급항해사(상선)", "operation", 2022, 4, 25)
+    ]["repaired_choices"][0] == (
+        "최소한 1개월의 유조선 및 케미컬 탱커에서의 승인된 승무경력과 "
+        "STCW code 제A-Ⅴ/1조의 해기능력을 충족하면 기초 승무자격증을 "
+        "받을 수 있다."
+    )
+    assert repairs[
+        ("3급항해사(상선)", "operation", 2021, 1, 25)
+    ]["repaired_choices"][1] == (
+        "최소한 1개월의 유조선 및 케미컬 탱커에서의 승인된 승무경력과 "
+        "STCW code 제A-Ⅴ/1조의 해기능력을 충족하면 기초 승무자격증을 "
+        "받을 수 있다."
+    )

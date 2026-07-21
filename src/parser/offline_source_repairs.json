@@ -11758,6 +11758,107 @@
         "Boarding arrangements",
         "Muster list"
       ]
+    },
+    {
+      "question_id": 1543,
+      "year": 2022,
+      "session": 3,
+      "question_number": 3,
+      "subject": "해사영어",
+      "source_pdf_relative_path": "[론박]해사영어(25년 하반기 포함)/[기출문제]해사영어(24년-13년).pdf",
+      "source_page": 24,
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 24쪽 3번 발문과 <보기>를 직접 판독",
+      "expected_current_stem": "다음 <보기> 중 용어에 대한 설명으로 을지 않은 것은 모두 개인가?",
+      "repaired_stem": "다음 <보기> 중 용어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가?",
+      "expected_current_question_format_json": {
+        "schema_version": 2,
+        "tables": [
+          {
+            "id": "view-table-1",
+            "rows": [["< 보 기 >\n@ Beach (to): To run a vessel up on a beach\nto prevent its sinking in deep water\nLocated: In navigational warnings; position\nof object confirmed\n㉢ HaIf cardinal point: The f01그r main points\nof the; north, east, south and west\n@ Muster List of crew, passengers and\nothers on board and their functions in a\ndistress or drill\n㉤ Da•elict: A vessel which has been\ndestroyed, sunk or abandoned at a sea"]],
+            "cells": [
+              {
+                "row": 0,
+                "col": 0,
+                "text": "< 보 기 >\n@ Beach (to): To run a vessel up on a beach\nto prevent its sinking in deep water\nLocated: In navigational warnings; position\nof object confirmed\n㉢ HaIf cardinal point: The f01그r main points\nof the; north, east, south and west\n@ Muster List of crew, passengers and\nothers on board and their functions in a\ndistress or drill\n㉤ Da•elict: A vessel which has been\ndestroyed, sunk or abandoned at a sea",
+                "row_span": 1,
+                "col_span": 1,
+                "horizontal_alignment": "left",
+                "vertical_alignment": "center",
+                "spans": []
+              }
+            ],
+            "anchor": {
+              "offset": 38,
+              "before_context": "대한 설명으로 을지 않은 것은\n모두 개인가?",
+              "after_context": ""
+            },
+            "source": {"kind": "view_block_text"},
+            "confidence": {
+              "score": 1.0,
+              "reasons": ["explicit_view_marker"]
+            },
+            "render_mode": "native",
+            "column_widths": [],
+            "row_heights": [],
+            "borders": [],
+            "layout": {"width_mode": "auto", "wide": false},
+            "complexity": {
+              "has_formula": false,
+              "has_embedded_image": false,
+              "has_rotated_text": false,
+              "has_complex_merge": false,
+              "has_duplicate_text_risk": false
+            },
+            "recommended_render": "native"
+          }
+        ]
+      },
+      "repaired_question_format_json": {
+        "schema_version": 2,
+        "tables": [
+          {
+            "id": "view-table-1",
+            "rows": [["< 보 기 >\n㉠ Beach (to) : To run a vessel up on a beach\nto prevent its sinking in deep water\n㉡ Located : In navigational warnings ; position\nof object confirmed\n㉢ Half cardinal point : The four main points\nof the compass ; north, east, south and west\n㉣ Muster : List of crew, passengers and\nothers on board and their functions in a\ndistress or drill\n㉤ Derelict : A vessel which has been\ndestroyed, sunk or abandoned at a sea"]],
+            "cells": [
+              {
+                "row": 0,
+                "col": 0,
+                "text": "< 보 기 >\n㉠ Beach (to) : To run a vessel up on a beach\nto prevent its sinking in deep water\n㉡ Located : In navigational warnings ; position\nof object confirmed\n㉢ Half cardinal point : The four main points\nof the compass ; north, east, south and west\n㉣ Muster : List of crew, passengers and\nothers on board and their functions in a\ndistress or drill\n㉤ Derelict : A vessel which has been\ndestroyed, sunk or abandoned at a sea",
+                "row_span": 1,
+                "col_span": 1,
+                "horizontal_alignment": "left",
+                "vertical_alignment": "center",
+                "spans": []
+              }
+            ],
+            "anchor": {
+              "offset": 40,
+              "before_context": "용어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가?",
+              "after_context": ""
+            },
+            "source": {"kind": "view_block_text"},
+            "confidence": {
+              "score": 1.0,
+              "reasons": ["explicit_view_marker"]
+            },
+            "render_mode": "native",
+            "column_widths": [],
+            "row_heights": [],
+            "borders": [],
+            "layout": {"width_mode": "auto", "wide": false},
+            "complexity": {
+              "has_formula": false,
+              "has_embedded_image": false,
+              "has_rotated_text": false,
+              "has_complex_merge": false,
+              "has_duplicate_text_risk": false
+            },
+            "recommended_render": "native"
+          }
+        ]
+      }
     }
   ]
 }

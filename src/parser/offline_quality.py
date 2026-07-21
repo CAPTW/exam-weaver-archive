@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from .formatting import has_suspicious_text_artifact
 from .offline_exam import ParsedOfflineQuestion
+from .rich_text_quality import inspect_rich_text
 from .text_quality import text_quality_issue_codes
 
 
@@ -71,6 +72,42 @@ def validate_offline_question(
     _append_text_quality_reasons(reasons, stem, "stem")
     for choice in choices:
         _append_text_quality_reasons(reasons, choice, "choice")
+    question_inspection = inspect_rich_text(
+        stem,
+        question.question_format_json,
+        owner="question",
+        text_path="stem",
+        format_path="question_format_json",
+    )
+    for issue in question_inspection.issues:
+        reasons.append(f"{issue.code}_question_format")
+    for surface in question_inspection.surfaces[1:]:
+        _append_text_quality_reasons(
+            reasons,
+            surface.text,
+            "question_format",
+        )
+    for index, choice in enumerate(choices):
+        format_json = (
+            question.choice_format_jsons[index]
+            if index < len(question.choice_format_jsons)
+            else None
+        )
+        inspection = inspect_rich_text(
+            choice,
+            format_json,
+            owner="choice",
+            text_path=f"choices[{index}]",
+            format_path=f"choice_format_jsons[{index}]",
+        )
+        for issue in inspection.issues:
+            reasons.append(f"{issue.code}_choice_format")
+        for surface in inspection.surfaces[1:]:
+            _append_text_quality_reasons(
+                reasons,
+                surface.text,
+                "choice_format",
+            )
     if len(choices) not in (4, 5):
         reasons.append("invalid_choice_count")
     if any(not choice for choice in choices):

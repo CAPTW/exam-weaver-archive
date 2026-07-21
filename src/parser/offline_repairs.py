@@ -17,6 +17,7 @@ from typing import Mapping
 from .aligned_choice_table import build_aligned_choice_payloads
 from .offline_exam import ParsedOfflineQuestion
 from .formatting import merge_spans, normalize_latex_text
+from .rich_text_quality import inspect_rich_text
 
 
 RepairKey = tuple[str, int, int]
@@ -91,6 +92,16 @@ def apply_audited_source_repair(
         stem,
         candidate.question_format_json if raw_stem is None else None,
     )
+    raw_question_format = repair.get("repaired_question_format_json")
+    if raw_question_format is not None:
+        if not isinstance(raw_question_format, Mapping):
+            raise ValueError(
+                f"invalid audited question format for {key!r}"
+            )
+        question_format_json = json.dumps(
+            raw_question_format,
+            ensure_ascii=False,
+        )
     raw_question_spans = repair.get("repaired_question_spans")
     if raw_question_spans is not None:
         if not isinstance(raw_question_spans, list):
@@ -117,6 +128,20 @@ def apply_audited_source_repair(
             verified_spans.append(span)
         payload["spans"] = merge_spans(payload.get("spans") or [], verified_spans)
         question_format_json = json.dumps(payload, ensure_ascii=False)
+    inspection = inspect_rich_text(
+        stem,
+        question_format_json,
+        owner="question",
+        text_path="stem",
+        format_path="question_format_json",
+    )
+    if inspection.issues:
+        detail = ", ".join(
+            f"{issue.code}:{issue.path}" for issue in inspection.issues
+        )
+        raise ValueError(
+            f"invalid audited question rich text for {key!r}: {detail}"
+        )
     raw_choices = repair.get("repaired_choices")
     raw_choice_overrides = repair.get("repaired_choice_overrides")
     raw_choice_fields = repair.get("repaired_choice_fields")

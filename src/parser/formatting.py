@@ -201,6 +201,7 @@ ENGLISH_OCR_TOKEN_REPLACEMENTS = {
     "FaciIities": "Facilities",
     "FaciIitY": "Facility",
     "FaciIity": "Facility",
+    "HaIf": "Half",
     "FIat": "Flat",
     "FiIIed": "Filled",
     "FIip": "Flip",
@@ -555,6 +556,8 @@ ENGLISH_OCR_TOKEN_REPLACEMENTS = {
     "m11": "roll",
     "VoI": "Vol",
     "Configuous": "Contiguous",
+    "Da•elict": "Derelict",
+    "f01그r": "four",
 }
 
 
@@ -572,6 +575,11 @@ OCR_EXACT_PHRASE_REPLACEMENTS = {
     "rCOLREG": "「COLREG",
     "%rine Communication Phrases": "Marine Communication Phrases",
     "pass engers": "passengers",
+    "설명으로 을지 않은 것은 모두 개인가?": (
+        "설명으로 옳지 않은 것은 모두 몇 개인가?"
+    ),
+    "설명으로 을지 않은 것은": "설명으로 옳지 않은 것은",
+    "것은 모두 개인가?": "것은 모두 몇 개인가?",
     "envil℃nment": "environment",
     "llanchor aweigh": "anchor aweigh",
     "Message MarkerOll 대한": "Message Marker에 대한",

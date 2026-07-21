@@ -23,6 +23,9 @@ ENGLISH_OCR_CONFUSABLE_PATTERN = re.compile(
     r"\b[A-Za-z][A-Za-z01]*[01]+[A-Za-z]{1,12}\b|"
     r"(?<=[A-Za-z])[㈜ⅰ-ⅹ殂盞飇恤喬訃粼](?=[A-Za-z]))"
 )
+COMPACT_ENGINEERING_FORMULA_PATTERN = re.compile(
+    r"[A-Za-z0-9_+\-*/^().=\s]+"
+)
 KNOWN_ENGLISH_OCR_CONFUSABLE_PATTERN = re.compile(
     r"(?<![0-9A-Za-z])(?:"
     + "|".join(
@@ -40,6 +43,13 @@ KNOWN_OCR_PHRASE_PATTERN = re.compile(
 VALID_ROMAN_ANNOTATION_PATTERN = re.compile(
     r"(?<![0-9A-Za-z])[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ](?=(?:의)?(?:\s|[.,:;)\]」]|$))"
 )
+VALID_ROMAN_KOREAN_CONTEXT_PATTERN = re.compile(
+    r"제[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+-\d+장|"
+    r"(?:제|부속서\s*)[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+"
+    r"(?=(?:장(?:의)?|에서(?:의)?|에|으로|의|상))|"
+    r"(?<![0-9A-Za-z가-힣])[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]"
+    r"(?=(?:에서(?:의)?|에|으로|에게|에는|에도|은|는|이|가|을|를|의|과|와|상|하))"
+)
 MIXED_ROMAN_OCR_PATTERN = re.compile(
     r"(?:[0-9A-Za-z가-힣*#()\\][ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]"
     r"|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ][0-9A-Za-z가-힣*#()\\])"
@@ -51,7 +61,10 @@ VALID_HANGUL_NUMBER_PATTERN = re.compile(
 VALID_MIXED_SCRIPT_TERM_PATTERN = re.compile(
     r"(?:지진파의[SP]파|A1해역|A2해역|A3해역|A4해역)"
 )
-VALID_CJK_ANNOTATION_PATTERN = re.compile(r"[（(][一-龥]{1,16}[)）]")
+VALID_CJK_ANNOTATION_PATTERN = re.compile(
+    r"[（(](?=[가-힣一-龥\s,·/]{1,32}[)）])"
+    r"(?=[^()）]*[一-龥])[가-힣一-龥\s,·/]{1,32}[)）]"
+)
 VALID_CJK_PARTY_PATTERN = re.compile(
     r"(?<![0-9A-Za-z가-힣一-龥])[甲乙丙丁]"
     r"(?=(?:(?:선장|경장|씨|어선|소유자|사업자|회사))?"
@@ -59,6 +72,9 @@ VALID_CJK_PARTY_PATTERN = re.compile(
     r"(?:\s|[,.!?·:;)]|$))"
 )
 CJK_PATTERN = re.compile(r"[一-龥]")
+DAMAGED_LIST_MARKER_PATTERN = re.compile(
+    r"(?m)^\s*@(?=\s*[A-Za-z가-힣])"
+)
 
 
 def has_intrusive_cjk_ocr(text: str) -> bool:
@@ -82,7 +98,7 @@ def text_quality_issue_codes(text: str) -> tuple[str, ...]:
     codes: list[str] = []
     if (
         OCR_NOISE_PATTERN.search(value)
-        or ENGLISH_OCR_CONFUSABLE_PATTERN.search(value)
+        or has_english_ocr_confusable(value)
         or KNOWN_ENGLISH_OCR_CONFUSABLE_PATTERN.search(value)
         or KNOWN_OCR_PHRASE_PATTERN.search(value)
         or has_mixed_roman_ocr(value)
@@ -92,15 +108,37 @@ def text_quality_issue_codes(text: str) -> tuple[str, ...]:
         codes.append("ocr_noise")
     if BROKEN_UNIT_PATTERN.search(value):
         codes.append("broken_unit")
+    if has_damaged_list_marker(value):
+        codes.append("damaged_list_marker")
     if has_unbalanced_delimiters(value):
         codes.append("unbalanced_delimiter")
     return tuple(codes)
 
 
+def has_english_ocr_confusable(text: str) -> bool:
+    """Detect OCR-like digits in English words, excluding compact formulas."""
+
+    value = str(text or "").strip()
+    if (
+        COMPACT_ENGINEERING_FORMULA_PATTERN.fullmatch(value)
+        and re.search(r"[()+\-*/^=]", value)
+        and re.search(r"\d", value)
+    ):
+        return False
+    return bool(ENGLISH_OCR_CONFUSABLE_PATTERN.search(value))
+
+
+def has_damaged_list_marker(text: str) -> bool:
+    """Detect an OCR ``@`` substituted for a printed list marker."""
+
+    return bool(DAMAGED_LIST_MARKER_PATTERN.search(str(text or "")))
+
+
 def has_mixed_roman_ocr(text: str) -> bool:
     """Detect Roman numeral glyphs embedded in OCR-corrupted word tokens."""
 
-    value = VALID_ROMAN_ANNOTATION_PATTERN.sub("", str(text or ""))
+    value = VALID_ROMAN_KOREAN_CONTEXT_PATTERN.sub("", str(text or ""))
+    value = VALID_ROMAN_ANNOTATION_PATTERN.sub("", value)
     return bool(MIXED_ROMAN_OCR_PATTERN.search(value))
 
 

@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "question_id": 6133,
+      "status": "confirmed",
+      "natural_key": {
+        "exam_code": "3급항해사(상선)",
+        "subject_code": "regulation",
+        "year": 2022,
+        "session": 3,
+        "question_number": 9
+      },
+      "source_page": 25,
+      "source_filename": "2022/2022년 3급항해사(상선).pdf",
+      "exact_source_value": {
+        "question_text": "상법상 선박의 종물(從物)로 추정하는 것은?",
+        "choices": [
+          "선박 담보",
+          "선박의 화물",
+          "선원 및 여객",
+          "선박의 속구목록에 기재한 물건"
+        ]
+      }
+    },
+    {
+      "question_id": 6508,
+      "status": "confirmed",
+      "natural_key": {
+        "exam_code": "3급항해사(상선)",
+        "subject_code": "regulation",
+        "year": 2021,
+        "session": 2,
+        "question_number": 9
+      },
+      "source_page": 16,
+      "source_filename": "2021/2021년 3급항해사(상선).pdf",
+      "exact_source_value": {
+        "question_text": "상법상 선박의 종물(從物)로 추정하는 것은?",
+        "choices": [
+          "선원 및 여객",
+          "선박 담보",
+          "선박의 화물",
+          "선박의 속구목록에 기재한 물건"
+        ]
+      }
+    },
+    {
+      "question_id": 6857,
+      "status": "confirmed",
+      "natural_key": {
+        "exam_code": "3급항해사(상선)",
+        "subject_code": "navigation",
+        "year": 2021,
+        "session": 4,
+        "question_number": 8
+      },
+      "source_page": 32,
+      "source_filename": "2021/2021년 3급항해사(상선).pdf",
+      "exact_source_value": {
+        "question_text": "암암(暗岩)이란?",
+        "choices": [
+          "저조일 때 수면 위로 나타나는 바위",
+          "저조일 때 그 꼭대기가 해수에 씻기는 바위",
+          "저조일 때에도 수면 위에 나타나지 않는 바위",
+          "조위가 평균수면과 같을 때 수면에 나타나는 바위"
+        ]
+      }
+    },
+    {
+      "question_id": 6349,
+      "status": "confirmed",
+      "natural_key": {
+        "exam_code": "3급항해사(상선)",
+        "subject_code": "operation",
+        "year": 2022,
+        "session": 4,
+        "question_number": 25
+      },
+      "source_page": 35,
+      "source_filename": "2022/2022년 3급항해사(상선).pdf",
+      "exact_source_value": {
+        "question_text": "STCW 협약상 유조선 및 케미컬 탱커의 선장, 해기사 및 부원이 되고자 하는 자가 갖추어야 할 최소한의 자격요건으로 옳지 않은 것은?",
+        "choices": [
+          "최소한 1개월의 유조선 및 케미컬 탱커에서의 승인된 승무경력과 STCW code 제A-Ⅴ/1조의 해기능력을 충족하면 기초 승무자격증을 받을 수 있다.",
+          "유조선에서 선장, 기관장, 1등항해사, 1등기관사와 화물 관련 작업에 대하여 직접 책임을 지는 모든 사람은 유조선 하역작업을 위한 상급 승무자격증을 소지하여야 한다.",
+          "유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 해기사와 부원은 기초 승무자격증(Certificate of proficiency)을 소지하여야 한다.",
+          "유조선 및 케미컬 탱커의 기초교육을 이수하고, 유조선에서 최소 3개월의 승인된 승무경력을 갖추어 유조선 직무(상급)교육을 이수하면 상급 승무자격증을 받을 수 있다."
+        ]
+      }
+    },
+    {
+      "question_id": 6474,
+      "status": "confirmed",
+      "natural_key": {
+        "exam_code": "3급항해사(상선)",
+        "subject_code": "operation",
+        "year": 2021,
+        "session": 1,
+        "question_number": 25
+      },
+      "source_page": 5,
+      "source_filename": "2021/2021년 3급항해사(상선).pdf",
+      "exact_source_value": {
+        "question_text": "STCW 협약상 유조선 및 케미컬 탱커의 선장, 해기사 및 부원이 되고자 하는 자가 갖추어야 할 최소한의 자격요건으로 옳지 않은 것은?",
+        "choices": [
+          "유조선 및 케미컬 탱커의 화물과 하역장치에 관련된 특정한 임무와 책임을 담당하는 해기사와 부원은 기초 승무자격증(Certificate of proficiency)을 소지하여야 한다.",
+          "최소한 1개월의 유조선 및 케미컬 탱커에서의 승인된 승무경력과 STCW code 제A-Ⅴ/1조의 해기능력을 충족하면 기초 승무자격증을 받을 수 있다.",
+          "유조선에서 선장, 기관장, 1등항해사, 1등기관사와 화물 관련 작업에 대하여 직접 책임을 지는 모든 사람은 유조선 하역작업을 위한 상급 승무자격증을 소지하여야 한다.",
+          "유조선 및 케미컬 탱커의 기초교육을 이수하고, 유조선에서 최소 3개월의 승인된 승무경력을 갖추며, 유조선 직무(상급)교육을 이수하면 상급 승무자격증을 받을 수 있다."
+        ]
+      }
+    }
+  ]
+}

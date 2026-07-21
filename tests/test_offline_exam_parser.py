@@ -6,6 +6,29 @@ from src.parser.offline_quality import validate_offline_question
 from src.parser.layout import LayoutLine, LayoutWord, StructuredPage
 
 
+def test_offline_quality_checks_question_and_choice_format_surfaces():
+    table = json.dumps({"tables": [{
+        "rows": [["@ Beach (to): text"]],
+        "cells": [{"row": 0, "col": 0, "text": "@ Beach (to): text"}],
+    }]}, ensure_ascii=False)
+    candidate = ParsedOfflineQuestion(
+        number=3,
+        stem="정상 발문은?",
+        choices=["A", "B", "C", "D"],
+        source_page=24,
+        confidence=1.0,
+        diagnostics=(),
+        question_format_json=table,
+        choice_format_jsons=("", table, "", ""),
+    )
+
+    result = validate_offline_question(candidate)
+
+    assert not result.importable
+    assert "damaged_list_marker_question_format" in result.reason_codes
+    assert "damaged_list_marker_choice_format" in result.reason_codes
+
+
 def _line(
     texts,
     *,

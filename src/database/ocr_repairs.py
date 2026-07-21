@@ -20,6 +20,7 @@ class OcrRepairResult:
     applied_records: int
     changed_source_pages: int
     changed_stems: int
+    changed_question_formats: int
     changed_question_images: int
     changed_choice_sets: int
 
@@ -27,6 +28,8 @@ class OcrRepairResult:
 def apply_audited_repairs(
     database: str | Path,
     repairs_path: str | Path,
+    *,
+    allow_unmatched: bool = False,
 ) -> OcrRepairResult:
     """Apply every exact-source record or roll the complete transaction back."""
 
@@ -40,6 +43,7 @@ def apply_audited_repairs(
     applied_records = 0
     changed_source_pages = 0
     changed_stems = 0
+    changed_question_formats = 0
     changed_question_images = 0
     changed_choice_sets = 0
     with sqlite3.connect(database_path) as connection:
@@ -90,7 +94,8 @@ def apply_audited_repairs(
                 identity = (*identity_subject, question_id, repair["question_number"])
             rows = connection.execute(
                 f"""
-                SELECT q.id, q.question_text, q.source_page, qs.source_url
+                SELECT q.id, q.question_text, q.question_format_json,
+                       q.source_page, qs.source_url
                 FROM questions q
                 JOIN exam_subjects es ON es.id = q.exam_subject_id
                 JOIN subjects s ON s.id = es.subject_id
@@ -100,11 +105,19 @@ def apply_audited_repairs(
                 """,
                 (*subject_params, *identity_params),
             ).fetchall()
+            if len(rows) == 0 and allow_unmatched:
+                continue
             if len(rows) != 1:
                 raise ValueError(
                     f"audited repair identity is not unique: {identity!r}: {len(rows)}"
                 )
-            question_id, current_stem, source_page, source_url = rows[0]
+            (
+                question_id,
+                current_stem,
+                current_question_format,
+                source_page,
+                source_url,
+            ) = rows[0]
             if not has_exam_identity:
                 database_source = Path(
                     unquote(urlparse(str(source_url or "")).path)
@@ -148,16 +161,85 @@ def apply_audited_repairs(
                 changed_source_pages += 1
 
             repaired_stem = repair.get("repaired_stem")
-            if repaired_stem is not None and str(current_stem) != str(repaired_stem):
+            target_stem = (
+                str(repaired_stem)
+                if repaired_stem is not None
+                else str(current_stem)
+            )
+            expected_current_stem = repair.get("expected_current_stem")
+            if (
+                repaired_stem is not None
+                and expected_current_stem is not None
+                and not _matches_expected(
+                    str(current_stem),
+                    str(expected_current_stem),
+                    target_stem,
+                )
+            ):
+                raise ValueError(
+                    "audited repair stem mismatch: "
+                    f"{identity!r}: database={current_stem!r} "
+                    f"expected={expected_current_stem!r} "
+                    f"repaired={target_stem!r}"
+                )
+
+            target_question_format = current_question_format
+            repaired_question_format = repair.get(
+                "repaired_question_format_json"
+            )
+            if repaired_question_format is not None:
+                repaired_format_object = _json_object(
+                    repaired_question_format,
+                    label="repaired_question_format_json",
+                )
+                current_format_object = (
+                    _json_object(
+                        current_question_format,
+                        label="database question_format_json",
+                    )
+                    if current_question_format
+                    else None
+                )
+                if "expected_current_question_format_json" in repair:
+                    expected_format_object = _json_object(
+                        repair["expected_current_question_format_json"],
+                        label="expected_current_question_format_json",
+                    )
+                    if not _matches_expected(
+                        current_format_object,
+                        expected_format_object,
+                        repaired_format_object,
+                    ):
+                        raise ValueError(
+                            "audited repair question format mismatch: "
+                            f"{identity!r}"
+                        )
+                target_question_format = json.dumps(
+                    repaired_format_object,
+                    ensure_ascii=False,
+                )
+            elif repaired_stem is not None and str(current_stem) != target_stem:
+                target_question_format = None
+
+            stem_changed = str(current_stem) != target_stem
+            format_changed = current_question_format != target_question_format
+            if stem_changed or format_changed:
                 connection.execute(
                     """
                     UPDATE questions
-                    SET question_text = ?, question_format_json = NULL
+                    SET question_text = ?, question_format_json = ?
                     WHERE id = ?
                     """,
-                    (str(repaired_stem), int(question_id)),
+                    (
+                        target_stem,
+                        target_question_format,
+                        int(question_id),
+                    ),
                 )
+            if stem_changed:
                 changed_stems += 1
+            if format_changed:
+                changed_question_formats += 1
 
             repaired_question_image = repair.get("repaired_question_image_path")
             if repaired_question_image is not None:
@@ -336,6 +418,25 @@ def apply_audited_repairs(
         applied_records=applied_records,
         changed_source_pages=changed_source_pages,
         changed_stems=changed_stems,
+        changed_question_formats=changed_question_formats,
         changed_question_images=changed_question_images,
         changed_choice_sets=changed_choice_sets,
     )
+
+
+def _json_object(value: object, *, label: str) -> dict:
+    try:
+        payload = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} must be a JSON object") from error
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return payload
+
+
+def _matches_expected(
+    current: object,
+    expected: object,
+    repaired: object,
+) -> bool:
+    return current == expected or current == repaired

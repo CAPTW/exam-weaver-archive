@@ -1,7 +1,145 @@
 import json
+import sqlite3
+
+import pytest
 
 from scripts.repair_db_text import has_unbalanced_delimiters, repair_text_and_format
+from src.database.text_repair import (
+    TextChange,
+    apply_changes,
+    collect_findings,
+    collect_surface_counts,
+)
 from src.database.validator import QuestionValidator
+
+
+@pytest.fixture()
+def audit_connection(repo, sample_metadata, sample_question):
+    sample_question.text = "발문 HaIf token"
+    repo.save_questions([sample_question], sample_metadata)
+    connection = sqlite3.connect(repo.db_path)
+    connection.row_factory = sqlite3.Row
+    question = connection.execute(
+        "SELECT id, exam_subject_id FROM questions ORDER BY id LIMIT 1"
+    ).fetchone()
+    question_table = json.dumps({"tables": [{
+        "rows": [["@ Beach row"]],
+        "cells": [{"row": 0, "col": 0, "text": "@ Beach row"}],
+    }]}, ensure_ascii=False)
+    choice_table = json.dumps({"tables": [{
+        "rows": [["Da•elict row"]],
+        "cells": [{"row": 0, "col": 0, "text": "Da•elict row"}],
+    }]}, ensure_ascii=False)
+    group_id = connection.execute(
+        """
+        INSERT INTO question_groups (
+            exam_subject_id, year, session, group_number, shared_text
+        ) VALUES (?, 2024, 1, 1, ?)
+        """,
+        (question["exam_subject_id"], "공유 지문 f01그r token"),
+    ).lastrowid
+    connection.execute(
+        """
+        UPDATE questions
+        SET question_format_json = ?, group_id = ?
+        WHERE id = ?
+        """,
+        (question_table, group_id, question["id"]),
+    )
+    connection.execute(
+        """
+        UPDATE question_choices
+        SET choice_text = '선지 설명으로 을지 않은 것은',
+            choice_format_json = ?
+        WHERE question_id = ? AND choice_number = 1
+        """,
+        (choice_table, question["id"]),
+    )
+    connection.commit()
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def test_collect_findings_audits_all_rich_text_surfaces(audit_connection):
+    findings = collect_findings(audit_connection)
+    paths = {finding.field_path for finding in findings}
+
+    assert "question_text" in paths
+    assert "question_format_json.tables[0].rows[0][0]" in paths
+    assert "question_format_json.tables[0].cells[0].text" in paths
+    assert "choice_text" in paths
+    assert "choice_format_json.tables[0].rows[0][0]" in paths
+    assert "choice_format_json.tables[0].cells[0].text" in paths
+    assert "shared_text" in paths
+
+    counts = collect_surface_counts(audit_connection)
+    assert counts == {
+        "question_text": 1,
+        "question_format_rows": 1,
+        "question_format_cells": 1,
+        "choice_text": 4,
+        "choice_format_rows": 1,
+        "choice_format_cells": 1,
+        "shared_text": 1,
+    }
+
+
+def test_collect_findings_routes_unconfirmed_text_noise_to_source_review(
+    audit_connection,
+):
+    findings = collect_findings(audit_connection)
+    text_findings = [
+        finding
+        for finding in findings
+        if finding.category in {
+            "ocr_noise_text",
+            "broken_unit_text",
+            "unbalanced_paren_or_bracket",
+            "damaged_list_marker",
+        }
+    ]
+
+    assert text_findings
+    assert {finding.severity for finding in text_findings} == {
+        "needs_source_review"
+    }
+
+
+def test_collect_findings_keeps_rich_text_structure_errors_blocking(
+    audit_connection,
+):
+    audit_connection.execute(
+        "UPDATE questions SET question_format_json = '[1, 2]'"
+    )
+    audit_connection.commit()
+
+    findings = collect_findings(audit_connection)
+    structural = [
+        finding
+        for finding in findings
+        if finding.category == "invalid_format_json"
+    ]
+
+    assert structural
+    assert {finding.severity for finding in structural} == {
+        "blocked_quality"
+    }
+
+
+def test_apply_changes_rejects_expected_value_mismatch(audit_connection):
+    change = TextChange(
+        table="question_groups",
+        row_id=1,
+        field="shared_text",
+        before="다른 현재값",
+        after="교정값",
+        metadata={},
+    )
+
+    with pytest.raises(ValueError, match="expected current value mismatch"):
+        apply_changes(audit_connection, [change])
 
 
 def test_has_unbalanced_delimiters_ignores_fraction_parentheses():

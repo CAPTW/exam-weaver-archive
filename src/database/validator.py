@@ -5,6 +5,7 @@ from typing import Dict, List
 from ..parser.formatting import has_suspicious_text_artifact
 from ..parser.patterns import NUMBER_TO_CHOICE_SYMBOL
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..parser.rich_text_quality import inspect_rich_text
 from ..parser.text_quality import (
     BROKEN_UNIT_PATTERN,
     OCR_NOISE_PATTERN,
@@ -76,8 +77,6 @@ class QuestionValidator:
             question_text = str(question.get('question_text') or '')
             if question_text.startswith('[OCR 누락]'):
                 issues.append(self._issue('ocr_placeholder', 'OCR 누락 placeholder', 'error'))
-            if has_suspicious_text_artifact(question_text):
-                issues.append(self._issue('suspicious_text_artifact', '발문 텍스트 순서 의심', 'error'))
             if has_misplaced_view_boundary(
                 question_text,
                 question.get('question_format_json'),
@@ -87,7 +86,29 @@ class QuestionValidator:
                     '발문과 <보기> 표 경계 이상',
                     'error',
                 ))
-            self._validate_text_quality(question_text, '발문', issues)
+            self._validate_rich_text_pair(
+                question_text,
+                question.get('question_format_json'),
+                owner='question',
+                text_path='question_text',
+                format_path='question_format_json',
+                issues=issues,
+            )
+
+        shared_text = str(
+            question.get('group_shared_text')
+            or question.get('shared_passage')
+            or ''
+        )
+        if shared_text.strip():
+            self._validate_rich_text_pair(
+                shared_text,
+                None,
+                owner='group',
+                text_path='shared_text',
+                format_path='shared_format_json',
+                issues=issues,
+            )
 
         if not self._valid_session(question.get('session')):
             issues.append(self._issue('invalid_session', '회차 범위 이상', 'error'))
@@ -161,10 +182,15 @@ class QuestionValidator:
             if expected_symbol and symbol not in self.LEGACY_CHOICE_SYMBOLS.get(number, {expected_symbol}):
                 issues.append(self._issue('invalid_choice_symbol', f'{number}번 선지 기호 이상', 'error'))
             choice_text = str(choice.get('choice_text') or '')
-            if choice_text.strip() and has_suspicious_text_artifact(choice_text):
-                issues.append(self._issue('suspicious_text_artifact', f'{number}번 선지 텍스트 순서 의심', 'error'))
-            if choice_text.strip():
-                self._validate_text_quality(choice_text, f'{number}번 선지', issues)
+            if choice_text.strip() or choice.get('choice_format_json'):
+                self._validate_rich_text_pair(
+                    choice_text,
+                    choice.get('choice_format_json'),
+                    owner='choice',
+                    text_path=f'choices[{number}].choice_text',
+                    format_path=f'choices[{number}].choice_format_json',
+                    issues=issues,
+                )
             if (
                 not choice_text.strip()
                 and not choice_image_path
@@ -215,8 +241,42 @@ class QuestionValidator:
             issues.append(self._issue('ocr_noise_text', f'{label} OCR 잡문자 의심', 'error'))
         if 'broken_unit' in codes:
             issues.append(self._issue('broken_unit_text', f'{label} 단위/수식 깨짐 의심', 'warning'))
+        if 'damaged_list_marker' in codes:
+            issues.append(self._issue('damaged_marker_text', f'{label} 목록 기호 OCR 손상', 'error'))
         if 'unbalanced_delimiter' in codes:
             issues.append(self._issue('unbalanced_delimiter', f'{label} 괄호/대괄호 불균형', 'warning'))
+
+    def _validate_rich_text_pair(
+        self,
+        text: str,
+        format_json: str | None,
+        *,
+        owner: str,
+        text_path: str,
+        format_path: str,
+        issues: List[Dict],
+    ) -> None:
+        inspection = inspect_rich_text(
+            text,
+            format_json,
+            owner=owner,
+            text_path=text_path,
+            format_path=format_path,
+        )
+        for structural in inspection.issues:
+            issues.append(self._issue(
+                structural.code,
+                f'{structural.path}: rich-text 구조 이상',
+                'error',
+            ))
+        for surface in inspection.surfaces:
+            if has_suspicious_text_artifact(surface.text):
+                issues.append(self._issue(
+                    'suspicious_text_artifact',
+                    f'{surface.path} 텍스트 순서 의심',
+                    'error',
+                ))
+            self._validate_text_quality(surface.text, surface.path, issues)
 
     def _has_unbalanced_delimiters(self, text: str) -> bool:
         return has_unbalanced_delimiters(text)

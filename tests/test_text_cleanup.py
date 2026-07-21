@@ -7,6 +7,37 @@ from src.parser.formatting import (
 from src.parser.text_quality import text_quality_issue_codes
 
 
+def test_reported_maritime_ocr_tokens_are_repaired_conservatively():
+    raw = (
+        "다음 <보기> 중 용어에 대한 설명으로 을지 않은 것은 모두 개인가?\n"
+        "㉢ HaIf cardinal point: The f01그r main points\n"
+        "㉤ Da•elict: A vessel"
+    )
+
+    repaired = repair_ocr_confusable_artifacts(raw)
+
+    assert repaired == (
+        "다음 <보기> 중 용어에 대한 설명으로 옳지 않은 것은 모두 몇 개인가?\n"
+        "㉢ Half cardinal point: The four main points\n"
+        "㉤ Derelict: A vessel"
+    )
+
+
+def test_quality_gate_flags_damaged_multiline_list_markers():
+    text = "< 보 기 >\n@ Beach (to): text\n㉢ Half cardinal point: text"
+
+    assert "damaged_list_marker" in text_quality_issue_codes(text)
+
+
+def test_quality_gate_does_not_flag_email_or_valid_ordered_markers():
+    assert "damaged_list_marker" not in text_quality_issue_codes(
+        "contact@example.com"
+    )
+    assert "damaged_list_marker" not in text_quality_issue_codes(
+        "㉠ Alpha\n㉡ Beta\n㉢ Gamma"
+    )
+
+
 def test_repair_extracted_text_artifacts_normalizes_private_math_glyphs_and_linewraps():
     text = (
         "3상 교류 유효전력을 표시한 것으로 옳은 것은? "
@@ -1018,6 +1049,40 @@ def test_quality_gate_flags_new_residual_ocr_patterns_before_repair():
         "가장 오은 거 은?",
         "ice¯breaker assistance",
         "해°°뻬 배출되는 폐기물",
+    ):
+        assert "ocr_noise" in text_quality_issue_codes(text)
+
+
+def test_quality_gate_accepts_standalone_roman_numerals_with_korean_suffixes():
+    for text in (
+        "MARPOL 협약 및 개정규정의 부속서 Ⅵ에서 정한 물질은?",
+        "MARPOL 협약 부속서 Ⅵ에 관한 설명은?",
+        "MARPOL 협약 부속서Ⅴ에서의 기준은?",
+        "해상인명안전협약 제Ⅳ장의 요건은?",
+        "해상인명안전협약 제Ⅱ-1장 26규칙에 따른 기준은?",
+    ):
+        assert "ocr_noise" not in text_quality_issue_codes(text)
+
+
+def test_quality_gate_accepts_compact_engineering_formula_tokens():
+    for text in (
+        "K(1+T1s)",
+        "K(1+1/(T1s))",
+    ):
+        assert "ocr_noise" not in text_quality_issue_codes(text)
+
+
+def test_quality_gate_accepts_mixed_hangul_hanja_parenthetical_annotation():
+    assert "ocr_noise" not in text_quality_issue_codes(
+        "Unknown clause(부지, 不知)에서 말하는 것은?"
+    )
+
+
+def test_quality_gate_still_rejects_roman_and_cjk_glyphs_inside_words():
+    for text in (
+        r"the halide torch \ⅵ11 burn",
+        "roⅲng bearing",
+        "(匁k害通航)",
     ):
         assert "ocr_noise" in text_quality_issue_codes(text)
 
