@@ -75,6 +75,19 @@ CJK_PATTERN = re.compile(r"[一-龥]")
 DAMAGED_LIST_MARKER_PATTERN = re.compile(
     r"(?m)^\s*@(?=\s*[A-Za-z가-힣])"
 )
+COUNTING_LIST_PROMPT_PATTERN = re.compile(
+    r"(?:모두|총)\s*몇\s*(?:개|가지|명|척)"
+)
+EXPLICIT_VIEW_PATTERN = re.compile(r"<\s*보\s*기\s*>")
+VALID_LIST_MARKER_PATTERN = re.compile(
+    r"(?<!\S)(?:"
+    r"[ㄱ-ㅎ][.)]|[㉠-㉻Ⓐ-Ⓩⓐ-ⓩ①-⑳]|"
+    r"\((?:[A-Za-z]|\d{1,2})\)|"
+    r"[A-Ia-i][.)](?=\s)"
+    r")"
+)
+MIN_STRUCTURED_LIST_COLONS = 4
+MIN_VALID_LIST_MARKERS = 3
 
 
 def has_intrusive_cjk_ocr(text: str) -> bool:
@@ -129,9 +142,25 @@ def has_english_ocr_confusable(text: str) -> bool:
 
 
 def has_damaged_list_marker(text: str) -> bool:
-    """Detect an OCR ``@`` substituted for a printed list marker."""
+    """Detect damaged or missing markers in a printed counting list.
 
-    return bool(DAMAGED_LIST_MARKER_PATTERN.search(str(text or "")))
+    Besides the common OCR ``@`` substitution, scanned maritime questions can
+    turn a whole ``ㄱ``-through-``ㅇ`` sequence into arbitrary letters, digits,
+    and punctuation.  A counting prompt followed by several colon-delimited
+    definitions must retain a recognizable marker sequence unless it is an
+    explicit ``<보기>`` block.
+    """
+
+    value = str(text or "")
+    if DAMAGED_LIST_MARKER_PATTERN.search(value):
+        return True
+    if (
+        not COUNTING_LIST_PROMPT_PATTERN.search(value)
+        or value.count(":") < MIN_STRUCTURED_LIST_COLONS
+        or EXPLICIT_VIEW_PATTERN.search(value)
+    ):
+        return False
+    return len(VALID_LIST_MARKER_PATTERN.findall(value)) < MIN_VALID_LIST_MARKERS
 
 
 def has_mixed_roman_ocr(text: str) -> bool:

@@ -48,6 +48,66 @@ def _normalized_rich_text(value: str, format_json: str | None = None) -> tuple[s
     return formatted.text, json.dumps(payload, ensure_ascii=False) if payload else None
 
 
+def replace_single_view_text(
+    format_json: str | None,
+    repaired_text: str,
+    *,
+    expected_current_text: str | None = None,
+) -> str:
+    """Replace one single-cell view table without discarding its metadata."""
+
+    try:
+        payload = json.loads(format_json) if format_json else {}
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid question format for audited view repair") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("invalid question format for audited view repair")
+    candidates = []
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        rows = table.get("rows")
+        if (
+            isinstance(rows, list)
+            and len(rows) == 1
+            and isinstance(rows[0], list)
+            and len(rows[0]) == 1
+            and isinstance(rows[0][0], str)
+        ):
+            candidates.append(table)
+    if len(candidates) != 1:
+        raise ValueError(
+            "audited view repair requires exactly one single-cell table"
+        )
+
+    table = candidates[0]
+    current = table["rows"][0][0]
+    target = str(repaired_text)
+    if (
+        expected_current_text is not None
+        and current not in (str(expected_current_text), target)
+    ):
+        raise ValueError(
+            "audited view text mismatch: "
+            f"current={current!r} expected={expected_current_text!r}"
+        )
+    table["rows"][0][0] = target
+    matching_cells = [
+        cell
+        for cell in (table.get("cells") or [])
+        if isinstance(cell, dict)
+        and int(cell.get("row", -1)) == 0
+        and int(cell.get("col", -1)) == 0
+    ]
+    if len(matching_cells) != 1:
+        raise ValueError(
+            "audited view repair requires one matching table cell"
+        )
+    matching_cells[0]["text"] = target
+    matching_cells[0]["spans"] = []
+    return json.dumps(payload, ensure_ascii=False)
+
+
 @lru_cache(maxsize=1)
 def load_audited_source_repairs() -> dict[RepairKey, RepairRecord]:
     """Load exact-source repairs bundled with the parser."""
@@ -93,6 +153,9 @@ def apply_audited_source_repair(
         candidate.question_format_json if raw_stem is None else None,
     )
     raw_question_format = repair.get("repaired_question_format_json")
+    raw_view_text = repair.get("repaired_view_text")
+    if raw_question_format is not None and raw_view_text is not None:
+        raise ValueError(f"ambiguous audited question format for {key!r}")
     if raw_question_format is not None:
         if not isinstance(raw_question_format, Mapping):
             raise ValueError(
@@ -101,6 +164,11 @@ def apply_audited_source_repair(
         question_format_json = json.dumps(
             raw_question_format,
             ensure_ascii=False,
+        )
+    elif raw_view_text is not None:
+        question_format_json = replace_single_view_text(
+            question_format_json,
+            str(raw_view_text),
         )
     raw_question_spans = repair.get("repaired_question_spans")
     if raw_question_spans is not None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from src.parser.aligned_choice_table import build_aligned_choice_payloads
+from src.parser.offline_repairs import replace_single_view_text
 
 
 CHOICE_SYMBOLS = ("㉮", "㉯", "㉴", "㉵", "⑤")
@@ -187,6 +188,14 @@ def apply_audited_repairs(
             repaired_question_format = repair.get(
                 "repaired_question_format_json"
             )
+            repaired_view_text = repair.get("repaired_view_text")
+            if (
+                repaired_question_format is not None
+                and repaired_view_text is not None
+            ):
+                raise ValueError(
+                    f"ambiguous audited question format: {identity!r}"
+                )
             if repaired_question_format is not None:
                 repaired_format_object = _json_object(
                     repaired_question_format,
@@ -217,6 +226,16 @@ def apply_audited_repairs(
                 target_question_format = json.dumps(
                     repaired_format_object,
                     ensure_ascii=False,
+                )
+            elif repaired_view_text is not None:
+                target_question_format = replace_single_view_text(
+                    current_question_format,
+                    str(repaired_view_text),
+                    expected_current_text=(
+                        str(repair["expected_current_view_text"])
+                        if "expected_current_view_text" in repair
+                        else None
+                    ),
                 )
             elif repaired_stem is not None and str(current_stem) != target_stem:
                 target_question_format = None

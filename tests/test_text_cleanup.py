@@ -38,6 +38,56 @@ def test_quality_gate_does_not_flag_email_or_valid_ordered_markers():
     )
 
 
+def test_quality_gate_flags_corrupted_enumerator_sequences_in_counting_questions():
+    corrupted = (
+        "다음 해상보험 용어 설명 중 틀린 표현은 모두 몇 개 인가? "
+        "기. 명시담보: Clear warranty L. 묵시담보: Implied warranty "
+        "드. 추정전손: Constructive total loss 근. 공동해손: General average "
+        "a, 347+}: Insured amount 1」. 보험자: Insured "
+        "치 피보험자: Assurer 0. ©. © Partial loss"
+    )
+    missing = (
+        "해사영어에서 사용되는 약어에 대한 설명 중 옳지 않은 것은 모두 몇 개인가?\n"
+        "A/Co. : 정침하다\nK.O. : 작업종료\nC.P.A. : 최근접거리\n"
+        "BWE : 방파제 입구\nD.W.T. : 재화중량톤\nLat. : 경도\n"
+        "P/S : 좌현\nS.B.E. : 기관사용준비\nE.T.D. : 입항예정시간"
+    )
+
+    assert "damaged_list_marker" in text_quality_issue_codes(corrupted)
+    assert "damaged_list_marker" in text_quality_issue_codes(missing)
+
+
+def test_quality_gate_accepts_counting_lists_with_valid_enumerator_sequences():
+    hangul_markers = (
+        "영문 표기 설명 중 틀린 것은 모두 몇 개인가? "
+        "ㄱ. A/C: 항공기 ㄴ. ILF: 국제인명구조연합 ㄷ. MID: 해양식별숫자 "
+        "ㄹ. IMO: 국제해사기구 ㅁ. OSC: 현장지휘관 ㅂ. RB: 구조정 "
+        "ㅅ. RV: 구조선박 ㅇ. WMO: 세계기상기구"
+    )
+    numeric_markers = (
+        "다음 설명 중 옳은 것은 모두 몇 개인가? "
+        "(1) PA: 첫째 (2) PB: 둘째 (3) PC: 셋째 (4) PD: 넷째"
+    )
+    explicit_view = (
+        "다음 <보기>의 약어 설명 중 옳은 것은 모두 몇 개인가?\n"
+        "CPA: 최근접거리\nTCPA: 최근접시간\nDWT: 재화중량톤\nETA: 도착예정시간"
+    )
+
+    assert "damaged_list_marker" not in text_quality_issue_codes(hangul_markers)
+    assert "damaged_list_marker" not in text_quality_issue_codes(numeric_markers)
+    assert "damaged_list_marker" not in text_quality_issue_codes(explicit_view)
+
+
+def test_source_printed_english_spellings_are_not_guessed_as_ocr_damage():
+    source_text = (
+        "Amver: A world-wide ship reporting system. "
+        "트랜지스터(Transister)"
+    )
+
+    assert repair_ocr_confusable_artifacts(source_text) == source_text
+    assert text_quality_issue_codes(source_text) == ()
+
+
 def test_repair_extracted_text_artifacts_normalizes_private_math_glyphs_and_linewraps():
     text = (
         "3상 교류 유효전력을 표시한 것으로 옳은 것은? "

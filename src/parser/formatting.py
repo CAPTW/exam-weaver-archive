@@ -296,7 +296,6 @@ ENGLISH_OCR_TOKEN_REPLACEMENTS = {
     "Surgng": "Surging",
     "SurvivaI": "Survival",
     "Territonal": "Territorial",
-    "Transister": "Transistor",
     "UPPer": "upper",
     "VesseI": "Vessel",
     "WheeI": "Wheel",
@@ -443,7 +442,6 @@ ENGLISH_OCR_TOKEN_REPLACEMENTS = {
     # Second pass over the remaining spelling-profile candidates.  These are
     # still exact tokens (not fuzzy replacement), so domain terms stay intact.
     "AeronauticaI": "Aeronautical",
-    "Amver": "AMVER",
     "Bullbous": "Bulbous",
     "CaIl": "Call",
     "Cawenticn": "Convention",

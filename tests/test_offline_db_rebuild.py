@@ -597,6 +597,55 @@ def test_source_repair_restores_question_format_rows_and_cells():
     assert payload["tables"][0]["cells"][0]["text"] == "㉠ Beach : Half"
 
 
+def test_source_repair_replaces_single_view_text_while_preserving_table_metadata():
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    corrupted = "<보기>\n@ Beach: HaIf"
+    repaired_view = "<보기>\n㉠ Beach : Half"
+    candidate = ParsedOfflineQuestion(
+        number=3,
+        stem="발문",
+        choices=["A", "B", "C", "D"],
+        source_page=24,
+        confidence=0.9,
+        diagnostics=(),
+        question_format_json=json.dumps({
+            "schema_version": 2,
+            "tables": [{
+                "id": "view-table-1",
+                "rows": [[corrupted]],
+                "cells": [{
+                    "row": 0,
+                    "col": 0,
+                    "text": corrupted,
+                    "row_span": 1,
+                    "col_span": 1,
+                    "spans": [],
+                }],
+                "anchor": {"offset": 2},
+            }],
+        }, ensure_ascii=False),
+    )
+    repairs = {
+        ("source.pdf", 24, 3): {
+            "confidence": "exact_source",
+            "repaired_view_text": repaired_view,
+        }
+    }
+
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("source.pdf"),
+        repairs=repairs,
+    )
+
+    payload = json.loads(repaired.question_format_json)
+    table = payload["tables"][0]
+    assert table["rows"][0][0] == repaired_view
+    assert table["cells"][0]["text"] == repaired_view
+    assert table["anchor"] == {"offset": 2}
+
+
 def test_bundled_2022_maritime_english_question_three_is_source_exact():
     from src.parser.offline_repairs import apply_audited_source_repair
 
@@ -719,6 +768,50 @@ def test_exact_question_format_repair_enforces_expected_values_and_is_idempotent
     assert database.read_bytes() == before
 
 
+def test_exact_source_repair_replaces_single_view_text_idempotently(tmp_path):
+    from src.database.ocr_repairs import apply_audited_repairs
+
+    database = tmp_path / "staging.db"
+    corrupted = "<보기>\n@ Beach: HaIf"
+    repaired_view = "<보기>\n㉠ Beach : Half"
+    question = _question(1)
+    question.format_json = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "id": "view-table-1",
+            "rows": [[corrupted]],
+            "cells": [{"row": 0, "col": 0, "text": corrupted, "spans": []}],
+            "anchor": {"offset": 2},
+        }],
+    }, ensure_ascii=False)
+    _database(database, [question])
+    repairs = tmp_path / "repairs.json"
+    repairs.write_text(json.dumps({"repairs": [{
+        "subject": "항해",
+        "year": 2024,
+        "session": 2,
+        "question_number": 1,
+        "source_page": 1,
+        "expected_current_view_text": corrupted,
+        "repaired_view_text": repaired_view,
+        "confidence": "exact_source",
+    }]}, ensure_ascii=False), encoding="utf-8")
+
+    first = apply_audited_repairs(database, repairs)
+    second = apply_audited_repairs(database, repairs)
+
+    assert first.changed_question_formats == 1
+    assert second.changed_question_formats == 0
+    with sqlite3.connect(database) as connection:
+        payload = json.loads(connection.execute(
+            "SELECT question_format_json FROM questions"
+        ).fetchone()[0])
+    table = payload["tables"][0]
+    assert table["rows"][0][0] == repaired_view
+    assert table["cells"][0]["text"] == repaired_view
+    assert table["anchor"] == {"offset": 2}
+
+
 def test_applies_audited_labeled_choice_fields_with_editable_table_formats(tmp_path):
     from src.database.ocr_repairs import apply_audited_repairs
 
@@ -822,6 +915,77 @@ def test_bundled_view_boundary_repairs_restore_source_confirmed_content():
     assert law["repaired_choices"] == ["2개", "3개", "4개", "5개"]
     assert "옳은 것은 모두 몇 개인가? <보기>" in navigation["repaired_stem"]
     assert navigation["repaired_choices"] == ["없음", "1개", "2개", "3개"]
+
+
+def test_bundled_maritime_english_repairs_restore_verified_enumerator_lists():
+    from src.parser.offline_repairs import load_audited_source_repairs
+    from src.parser.text_quality import text_quality_issue_codes
+
+    load_audited_source_repairs.cache_clear()
+    repairs = load_audited_source_repairs()
+    filename = "[기출문제]해사영어(24년-13년).pdf".casefold()
+    expected_fragments = {
+        (40, 19): ("㉠ Power-driven vessel", "㉣ WIG craft"),
+        (41, 5): ("㉠ Secured all derrick booms", "㉤ Started to heave up"),
+        (45, 11): ("Ⓐ A/Co.", "Ⓘ E.T.D."),
+        (53, 18): ("㉠ DSC", "㉥ VTS"),
+        (59, 17): ("㉠ Emergency phase", "㉣ Search"),
+        (60, 4): ("㉠ Dragging", "㉤ A warm front"),
+        (60, 6): ("㉠ Hampered vessel", "㉣ Roll call"),
+        (78, 13): ("ㄱ. fire detecting", "ㅇ. vapor-compression"),
+        (84, 12): ("ㄱ. 명시담보", "ㅇ. 분손"),
+    }
+
+    for source_key, fragments in expected_fragments.items():
+        repair = repairs[(filename, *source_key)]
+        stem = repair["repaired_stem"]
+        assert repair["expected_current_stem"]
+        assert all(fragment in stem for fragment in fragments)
+        assert text_quality_issue_codes(stem) == ()
+
+
+def test_bundled_repairs_restore_all_verified_damaged_view_lists():
+    from src.parser.text_quality import text_quality_issue_codes
+
+    payload = json.loads(Path(
+        "src/parser/offline_source_repairs.json"
+    ).read_text(encoding="utf-8"))
+    repairs = {
+        item.get("question_id"): item
+        for item in payload["repairs"]
+        if item.get("question_id")
+    }
+    expected_fragments = {
+        1363: ("㉠ Draught", "㉣ Traffic clearance"),
+        1366: ("㉠ Fishing gear", "㉤ M/V “C”"),
+        1370: ("㉠ INSTRUCTION", "㉣ REQUEST"),
+        1414: ("㉠ Reporting point", "㉣ Traffic clearance"),
+        1423: ("㉠ Crash-stop", "㉣ Air draft"),
+        1457: ("㉠ Alert phase", "㉣ Distress phase"),
+        1464: ("㉠ ADVICE", "㉤ INTENTION"),
+        1493: ("㉠ Abandon vessel", "㉣ Freeboard"),
+        1541: ("㉠ INFORMATION", "㉤ The use of INTENTION"),
+        1542: ("㉠ Rolling", "㉣ Sagging"),
+        1544: ("㉠ Used to search", "㉤ Aircraft"),
+        1548: ("㉠ Area to be avoided", "㉣ Traffic lane"),
+        1552: ("㉠ AIS", "㉤ PFSP"),
+        1553: ("㉠ Any action", "㉣ If necessary"),
+        1558: ("㉠ Adrift", "㉣ Fairway"),
+        1559: ("㉠ A mark or place", "㉣ To have seawater"),
+        1560: ("㉠ Heading", "㉤ Give way"),
+        1590: ("㉠ Often appropriate", "㉢ Accurate navigation"),
+        1596: ("㉠ I might enter", "㉡ You should anchor"),
+        2123: ("㉠ 항정선", "㉤ 침로가 동"),
+        2267: ("㉠ 잠수함", "㉤ 안벽 부근"),
+    }
+
+    for question_id, fragments in expected_fragments.items():
+        repair = repairs[question_id]
+        view = repair["repaired_view_text"]
+        assert repair["expected_current_view_text"]
+        assert all(fragment in view for fragment in fragments)
+        assert text_quality_issue_codes(repair["repaired_stem"]) == ()
+        assert text_quality_issue_codes(view) == ()
 
 
 def test_offline_candidate_ingestion_preserves_view_and_choice_tables():
