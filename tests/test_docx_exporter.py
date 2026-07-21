@@ -310,7 +310,7 @@ def test_export_uses_reference_exam_layout_and_highlights_correct_choice(tmp_pat
         assert paragraph.xpath("./w:pPr/w:spacing/@w:lineRule", namespaces=NS) == ["atLeast"]
         assert paragraph.xpath(".//w:rFonts/@w:eastAsia", namespaces=NS)
         assert set(paragraph.xpath(".//w:rFonts/@w:eastAsia", namespaces=NS)) == {
-            "경기천년제목OTF Light"
+            "Pretendard"
         }
 
     assert paragraphs[0].xpath(".//w:sz/@w:val", namespaces=NS) == ["32"]
@@ -523,6 +523,9 @@ def test_export_renders_table_format_as_native_word_table(tmp_path):
 
     assert len(tables) == 1
     assert cell_texts == ["구분", "값", "A", "10", "B", "20"]
+    assert document_xml.xpath(
+        "string(//w:tbl/w:tblPr/w:jc/@w:val)", namespaces=NS
+    ) == "center"
 
 
 def _hybrid_table_payload(image_path, score=.95, render_mode="auto", complexity=None):
@@ -683,6 +686,45 @@ def test_wide_table_temporarily_switches_to_one_column_section(tmp_path):
     column_counts = xml.xpath("//w:sectPr/w:cols/@w:num", namespaces=NS)
     assert "1" in column_counts
     assert column_counts[-1] == "2"
+    wide_section_type = xml.xpath(
+        "string((//w:sectPr[w:cols/@w:num='1']/w:type/@w:val)[1])",
+        namespaces=NS,
+    )
+    assert wide_section_type in {"", "nextPage"}
+
+
+def test_long_one_cell_view_table_stays_inside_two_column_width(tmp_path):
+    output = tmp_path / "long-view-table.docx"
+    payload = json.dumps({
+        "tables": [{
+            "id": "long-view",
+            "rows": [["<보기> " + ("긴 지문 내용 " * 80)]],
+            "layout": {"width_mode": "auto"},
+            "confidence": {"score": 1.0},
+            "render_mode": "native",
+        }]
+    }, ensure_ascii=False)
+
+    DocxExporter().export(
+        "긴 보기 표",
+        _single_table_question(payload),
+        str(output),
+    )
+
+    xml = _read_document_xml(output)
+    column_counts = xml.xpath("//w:sectPr/w:cols/@w:num", namespaces=NS)
+    grid_widths = [
+        int(value)
+        for value in xml.xpath("//w:tbl/w:tblGrid/w:gridCol/@w:w", namespaces=NS)
+    ]
+    preferred_width = int(xml.xpath(
+        "string(//w:tbl/w:tblPr/w:tblW/@w:w)",
+        namespaces=NS,
+    ))
+
+    assert "1" not in column_counts
+    assert sum(grid_widths) == pytest.approx(82 / 25.4 * 1440, rel=0.03)
+    assert preferred_width == pytest.approx(sum(grid_widths), abs=1)
 
 
 def test_native_table_writes_fixed_grid_widths_from_manual_layout(tmp_path):
@@ -1105,3 +1147,37 @@ def test_promoted_view_block_exports_once_as_one_cell_table(tmp_path):
     visible_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     visible_text += "\n" + document.tables[0].cell(0, 0).text
     assert visible_text.count("<보기>") == 1
+
+
+def test_promoted_view_table_preserves_and_exports_inline_underline(tmp_path):
+    output_path = tmp_path / "view-table-underline.docx"
+    source = "질문?\n<보기>\nThis is the target."
+    start = source.index("This")
+    question_text, format_json, changed = promote_view_block(
+        source,
+        json.dumps(
+            {"spans": [{"start": start, "end": start + 4, "underline": True}]},
+            ensure_ascii=False,
+        ),
+    )
+    questions = [{
+        "question_text": question_text,
+        "question_format_json": format_json,
+        "correct_answer": 1,
+        "choices": [
+            {"choice_number": number, "choice_text": f"선택지 {number}"}
+            for number in range(1, 5)
+        ],
+    }]
+
+    assert changed is True
+    DocxExporter().export("보기 표 밑줄", questions, str(output_path))
+    document = Document(output_path)
+    underlined = [
+        run.text
+        for paragraph in document.tables[0].cell(0, 0).paragraphs
+        for run in paragraph.runs
+        if run.underline
+    ]
+
+    assert underlined == ["This"]

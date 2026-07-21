@@ -21,8 +21,12 @@ from src.parser.formatting import (
     has_suspicious_text_artifact,
     normalize_latex_text,
     repair_extracted_text_artifacts,
+    repair_ocr_confusable_artifacts,
 )
-from src.parser.text_quality import has_unbalanced_delimiters as _has_unbalanced_delimiters
+from src.parser.text_quality import (
+    has_unbalanced_delimiters as _has_unbalanced_delimiters,
+    text_quality_issue_codes,
+)
 
 
 @dataclass
@@ -48,24 +52,106 @@ class SuspiciousText:
     metadata: dict[str, Any] | None = None
 
 
-def repair_text_and_format(text: str, format_json: str | None) -> tuple[str, str | None, bool]:
+def repair_text_and_format(
+    text: str,
+    format_json: str | None,
+    *,
+    confusables_only: bool = False,
+) -> tuple[str, str | None, bool]:
     """Return repaired text, format_json, and whether a format-json row was skipped."""
-    if format_json:
-        repaired = repair_extracted_text_artifacts(text)
-        if can_preserve_format_json(text, repaired, format_json):
-            return repaired, format_json, False
+    repair = (
+        repair_ocr_confusable_artifacts
+        if confusables_only
+        else repair_extracted_text_artifacts
+    )
+    repaired_format = repair_embedded_format_text(format_json, repair)
+    if confusables_only:
+        repaired = repair(text)
+        if repaired == text:
+            return text, repaired_format, False
+        if not repaired_format:
+            return repaired, None, False
+        if can_preserve_format_json(text, repaired, repaired_format):
+            return repaired, repaired_format, False
         formatted = normalize_latex_text(repaired)
-        next_format = None
-        if formatted.spans:
-            next_format = json.dumps({"spans": formatted.spans}, ensure_ascii=False)
+        next_format = replace_format_spans(repaired_format, formatted.spans)
         return formatted.text, next_format, False
 
-    repaired = repair_extracted_text_artifacts(text)
+    if repaired_format:
+        repaired = repair(text)
+        if can_preserve_format_json(text, repaired, repaired_format):
+            return repaired, repaired_format, False
+        formatted = normalize_latex_text(repaired)
+        next_format = replace_format_spans(repaired_format, formatted.spans)
+        return formatted.text, next_format, False
+
+    repaired = repair(text)
     formatted = normalize_latex_text(repaired)
     next_format = None
     if formatted.spans:
         next_format = json.dumps({"spans": formatted.spans}, ensure_ascii=False)
     return formatted.text, next_format, False
+
+
+def repair_embedded_format_text(
+    format_json: str | None,
+    repair,
+) -> str | None:
+    """Repair textual table payloads without discarding table structure."""
+    if not format_json:
+        return format_json
+    try:
+        payload = json.loads(format_json)
+    except (TypeError, ValueError):
+        return format_json
+    if not isinstance(payload, dict):
+        return format_json
+
+    changed = False
+
+    def repair_preserving_hard_breaks(value: str) -> str:
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        return "\n".join(repair(line) for line in normalized.split("\n"))
+
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        rows = table.get("rows") or []
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, list):
+                continue
+            for column_index, value in enumerate(row):
+                if not isinstance(value, str):
+                    continue
+                repaired = repair_preserving_hard_breaks(value)
+                if repaired != value:
+                    rows[row_index][column_index] = repaired
+                    changed = True
+        for cell in table.get("cells") or []:
+            if not isinstance(cell, dict) or not isinstance(cell.get("text"), str):
+                continue
+            repaired = repair_preserving_hard_breaks(cell["text"])
+            if repaired != cell["text"]:
+                cell["text"] = repaired
+                changed = True
+    if not changed:
+        return format_json
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def replace_format_spans(format_json: str | None, spans: list[dict]) -> str | None:
+    """Replace rich-text spans while retaining tables and their layout metadata."""
+    try:
+        payload = json.loads(format_json) if format_json else {}
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if spans:
+        payload["spans"] = spans
+    else:
+        payload.pop("spans", None)
+    return json.dumps(payload, ensure_ascii=False) if payload else None
 
 
 def can_preserve_format_json(before: str, after: str, format_json: str | None) -> bool:
@@ -91,7 +177,11 @@ def can_preserve_format_json(before: str, after: str, format_json: str | None) -
     return True
 
 
-def collect_changes(conn: sqlite3.Connection) -> tuple[list[TextChange], list[TextChange]]:
+def collect_changes(
+    conn: sqlite3.Connection,
+    *,
+    confusables_only: bool = False,
+) -> tuple[list[TextChange], list[TextChange]]:
     changes: list[TextChange] = []
     skipped_format_rows: list[TextChange] = []
 
@@ -113,6 +203,7 @@ def collect_changes(conn: sqlite3.Connection) -> tuple[list[TextChange], list[Te
         next_text, next_format, skipped = repair_text_and_format(
             row["question_text"] or "",
             row["question_format_json"],
+            confusables_only=confusables_only,
         )
         if skipped and next_text != (row["question_text"] or ""):
             skipped_format_rows.append(
@@ -165,6 +256,7 @@ def collect_changes(conn: sqlite3.Connection) -> tuple[list[TextChange], list[Te
         next_text, next_format, skipped = repair_text_and_format(
             row["choice_text"] or "",
             row["choice_format_json"],
+            confusables_only=confusables_only,
         )
         if skipped and next_text != (row["choice_text"] or ""):
             skipped_format_rows.append(
@@ -240,7 +332,8 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
         for row in conn.execute(
             """
             SELECT
-                q.id, q.question_text AS text, q.year, q.session, q.question_number,
+                q.id, q.question_text AS text, q.question_format_json,
+                q.year, q.session, q.question_number,
                 e.code AS exam_code, s.name_ko AS subject_name
             FROM questions q
             JOIN exam_subjects es ON es.id = q.exam_subject_id
@@ -249,6 +342,68 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
             """
         )
     )
+    question_rows = conn.execute(
+        """
+        SELECT
+            q.id, q.question_format_json, q.year, q.session, q.question_number,
+            e.code AS exam_code, s.name_ko AS subject_name
+        FROM questions q
+        JOIN exam_subjects es ON es.id = q.exam_subject_id
+        JOIN exams e ON e.id = es.exam_id
+        JOIN subjects s ON s.id = es.subject_id
+        WHERE q.question_format_json IS NOT NULL
+        """
+    ).fetchall()
+    for row in question_rows:
+        try:
+            payload = json.loads(row["question_format_json"])
+        except (TypeError, ValueError):
+            continue
+        for table_index, table in enumerate(payload.get("tables") or []):
+            if not isinstance(table, dict):
+                continue
+            coordinates = set()
+            for row_index, values in enumerate(table.get("rows") or []):
+                if not isinstance(values, list):
+                    continue
+                for column_index, text in enumerate(values):
+                    coordinates.add((row_index, column_index))
+                    if not isinstance(text, str):
+                        continue
+                    rows.append({
+                        "table_name": "questions",
+                        "row_id": row["id"],
+                        "field_name": (
+                            f"question_format_json.tables[{table_index}]"
+                            f".rows[{row_index}][{column_index}]"
+                        ),
+                        "text": text,
+                        "year": row["year"],
+                        "session": row["session"],
+                        "question_number": row["question_number"],
+                        "exam_code": row["exam_code"],
+                        "subject_name": row["subject_name"],
+                    })
+            for cell_index, cell in enumerate(table.get("cells") or []):
+                if not isinstance(cell, dict) or not isinstance(cell.get("text"), str):
+                    continue
+                coordinate = (cell.get("row"), cell.get("col"))
+                if coordinate in coordinates:
+                    continue
+                rows.append({
+                    "table_name": "questions",
+                    "row_id": row["id"],
+                    "field_name": (
+                        f"question_format_json.tables[{table_index}]"
+                        f".cells[{cell_index}].text"
+                    ),
+                    "text": cell["text"],
+                    "year": row["year"],
+                    "session": row["session"],
+                    "question_number": row["question_number"],
+                    "exam_code": row["exam_code"],
+                    "subject_name": row["subject_name"],
+                })
     rows.extend(
         dict(row, table_name="question_choices", row_id=row["id"], field_name="choice_text")
         for row in conn.execute(
@@ -269,7 +424,9 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
     checks = [
         ("pua_remaining", lambda text: bool(re.search(r"[\ue000-\uf8ff]", text))),
         ("hwp_overbar_marker_review", lambda text: "¯" in text),
-        ("linebreak_remaining", lambda text: bool(re.search(r"[\r\n\t]", text))),
+        # Newlines are meaningful in stems, legal excerpts, and editable
+        # table cells.  Only carriage returns/tabs indicate unnormalised input.
+        ("linebreak_remaining", lambda text: bool(re.search(r"[\r\t]", text))),
         ("broken_variable_note_remaining", lambda text: bool(re.search(r"단\s+는\s+[^?()]+이다\?\s*\(\s*,", text))),
         ("dangling_blank_reference", lambda text: bool(re.search(r"에서\s+에\s+(?:각각\s+)?알맞은|에서\s+에\s+각각", text))),
         ("quote_blank_order_suspect", lambda text: bool(re.search(r'"\s*\(\s+\)\s*\?', text))),
@@ -277,6 +434,14 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
         ("blank_unit_suspect", lambda text: bool(re.search(r"\[\s*\]\s*(?:Ω|Ω|℃|ℓ)?", text))),
         ("paren_question_order_suspect", lambda text: bool(re.search(r"\([^)]{1,60}\)\s+\?", text))),
         ("suspicious_text_artifact", has_suspicious_text_artifact),
+        (
+            "ocr_noise_text",
+            lambda text: "ocr_noise" in text_quality_issue_codes(text),
+        ),
+        (
+            "broken_unit_text",
+            lambda text: "broken_unit" in text_quality_issue_codes(text),
+        ),
         ("unbalanced_paren_or_bracket", has_unbalanced_delimiters),
     ]
     for row in rows:
@@ -292,6 +457,13 @@ def collect_suspicious(conn: sqlite3.Connection) -> list[SuspiciousText]:
             metadata["choice_symbol"] = row["choice_symbol"]
             metadata["question_id"] = row["question_id"]
         for category, check in checks:
+            if (
+                category == "linebreak_remaining"
+                and str(row["field_name"]).startswith("question_format_json.")
+            ):
+                # Line breaks are expected inside an editable table cell and
+                # should not inflate the post-repair residual count.
+                continue
             if check(text):
                 suspicious.append(
                     SuspiciousText(
@@ -404,6 +576,11 @@ def main() -> int:
     parser.add_argument("--db", default=str(PROJECT_ROOT / "data" / "exam_bank.db"))
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--apply", action="store_true", help="Write changes to the DB.")
+    parser.add_argument(
+        "--confusables-only",
+        action="store_true",
+        help="Repair only source-confirmed OCR character confusions.",
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db).resolve()
@@ -420,7 +597,10 @@ def main() -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        changes, skipped_format_rows = collect_changes(conn)
+        changes, skipped_format_rows = collect_changes(
+            conn,
+            confusables_only=args.confusables_only,
+        )
         if args.apply and changes:
             apply_changes(conn, changes)
         if args.apply:

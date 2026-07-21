@@ -864,7 +864,7 @@
       "repaired_choices": [
         "X=A·B",
         "X=A+B",
-        "X=¬(A·B)",
+        "X=\\overline{A·B}",
         "X=A⊕B"
       ],
       "confidence": "exact_source",
@@ -6323,10 +6323,142 @@
       "source_page": 2,
       "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
       "confidence": "exact_source",
-      "evidence_note": "원문 2쪽 직접 대조",
-      "repaired_choice_overrides": {
-        "2": "안개 등으로 인하여 가시거리가 0.5해리 이내로 제한되는 경우에는 레이더 및 초단파(VHF) 통신설비를 갖추지 아니한 수상레저기구를 운항해서는 아니 된다."
-      }
+      "evidence_note": "원본 PDF 2쪽에서 발문과 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 중 「수상레저안전법」상 수상레저활동자가 지켜야 하는 운항규칙에 관한 설명으로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "다이빙대·계류장 및 교량으로부터 20미터 이내의 구역에서는 10노트 이하의 속력으로 운항하여야 한다.",
+        "안개 등으로 인하여 가시거리가 0.5해리 이내로 제한되는 경우에는 레이더 및 초단파(VHF) 통신설비를 갖추지 아니한 수상레저기구를 운항해서는 아니 된다.",
+        "다른 수상레저기구와 같은 방향으로 운항하는 경우에는 2미터 이내로 근접하여 운항하여서는 아니 된다.",
+        "다른 수상레저기구와 정면으로 충돌의 위험이 있을 때에는 음성신호, 수신호 등으로 상대에게 알리고 우현 쪽으로 진로를 피하여야 한다."
+      ]
+    },
+    {
+      "question_id": 47,
+      "subject": "해사법규",
+      "question_number": 7,
+      "source_page": 8,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 8쪽에서 발문, 보기 및 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 <보기> 중 「해수욕장의 이용 및 관리에 관한 법률」상 ( )안의 내용을 순서대로 바르게 나열한 것은? <보기> ㉠ (a)은(는) 해수욕장의 지속가능한 이용·관리를 위하여 (b)년마다 해수욕장 기본계획을 수립·시행하고 이에 필요한 재원을 확보하기 위하여 노력하여야 한다. ㉡ (c)은(는) 해수욕장에서의 안전사고를 예방하고 효과적으로 대처하기 위하여 시·도지사의 의견을 듣고 관계 중앙행정기관의 장과 협의를 거쳐 해수욕장 안전관리에 관한 지침을 정하여야 한다.",
+      "repaired_choices": [
+        "(a) 해양수산부장관 / (b) 10 / (c) 해양경찰청장",
+        "(a) 해양경찰청장 / (b) 5 / (c) 해양수산부장관",
+        "(a) 시·도지사 / (b) 10 / (c) 해양수산부장관",
+        "(a) 해양경찰청장 / (b) 5 / (c) 해양경찰청장"
+      ]
+    },
+    {
+      "question_id": 52,
+      "subject": "해사법규",
+      "question_number": 12,
+      "source_page": 9,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 9쪽에서 발문, 보기 및 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 <보기>는 「해사안전법」에 관한 설명이다. ( ) 안에 들어갈 숫자를 가장 옳게 연결한 것은? <보기> ㉠ 기적 및 호종을 비치하여야 하는 선박의 기준은 길이 (a)미터 이상 선박 ㉡ 서로 시계 안에 있는 경우 다른 선박의 좌현 쪽으로 앞지르기하려는 경우에는 장음 2회와 단음 (b)회의 순서로 의사를 표시할 것 ㉢ 길이 15미터 좌초선이 표시하여야 하는 형상물은 수직으로 둥근꼴의 형상물 (c)개이다.",
+      "repaired_choices": [
+        "(a) 12 / (b) 2 / (c) 3",
+        "(a) 20 / (b) 1 / (c) 2",
+        "(a) 12 / (b) 2 / (c) 2",
+        "(a) 20 / (b) 2 / (c) 3"
+      ]
+    },
+    {
+      "question_id": 67,
+      "subject": "해사법규",
+      "question_number": 7,
+      "source_page": 12,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 12쪽에서 확인한 8쪽 문항의 동일 원문 재수록본이다.",
+      "repaired_stem": "다음 <보기> 중 「해수욕장의 이용 및 관리에 관한 법률」상 ( )안의 내용을 순서대로 바르게 나열한 것은? <보기> ㉠ (a)은(는) 해수욕장의 지속가능한 이용·관리를 위하여 (b)년마다 해수욕장 기본계획을 수립·시행하고 이에 필요한 재원을 확보하기 위하여 노력하여야 한다. ㉡ (c)은(는) 해수욕장에서의 안전사고를 예방하고 효과적으로 대처하기 위하여 시·도지사의 의견을 듣고 관계 중앙행정기관의 장과 협의를 거쳐 해수욕장 안전관리에 관한 지침을 정하여야 한다.",
+      "repaired_choices": [
+        "(a) 해양수산부장관 / (b) 10 / (c) 해양경찰청장",
+        "(a) 해양경찰청장 / (b) 5 / (c) 해양수산부장관",
+        "(a) 시·도지사 / (b) 10 / (c) 해양수산부장관",
+        "(a) 해양경찰청장 / (b) 5 / (c) 해양경찰청장"
+      ]
+    },
+    {
+      "question_id": 72,
+      "subject": "해사법규",
+      "question_number": 12,
+      "source_page": 13,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 13쪽에서 확인한 9쪽 문항의 동일 원문 재수록본이다.",
+      "repaired_stem": "다음 <보기>는 「해사안전법」에 관한 설명이다. ( ) 안에 들어갈 숫자를 가장 옳게 연결한 것은? <보기> ㉠ 기적 및 호종을 비치하여야 하는 선박의 기준은 길이 (a)미터 이상 선박 ㉡ 서로 시계 안에 있는 경우 다른 선박의 좌현 쪽으로 앞지르기하려는 경우에는 장음 2회와 단음 (b)회의 순서로 의사를 표시할 것 ㉢ 길이 15미터 좌초선이 표시하여야 하는 형상물은 수직으로 둥근꼴의 형상물 (c)개이다.",
+      "repaired_choices": [
+        "(a) 12 / (b) 2 / (c) 3",
+        "(a) 20 / (b) 1 / (c) 2",
+        "(a) 12 / (b) 2 / (c) 2",
+        "(a) 20 / (b) 2 / (c) 3"
+      ]
+    },
+    {
+      "question_id": 19,
+      "subject": "해사법규",
+      "question_number": 19,
+      "source_page": 4,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 4쪽에서 발문과 네 선지를 직접 판독했다.",
+      "repaired_stem": "「선박안전법」상 해양수산부장관은 정기검사에 합격한 선박에 대하여 항해구역을 지정하여 선박검사증서를 교부하여야 하는데, 다음 중 해양수산부장관이 지정하는 항해구역의 종류로 옳은 것은? ㉠ 평수구역 ㉡ 연안구역 ㉢ 연해구역 ㉣ 근해구역 ㉤ 내해구역 ㉥ 원양구역 ㉦ 원해구역 ㉧ 광역구역",
+      "repaired_choices": [
+        "㉠, ㉡, ㉣, ㉦",
+        "㉡, ㉤, ㉦, ㉧",
+        "㉠, ㉡, ㉣, ㉥",
+        "㉠, ㉢, ㉣, ㉥"
+      ]
+    },
+    {
+      "question_id": 20,
+      "subject": "해사법규",
+      "question_number": 20,
+      "source_page": 4,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 4쪽에서 발문과 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 중 「수산업법」에서 규정한 용어의 정의로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "“어업”이란 염전에서 바닷물을 자연 증발시켜 소금을 생산하는 사업을 포함한다.",
+        "“수산업”이란 수산동식물을 포획·채취하거나 양식하는 사업을 말한다.",
+        "“어업권”이란 면허를 받아 어업을 경영할 수 있는 권리를 말한다.",
+        "“어업종사자”란 어업자를 위하여 수산동식물을 포획·채취하는 일에 종사하는 자와 염전에서 바닷물을 자연 증발시켜 소금을 생산하는 일에 종사하는 자를 말한다."
+      ]
+    },
+    {
+      "question_id": 24,
+      "subject": "해사법규",
+      "question_number": 24,
+      "source_page": 5,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 5쪽에서 발문과 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 중 「연안사고 예방에 관한 법률」상 ( )안에 들어갈 내용이 순서대로 가장 올바르게 나열된 것은? (㉠)은 연안사고 예방을 위하여 (㉡)마다 연안사고 예방 (㉢)을 수립·추진하여야 한다.",
+      "repaired_choices": [
+        "㉠ 해양수산부장관 ㉡ 3년 ㉢ 기본계획",
+        "㉠ 해양경찰청장 ㉡ 5년 ㉢ 기본계획",
+        "㉠ 해양경찰청장 ㉡ 3년 ㉢ 기본계획",
+        "㉠ 해양경찰청장 ㉡ 5년 ㉢ 시행계획"
+      ]
+    },
+    {
+      "question_id": 34,
+      "subject": "해사법규",
+      "question_number": 34,
+      "source_page": 6,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 6쪽에서 발문과 네 선지를 직접 판독했다.",
+      "repaired_stem": "다음 중 「해양환경관리법」상 해양경찰청 소속 해양환경감시원의 직무로 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "국내항해에 운항하는 대한민국 선박에 대한 출입 검사와 보고에 관한 사항",
+        "환경관리해역에서의 해양환경 개선을 위한 오염원 조사 활동",
+        "해양오염방제업자 및 유창청소업자가 운영하는 시설에 대한 검사·지도",
+        "해양시설에서의 방제선 등의 배치·설치 및 자재·약제의 비치 상황에 관한 검사"
+      ]
     },
     {
       "question_id": 1145,
@@ -10308,7 +10440,12 @@
       "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
       "confidence": "exact_source",
       "evidence_note": "원문 20쪽 직접 대조",
-      "repaired_stem": "다음 밑줄 친 This가 설명하는 것으로 가장 옳은 것은? This is used for the exchange of data in ship-to-ship communications and also in communication with shore-based facilities. The purpose of this is to help identify vessels; assist in target tracking; simplify information exchange (e.g. reduce verbal reporting); and provide additional information to assist situation awareness. This may be used together with VHF voice communications."
+      "repaired_stem": "다음 밑줄 친 This가 설명하는 것으로 가장 옳은 것은? This is used for the exchange of data in ship-to-ship communications and also in communication with shore-based facilities. The purpose of this is to help identify vessels; assist in target tracking; simplify information exchange (e.g. reduce verbal reporting); and provide additional information to assist situation awareness. This may be used together with VHF voice communications.",
+      "repaired_question_spans": [
+        {"start": 8, "end": 12, "underline": true},
+        {"start": 33, "end": 37, "underline": true},
+        {"start": 361, "end": 365, "underline": true}
+      ]
     },
     {
       "question_id": 1538,

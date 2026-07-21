@@ -11,7 +11,13 @@ from PIL import Image, ImageDraw
 
 from src.parser import extractor as extractor_module
 from src.parser.extractor import PDFExtractor
-from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
+from src.parser.layout import (
+    LayoutLine,
+    LayoutWord,
+    StructuredPage,
+    TextDecoration,
+    build_structured_page,
+)
 from src.parser.offline_exam import OfflineExamParser
 from src.parser.offline_quality import validate_offline_question
 from src.parser.table_format import parse_format_payload
@@ -325,6 +331,63 @@ def test_tesseract_merge_must_preserve_importable_question_coverage():
 
     assert PDFExtractor._preserves_importable_question_coverage(
         windows_page, damaged_merge
+    ) is False
+
+
+def test_high_contrast_ocr_page_repairs_korean_noise_with_number_coverage():
+    baseline = _ocr_page_from_lines(
+        "1. 다음 중 과태료의 부과 지入 。丁 권자는?",
+        "① 해양경살서장",
+        "② 해양경찰청장",
+        "③ 시드지사",
+        "④ 해양수산부장관",
+        "2. 다음 문제는?",
+        "① 하나",
+        "② 둘",
+        "③ 셋",
+        "④ 넷",
+    )
+    high_contrast = _ocr_page_from_lines(
+        "1. 다음 중 과태료의 부과 징수 권자는?",
+        "① 해양경찰서장",
+        "② 해양경찰청장",
+        "③ 시도지사",
+        "④ 해양수산부장관",
+        "2. 다음 문제는?",
+        "① 하나",
+        "② 둘",
+        "③ 셋",
+        "④ 넷",
+    )
+
+    assert PDFExtractor._should_prefer_high_contrast_ocr_page(
+        baseline, high_contrast
+    ) is True
+
+
+def test_high_contrast_ocr_page_cannot_drop_a_question_number():
+    baseline = _ocr_page_from_lines(
+        "1. 다음 중 과태료의 부과 지入 。丁 권자는?",
+        "① 하나",
+        "② 둘",
+        "③ 셋",
+        "④ 넷",
+        "2. 다음 문제는?",
+        "① 하나",
+        "② 둘",
+        "③ 셋",
+        "④ 넷",
+    )
+    incomplete = _ocr_page_from_lines(
+        "1. 다음 중 과태료의 부과 징수 권자는?",
+        "① 하나",
+        "② 둘",
+        "③ 셋",
+        "④ 넷",
+    )
+
+    assert PDFExtractor._should_prefer_high_contrast_ocr_page(
+        baseline, incomplete
     ) is False
 
 
@@ -2512,6 +2575,72 @@ def test_extractor_marks_only_raster_underlined_choice_words():
     assert by_text["100/0"] is True
     assert by_text["plain"] is False
     assert by_text["0fire"] is True
+
+
+def test_raster_text_decoration_recovers_only_semantic_underlines():
+    structured = build_structured_page(
+        [
+            {"text": "18.", "bbox": (50, 100, 75, 114), "confidence": 0.98},
+            {"text": "밑줄 친 This가 가리키는 것은?", "bbox": (85, 100, 360, 114), "confidence": 0.98},
+            {"text": "This", "bbox": (100, 150, 140, 164), "confidence": 0.98},
+            {"text": "is used for communication.", "bbox": (150, 150, 360, 164), "confidence": 0.98},
+            {"text": "ordinary", "bbox": (100, 200, 180, 214), "confidence": 0.98},
+        ],
+        page_number=20,
+        width=1000,
+        height=1000,
+        source="ocr",
+    )
+    image = Image.new("L", (1000, 1000), 255)
+    draw = ImageDraw.Draw(image)
+    draw.line((100, 164, 140, 164), fill=0, width=2)
+    # A short glyph-like stroke and a distant table rule must not become spans.
+    draw.line((120, 214, 130, 214), fill=0, width=2)
+    draw.line((80, 230, 500, 230), fill=0, width=1)
+
+    decorated = PDFExtractor()._attach_raster_text_decorations(structured, image)
+    marks = [mark for line in decorated.lines for mark in line.decorations]
+
+    assert [(mark.kind, mark.text) for mark in marks] == [("underline", "This")]
+
+
+def test_offline_parser_preserves_underline_and_overline_as_rich_spans():
+    lines = [
+        LayoutLine(
+            (LayoutWord("1. 밑줄 친 단어와 논리식에 관한 것은?", (0.05, 0.10, 0.45, 0.12), 0.99),),
+            (0.05, 0.10, 0.45, 0.12), 1, 0,
+        ),
+        LayoutLine(
+            (LayoutWord("This is a target.", (0.08, 0.15, 0.30, 0.17), 0.99),),
+            (0.08, 0.15, 0.30, 0.17), 1, 0,
+            (TextDecoration("underline", "This", "This is a target.", 0, 4, (0.08, 0.17, 0.13, 0.17)),),
+        ),
+        LayoutLine(
+            (LayoutWord("① X=A·B", (0.08, 0.22, 0.22, 0.24), 0.99),),
+            (0.08, 0.22, 0.22, 0.24), 1, 0,
+            (TextDecoration("overline", "A·B", "① X=A·B", 4, 7, (0.15, 0.22, 0.21, 0.22)),),
+        ),
+    ]
+    for number, y in enumerate((0.28, 0.34, 0.40), start=2):
+        text = f"{('②', '③', '④')[number - 2]} 선택지{number}"
+        lines.append(LayoutLine((LayoutWord(text, (0.08, y, 0.25, y + 0.02), 0.99),), (0.08, y, 0.25, y + 0.02), 1, 0))
+    structured = StructuredPage(1, 1.0, 1.0, "scanned", tuple(lines), ())
+
+    question = OfflineExamParser().parse_pages([structured])[0]
+    question_format = parse_format_payload(question.question_format_json)
+    choice_format = parse_format_payload(question.choice_format_jsons[0])
+
+    assert question_format["spans"] == [{"start": question.stem.index("This"), "end": question.stem.index("This") + 4, "underline": True}]
+    assert question.choices[0] == r"X=\overline{A \cdot B}"
+    assert choice_format["spans"] == [{"start": 2, "end": len(question.choices[0]), "latex": r"\overline{A \cdot B}"}]
+
+
+def test_overline_detector_rejects_equals_sign_noise_without_latin_formula_context():
+    from src.parser.extractor import PDFExtractor
+
+    assert PDFExtractor._line_may_contain_overline("① = 거 人 으9 =") is False
+    assert PDFExtractor._line_may_contain_overline("출력 X=A·B") is True
+    assert PDFExtractor._line_may_contain_overline("√ 20") is True
 
 
 def test_extractor_recovers_indented_duplicate_choice_cell_with_english_ocr(monkeypatch):

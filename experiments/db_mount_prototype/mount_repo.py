@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
 from src.database.practice_attempts import PracticeAttemptStore
+from src.parser.table_format import format_display_text
 
 
 NAMESPACE_SEPARATOR = "::"
@@ -604,20 +605,28 @@ class MountedExamRepository:
         if search_text:
             tokens = [token.strip() for token in search_text.split() if token.strip()]
             for token in tokens:
-                like = f"%{token.lower()}%"
+                token = token.lower().strip()
+                if not token:
+                    continue
+                like = f"%{_escape_like(token)}%"
                 query += """
                     AND (
-                        LOWER(q.question_text) LIKE ?
-                        OR LOWER(q.tags) LIKE ?
+                        LOWER(q.question_text) LIKE ? ESCAPE '\\'
+                        OR LOWER(COALESCE(q.tags, '')) LIKE ? ESCAPE '\\'
+                        OR LOWER(FORMAT_DISPLAY_TEXT(q.question_format_json)) LIKE ? ESCAPE '\\'
+                        OR LOWER(COALESCE(qg.shared_text, '')) LIKE ? ESCAPE '\\'
                         OR EXISTS (
                             SELECT 1
                             FROM question_choices qc
                             WHERE qc.question_id = q.id
-                              AND LOWER(qc.choice_text) LIKE ?
+                              AND (
+                                  LOWER(COALESCE(qc.choice_text, '')) LIKE ? ESCAPE '\\'
+                                  OR LOWER(FORMAT_DISPLAY_TEXT(qc.choice_format_json)) LIKE ? ESCAPE '\\'
+                              )
                         )
                     )
                 """
-                params.extend([like, like, like])
+                params.extend([like] * 6)
 
         if question_numbers:
             qnums = sorted({int(number) for number in question_numbers})
@@ -859,6 +868,12 @@ class MountedExamRepository:
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         else:
             conn = sqlite3.connect(mount.path)
+        conn.create_function(
+            "FORMAT_DISPLAY_TEXT",
+            1,
+            format_display_text,
+            deterministic=True,
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 30000")
         return conn

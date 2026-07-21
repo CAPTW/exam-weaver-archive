@@ -451,7 +451,16 @@ def build_questions(
                 parser_tags.append("answer_missing_in_source")
 
             choices = [
-                Choice(number=index, symbol=f"{index}", text=text)
+                Choice(
+                    number=index,
+                    symbol=f"{index}",
+                    text=text,
+                    format_json=(
+                        common_question.choice_format_jsons[index - 1]
+                        if index <= len(common_question.choice_format_jsons)
+                        else None
+                    ),
+                )
                 for index, text in enumerate(choice_texts, start=1)
             ]
 
@@ -461,12 +470,14 @@ def build_questions(
                 choices=choices,
                 correct_answer=correct_answer,
                 answer_available=correct_answer != 0,
-                has_image=False,
+                has_image=bool(getattr(common_question, "image_path", None)),
+                image_path=getattr(common_question, "image_path", None),
                 source_page=page_number,
                 subject_name=SUBJECT_NAME,
                 year=year,
                 session=session,
                 exam_type=EXAM_CODE,
+                format_json=common_question.question_format_json,
             )
             parsed_questions.append(ParsedQuestion(
                 question=question,

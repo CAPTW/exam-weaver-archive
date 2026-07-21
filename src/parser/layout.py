@@ -11,6 +11,43 @@ BBox = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
+class TextDecoration:
+    """One source-backed inline decoration attached to a layout line.
+
+    ``start`` and ``end`` address ``LayoutLine.text``.  Keeping both the
+    source line and its normalized page coordinates lets semantic parsers
+    recover the same range after question/choice segmentation without
+    flattening an underline, an overline, or a radical into OCR punctuation.
+    """
+
+    kind: str
+    text: str
+    line_text: str
+    start: int
+    end: int
+    bbox: BBox
+    confidence: float = 1.0
+    source: str = "native"
+
+    def __post_init__(self) -> None:
+        kind = str(self.kind or "").strip().lower()
+        if kind not in {"underline", "overline", "radical"}:
+            raise ValueError(f"unsupported text decoration: {kind}")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "text", str(self.text or ""))
+        object.__setattr__(self, "line_text", str(self.line_text or ""))
+        object.__setattr__(self, "start", max(0, int(self.start)))
+        object.__setattr__(self, "end", max(0, int(self.end)))
+        object.__setattr__(self, "bbox", tuple(float(value) for value in self.bbox))
+        object.__setattr__(
+            self,
+            "confidence",
+            max(0.0, min(1.0, float(self.confidence))),
+        )
+        object.__setattr__(self, "source", str(self.source or "unknown"))
+
+
+@dataclass(frozen=True)
 class LayoutWord:
     text: str
     bbox: BBox
@@ -29,10 +66,12 @@ class LayoutLine:
     bbox: BBox
     page: int
     column: int
+    decorations: tuple[TextDecoration, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "words", tuple(self.words))
         object.__setattr__(self, "bbox", tuple(float(value) for value in self.bbox))
+        object.__setattr__(self, "decorations", tuple(self.decorations or ()))
 
     @property
     def text(self) -> str:

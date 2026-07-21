@@ -102,6 +102,20 @@ def normalize_latex_text(value: str) -> FormattedText:
             i += sqrt_match.end()
             continue
 
+        sqrt_match = re.match(r'√\s*[¯‾]\s*([0-9]+(?:\.[0-9]+)?|[A-Za-z][A-Za-z0-9_]*)', raw[i:])
+        if sqrt_match:
+            inner = _normalize_formula_inner(sqrt_match.group(1))
+            append_equation(i, i + sqrt_match.end(), rf'\sqrt{{{inner}}}')
+            i += sqrt_match.end()
+            continue
+
+        combining_overline = re.match(r'([A-Za-z0-9])\u0305', raw[i:])
+        if combining_overline:
+            inner = _normalize_formula_inner(combining_overline.group(1))
+            append_equation(i, i + combining_overline.end(), rf'\overline{{{inner}}}')
+            i += combining_overline.end()
+            continue
+
         sqrt_match = re.match(r'√\s*([0-9])(?=[0-9A-Za-z])', raw[i:])
         if sqrt_match:
             inner = _normalize_formula_inner(sqrt_match.group(1))
@@ -157,52 +171,639 @@ def repair_extracted_text_artifacts(value: str) -> str:
     return text
 
 
+ENGLISH_OCR_TOKEN_REPLACEMENTS = {
+    # Capital I was commonly substituted for lowercase l by the source-PDF OCR.
+    "AIert": "Alert",
+    "ArticIe": "Article",
+    "authorlzation": "authorization",
+    "AstabIe": "Astable",
+    "BiIge": "Bilge",
+    "BIow": "Blow",
+    "BIower": "Blower",
+    "BoIIard": "Bollard",
+    "BuIbous": "Bulbous",
+    "CaII": "Call",
+    "CIamp": "Clamp",
+    "CIean": "Clean",
+    "CIear": "Clear",
+    "CIearance": "Clearance",
+    "CIeared": "Cleared",
+    "CIearing": "Clearing",
+    "CIosest": "Closest",
+    "CockbiII": "Cockbill",
+    "CoIIision": "Collision",
+    "CoIIisions": "Collisions",
+    "CyIinder": "Cylinder",
+    "DoIphin": "Dolphin",
+    "DoppIer": "Doppler",
+    "ExcIusive": "Exclusive",
+    "exerclse": "exercise",
+    "FaciIities": "Facilities",
+    "FaciIitY": "Facility",
+    "FaciIity": "Facility",
+    "FIat": "Flat",
+    "FiIIed": "Filled",
+    "FIip": "Flip",
+    "FIutter": "Flutter",
+    "MuItivibrator": "Multivibrator",
+    "OverIap": "Overlap",
+    "ParaIIeI": "Parallel",
+    "ParaIIel": "Parallel",
+    "PIease": "Please",
+    "PiIot": "Pilot",
+    "PoIIution": "Pollution",
+    "RefIector": "Reflector",
+    "ReguIations": "Regulations",
+    "RevoIution": "Revolution",
+    "rIAMSAR": "「IAMSAR",
+    "rISPS": "「ISPS",
+    "RoII": "Roll",
+    "ScaIe": "Scale",
+    "ScroII": "Scroll",
+    "SeIect": "Select",
+    "SeIf": "Self",
+    "ShaIIow": "Shallow",
+    "ShipIs": "Ship's",
+    "SIack": "Slack",
+    "SIamming": "Slamming",
+    "SIip": "Slip",
+    "SingIe": "Single",
+    "SIop": "Slop",
+    "SIudge": "Sludge",
+    "SLIb": "Sub",
+    "SLICh": "such",
+    "SmaII": "Small",
+    "SoIenoid": "Solenoid",
+    "SpiII": "Spill",
+    "VaIve": "Valve",
+    "VlsibiIity": "Visibility",
+    "VocabuIary": "Vocabulary",
+    "VOIume": "Volume",
+    "VoIume": "Volume",
+    "WaIk": "Walk",
+    "WiIiamson": "Williamson",
+    "YOLIr": "your",
+    # A lowercase l was commonly substituted for uppercase I at word start.
+    "lmagmary": "Imaginary",
+    "lmmediately": "Immediately",
+    "lmpaired": "Impaired",
+    "lmpeller": "Impeller",
+    "lmplied": "Implied",
+    "lnclination": "Inclination",
+    "ln": "In",
+    "lndex": "Index",
+    "lndicating": "Indicating",
+    "lnformation": "Information",
+    "lnformatlon": "Information",
+    "lnitial": "Initial",
+    "lnmarsat": "Inmarsat",
+    "lnnocent": "Innocent",
+    "lnshore": "Inshore",
+    "lnsurance": "Insurance",
+    "lnsured": "Insured",
+    "lntemational": "International",
+    "lntermediate": "Intermediate",
+    "lnternational": "International",
+    "lnternationaI": "International",
+    "lnverslon": "Inversion",
+    "engmes": "engines",
+    "hghts": "lights",
+    "houu-s": "hours",
+    "lmn긔gration": "immigration",
+    "ninutes": "minutes",
+    "prescrlbed": "prescribed",
+    "terrltorlal": "territorial",
+    # Additional whole-word repairs selected by a full database spelling
+    # profile.  Proper names, maritime terms, and British spellings are
+    # intentionally excluded; every entry below is a clear OCR substitution.
+    "11℃re": "more",
+    "Cavltation": "Cavitation",
+    "ControI": "Control",
+    "DifferentiaI": "Differential",
+    "FinaI": "Final",
+    "FouI": "Foul",
+    "GlobaI": "Global",
+    "KeeI": "Keel",
+    "NavaI": "Naval",
+    "NavigationaI": "Navigational",
+    "RoIIing": "Rolling",
+    "SafetY": "Safety",
+    "SecuritY": "Security",
+    "SignaI": "Signal",
+    "SmalI": "Small",
+    "SUPPlies": "Supplies",
+    "Surgng": "Surging",
+    "SurvivaI": "Survival",
+    "Territonal": "Territorial",
+    "Transister": "Transistor",
+    "UPPer": "upper",
+    "VesseI": "Vessel",
+    "WheeI": "Wheel",
+    "WindIass": "Windlass",
+    "YOLtr": "your",
+    "abllity": "ability",
+    "actlon": "action",
+    "addlng": "adding",
+    "aetivity": "activity",
+    "alr": "air",
+    "alteratlons": "alterations",
+    "apphes": "applies",
+    "assengers": "passengers",
+    "atertight": "watertight",
+    "aweighl": "aweigh",
+    "axiS": "axis",
+    "bOdy": "body",
+    "behlnd": "behind",
+    "boardlng": "boarding",
+    "bulwalk": "bulwark",
+    "capslzmg": "capsizing",
+    "centrlfugal": "centrifugal",
+    "circtllar": "circular",
+    "circumstan": "circumstance",
+    "clrcumstances": "circumstances",
+    "collimatior": "collimator",
+    "commumcation": "communication",
+    "communicatlons": "communications",
+    "complicance": "compliance",
+    "compnsmg": "comprising",
+    "compnsing": "comprising",
+    "compresslon": "compression",
+    "conflrmation": "confirmation",
+    "convliance": "compliance",
+    "corroslve": "corrosive",
+    "crossmg": "crossing",
+    "dearees": "degrees",
+    "deficiencles": "deficiencies",
+    "drainmgs": "drainings",
+    "eadweight": "deadweight",
+    "eagaged": "engaged",
+    "economc": "economic",
+    "economlc": "economic",
+    "engme": "engine",
+    "envlronment": "environment",
+    "envwonment": "environment",
+    "equupment": "equipment",
+    "everv": "every",
+    "expenences": "experiences",
+    "facilit": "facility",
+    "falrway": "fairway",
+    "fishmg": "fishing",
+    "floatatlon": "floatation",
+    "follwing": "following",
+    "frdffic": "traffic",
+    "freieht": "freight",
+    "giung": "giving",
+    "hOt": "hot",
+    "hich": "which",
+    "hiS": "his",
+    "hmlts": "limits",
+    "hnes": "lines",
+    "ichtweieh": "lightweight",
+    "idenfication": "identification",
+    "ightweight": "lightweight",
+    "inclLlding": "including",
+    "includlng": "including",
+    "infomation": "information",
+    "inforrmtion": "information",
+    "intergrity": "integrity",
+    "iustify": "justify",
+    "landwald": "landward",
+    "lrestricted": "restricted",
+    "lsolated": "isolated",
+    "majeare": "majeure",
+    "maln": "main",
+    "manualJ": "manual",
+    "marltime": "maritime",
+    "marmers": "markers",
+    "maxlmum": "maximum",
+    "meteorlogical": "meteorological",
+    "mmediate": "immediate",
+    "mnor": "minor",
+    "movin": "moving",
+    "mrror": "mirror",
+    "multlple": "multiple",
+    "neteorological": "meteorological",
+    "niles": "miles",
+    "nternal": "internal",
+    "observatlons": "observations",
+    "onginal": "original",
+    "operatlon": "operation",
+    "pernmssion": "permission",
+    "pilOt": "pilot",
+    "poin": "point",
+    "portlon": "portion",
+    "posifion": "position",
+    "positlon": "position",
+    "prattice": "practice",
+    "prescrlbed": "prescribed",
+    "prionty": "priority",
+    "pumoses": "purposes",
+    "pursuitOll": "pursuit",
+    "radiO": "radio",
+    "reclprocal": "reciprocal",
+    "recommendad": "recommended",
+    "recordec": "recorded",
+    "relleve": "relieve",
+    "removlng": "removing",
+    "rnanoeuvre": "manoeuvre",
+    "rneans": "means",
+    "rnllllrnize": "minimize",
+    "rotlting": "routing",
+    "routlng": "routing",
+    "runnmg": "running",
+    "safery": "safety",
+    "satelhte": "satellite",
+    "satelite": "satellite",
+    "satellte": "satellite",
+    "scanmng": "scanning",
+    "seagomg": "seagoing",
+    "separafing": "separating",
+    "separatlon": "separation",
+    "severly": "severely",
+    "shold": "should",
+    "shoud": "should",
+    "stralts": "straits",
+    "stramer": "streamer",
+    "successlon": "succession",
+    "tWO": "two",
+    "territonal": "territorial",
+    "territorlal": "territorial",
+    "thiS": "this",
+    "transmlssions": "transmissions",
+    "transmlttlng": "transmitting",
+    "transmsslons": "transmissions",
+    "turbO": "turbo",
+    "uncertaint": "uncertainty",
+    "whlch": "which",
+    "withln": "within",
+    "wlmch": "winch",
+    "xegion": "region",
+    "xessdl": "vessel",
+    # Second pass over the remaining spelling-profile candidates.  These are
+    # still exact tokens (not fuzzy replacement), so domain terms stay intact.
+    "AeronauticaI": "Aeronautical",
+    "Amver": "AMVER",
+    "Bullbous": "Bulbous",
+    "CaIl": "Call",
+    "Cawenticn": "Convention",
+    "CeII": "Cell",
+    "CLlStoms": "customs",
+    "COde": "Code",
+    "CoId": "Cold",
+    "CoiI": "Coil",
+    "Convartnents": "Compartments",
+    "Cornmuncation": "Communication",
+    "Cornmunication": "Communication",
+    "Descnption": "Description",
+    "DieseI": "Diesel",
+    "Expaned": "Expanded",
+    "FIeming": "Fleming",
+    "Foxtro": "Foxtrot",
+    "Gravitiy": "Gravity",
+    "POint": "Point",
+    "Plooding": "Flooding",
+    "PrecaLltionary": "Precautionary",
+    "Receivin": "Receiving",
+    "Rul": "Rule",
+    "SLlCtion": "suction",
+    "StOP": "stop",
+    "Tuunng": "Turning",
+    "Weathe": "Weather",
+    "auxilianes": "auxiliaries",
+    "beanng": "bearing",
+    "begine": "begin",
+    "convemence": "convenience",
+    "intervenmg": "intervening",
+    "Julu": "July",
+    "keemng": "keeping",
+    "liqtllds": "liquids",
+    "lJrgent": "Urgent",
+    "manne": "marine",
+    "marme": "marine",
+    "orgamzation": "organization",
+    "orgamzatlon": "organization",
+    "paLlenn": "pattern",
+    "reversmg": "reversing",
+    "rnanoawre": "manoeuvre",
+    "swaymg": "swaying",
+    "usmg": "using",
+    "vGthin": "within",
+    "VlCe": "vice",
+    "wiehillity": "visibility",
+    "yawmg": "yawing",
+    # Zero/one substitutions retained as complete tokens to avoid touching units,
+    # formulas, legal article numbers, or identifiers.
+    "C011ision": "Collision",
+    "C011isions": "Collisions",
+    "C0IIision": "Collision",
+    "C0IIisions": "Collisions",
+    "011e": "one",
+    "011t": "out",
+    "0f": "of",
+    "t0": "to",
+    "0i1": "oil",
+    "A11": "All",
+    "a11": "all",
+    "ManuaI": "Manual",
+    "RuIe": "Rule",
+    "TerritoriaI": "Territorial",
+    "CaIIing": "Calling",
+    "ldentification": "Identification",
+    "sh1P": "ship",
+    "sh1Ps": "ships",
+    "tO": "to",
+    "Of": "of",
+    "whO": "who",
+    "wh0": "who",
+    "alSO": "also",
+    "ThiS": "This",
+    "compr1S1ng": "comprising",
+    "mportant": "important",
+    "Convent10n": "Convention",
+    "t011S": "tons",
+    "Fou1": "Foul",
+    "p011": "port",
+    "R011": "Roll",
+    "rad10": "radio",
+    "Sh011": "Shall",
+    "Z00": "Zoo",
+    "YOII": "you",
+    "YOLI": "you",
+    "YOt1": "you",
+    "intO": "into",
+    "condltions": "conditions",
+    "moblle": "mobile",
+    "eqtllpment": "equipment",
+    "mintltes": "minutes",
+    "indlcating": "indicating",
+    "servlce": "service",
+    "maxmum": "maximum",
+    "Llfe": "Life",
+    "Mantime": "Maritime",
+    "10cati011": "location",
+    "111i1es": "miles",
+    "0M1": "own",
+    "0W11": "own",
+    "1n": "in",
+    "1S": "is",
+    "iS": "is",
+    "d0": "do",
+    "SLlCt1011": "suction",
+    "SHALHEZSAIlBOl": "SMCP",
+    "510p": "Slop",
+    "320kca1": "320kcal",
+    "m11": "roll",
+    "VoI": "Vol",
+    "Configuous": "Contiguous",
+}
+
+
+# Whole-phrase substitutions are intentionally source-grounded.  These tokens
+# came from the bundled maritime source PDFs where the OCR layer substituted
+# Roman numerals, Hangul glyphs, or punctuation for ordinary Latin letters.
+# Keeping them as complete phrases avoids guessing at legitimate formulae,
+# legal article numbers, and equipment identifiers elsewhere in the database.
+OCR_EXACT_PHRASE_REPLACEMENTS = {
+    "Stl℃ke": "stroke",
+    "navlgatl()ll": "navigation",
+    "()ther": "other",
+    "transmissions 010 should cease": "transmissions should cease",
+    "rSOLAS": "「SOLAS",
+    "rCOLREG": "「COLREG",
+    "%rine Communication Phrases": "Marine Communication Phrases",
+    "pass engers": "passengers",
+    "envil℃nment": "environment",
+    "llanchor aweigh": "anchor aweigh",
+    "Message MarkerOll 대한": "Message Marker에 대한",
+    "Communication mnrases": "Communication Phrases",
+    "tern긔nating": "terminating",
+    "Mouth nng": "Mouth ring",
+    "1978 하otocol": "1978 Protocol",
+    "Sector Searcholl 대한": "Sector Search에 대한",
+    "throM bag": "throw bag",
+    "power¯driven": "power-driven",
+    "stern¯light": "stern-light",
+    "sub¯paragraph": "sub-paragraph",
+    "pre¯compresses": "pre-compresses",
+    "super¯refraction": "super-refraction",
+    "co¯ordinator": "co-ordinator",
+    "give¯way": "give-way",
+    "Course¯up": "Course-up",
+    "vapor¯compression": "vapor-compression",
+    "011 pilotage duty": "on pilotage duty",
+    "6) at or near the masthead": "(i) at or near the masthead",
+    "the UPPer being": "the upper being",
+    "the lower(㉡)•,": "the lower (㉡);",
+    "(ⅱ) when underway": "(ii) when underway",
+    "(ⅲ) when at anchor": "(iii) when at anchor",
+    "lmn긔gration": "immigration",
+    "sea IS measured": "sea is measured",
+    "sea IS measured. ㉠ ㉡": "sea is measured.",
+    "Contiguous zone 1. In a zone": "Contiguous zone\n1. In a zone",
+    "(㉠) described as the contiguous zone": "(㉠), described as the contiguous zone",
+    "sea is measured. ㉠ ㉡": "sea is measured.",
+    "0 Approaching a dock": "○ Approaching a dock",
+    "0 (㉡) neans": "○ (㉡) means",
+    "0 (㉢) neans": "○ (㉢) means",
+    "1그n뉸 commnd": "under command",
+    "11℃re than 2 ninutes": "more than 2 minutes",
+    "Foaning": "Foaming",
+    "Fo섀ⅶng": "Foaming",
+    "인도요1수를": "인도·인수를",
+    "일을 '검수라 한다.": "일을 '검수'라 한다.",
+    "ntigUOUS /01다e beyond": "contiguous zone beyond",
+    "ntiguous /01다e beyond": "contiguous zone beyond",
+    "*ⅵ1에1": "when",
+    "\\ⅵ1에1": "when",
+    "yⅵ1리1": "when",
+    "Ⅲ1k11()vⅥ1": "known",
+    "Ⅲ1k11()vⅤ1": "known",
+    "「Ⅳ0 SMCP": "「IMO SMCP",
+    "01그e another": "one another",
+    "falls to understand": "fails to understand",
+    "ⅱ1 doubt": "in doubt",
+    "blasts 011 the whistle": "blasts on the whistle",
+    "dⅱ11": "drill",
+    "participated ⅲ abandon": "participated in abandon",
+    "drills 이1 board ⅲ the previous": "drills on board in the previous",
+    "\\Ⅵ1011 ship": "When ship",
+    "is commg up": "is coming up",
+    "tWO points": "two points",
+    "the 01그dy visual": "the only visual",
+    "the 01궍y visual": "the only visual",
+    "those 이1 board": "those on board",
+    "ship B 1ⅶ1 be": "ship B will be",
+    "on her osⅥ1": "on her own",
+    "ⅲ 1ⅵⅱc11 one-way": "in which one-way",
+    "avoid 00ⅲsi예": "avoid collision",
+    "irmediate ætion situation": "immediate action situation",
+    "ofiginal course": "original course",
+    "YYhen heading": "When heading",
+    "(가계)0§te course": "opposite course",
+    "ship i;ⅵ11 turn": "ship will turn",
+    "I \\ⅷ bring": "I will bring",
+    "\\Ⅴ1이1 a ship": "When a ship",
+    "k110NⅤ1 within": "known within",
+    "smuggled ⅱ1t0 the country": "smuggled into the country",
+    "the (B) \\ⅵt11 dead slow": "the (B) with dead slow",
+    "When tWO power": "When two power",
+    "are crosslng SO": "are crossing so",
+    "the other 011 her ()\\Ⅵ1": "the other on her own",
+    "avoid crossmg ahead": "avoid crossing ahead",
+    "goes #()Ⅱ1 fresh water": "goes from fresh water",
+    "draft 1ⅷ be increased": "draft will be increased",
+    "오손(f앤ⅱng)": "오손(fouling)",
+    "alter course Immediately to": "alter course immediately to",
+    "YI M/V korea,": "V: M/V Korea,",
+    "Confirm your position. I estimate": "Confirm your position. K: I estimate",
+    "lane slightly. I advise": "lane slightly. V: I advise",
+    "correct traffic lane. I will return": "correct traffic lane. K: I will return",
+    "Ot correct, correct": "not correct, correct",
+    "collisi()11": "collision",
+    "action as 1ⅵ11 best": "action as will best",
+    "vessel 011 her 0\\Ⅵ1 port": "vessel on her own port",
+    "ln posiⅱ011": "In position",
+    "incident 1ⅵll be": "incident will be",
+    "pr이〕e11ⅲg machinery": "propelling machinery",
+    "양방향ⅥIF": "양방향 VHF",
+    "회전통(Boxⅵ)": "회전통(Bowl)",
+    "회전통(*ⅵ)": "회전통(Bowl)",
+    "밸브오비랩(0Ⅴerlap)": "밸브오버랩(Overlap)",
+    "solidifying 1”ⅱ*": "solidifying point",
+    "크라운(다mⅦ)": "크라운(Crown)",
+    "2.074Ⅹ6": "2.074×6",
+    "2.074Ⅹ8": "2.074×8",
+    "1.144Ⅹ6": "1.144×6",
+    "1.144Ⅹ8": "1.144×8",
+    "2Q과 4Q의 저항": "2Ω과 4Ω의 저항",
+    "20Ⅴ의 전압": "20V의 전압",
+    "행정이 0.81끠": "행정이 0.8m",
+    "행정이 0.81뿌": "행정이 0.8m",
+    "엔진회전수가 1,80011)1끠": "엔진회전수가 1,800rpm",
+    "엔진회전수가 1,80011)1뿌": "엔진회전수가 1,800rpm",
+    "지시마력(Ⅱ-IP)": "지시마력(IHP)",
+    "30kgf/cm2, 실린더 단면적이 100cm2": "30kgf/cm², 실린더 단면적이 100cm²",
+    "평균유효압력(kgf/cⅡf)": "평균유효압력(kgf/cm²)",
+    "실린더 정수(Cllim)": "실린더 정수(cm²·m)",
+    "회전수(rpm): 10라.": "회전수(rpm): 10 라.",
+    "4001”": "400ps",
+    "A,;Ⅵ1에1 hearing them": "When hearing them",
+    "「Ⅳ0 표준해사통신용어」": "「IMO 표준해사통신용어」",
+    "Services, P designed: to improve; safety and efficiency 0 > of vessel traffic \" and to protect the environment": (
+        "Services, designed to improve safety and efficiency of vessel traffic and to protect the environment"
+    ),
+    "Place on deck, in mess rooms, etc., assigned to crew and passengers where they have to meet according to the muster list when the correspondin: e alarm. is released. or 0 C 111a": (
+        "Place on deck, in mess rooms, etc., assigned to crew and passengers where they have to meet according to the muster list when the corresponding alarm is released or announcement made"
+    ),
+    "ln a tropical cyclone, a veering Wind one changing direction to the right ⅱ1 the Northern Henmsphere and ()11e changing direction to the left in the Southern Hemsphere": (
+        "In a tropical cyclone, a veering wind one changing direction to the right in the Northern Hemisphere and one changing direction to the left in the Southern Hemisphere"
+    ),
+    "\\Ⅵ1이1 a ship's bOW": "When a ship's bow",
+    "수색패턴(Sea℃h pattern)": "수색패턴(Search pattern)",
+    "k110NⅥ1 within": "known within",
+    "k110NⅤ1 within": "known within",
+    "commence search point iS always": "The commence search point is always",
+    "boats to LlSe when": "boats to use when",
+    "Are 3℃u underway?": "Are you underway?",
+    "011 12 December 2002": "on 12 December 2002",
+    "approprwte protective": "appropriate protective",
+    "1 am coming to rescue": "I am coming to rescue",
+    "prescrlbed for power—dnven": "prescribed for power-driven",
+    "non•nal": "normal",
+    "vertical æds": "vertical axis",
+    "밸브 스프ä(valve spring)": "밸브 스프링(valve spring)",
+    "태P• 유효 마력": "EHP: 유효마력",
+    "설명 중 들린 것은?": "설명 중 틀린 것은?",
+    "20V의 전압이 기해졌다": "20V의 전압이 가해졌다",
+    "0.8m 엔진회전수가": "0.8m, 엔진회전수가",
+    "1,800rpm 지시평균유효압력": "1,800rpm, 지시평균유효압력",
+    "position of the search Object": "position of the search object",
+    "location IS certain": "location is certain",
+    "Law 하 the": "Law of the",
+    "S iS an 0 ration, norm ally co¯ordinated by a rescue co¯ordination centre or rescue sub-centre, using available personnel and facilities to locate person in distress.": (
+        "'Rescue' is an operation, normally co-ordinated by a rescue co-ordination centre or rescue sub-centre, using available personnel and facilities to locate person in distress."
+    ),
+    "any exercise or practice with weapons of any kind:": "any exercise or practice with weapons of any kind",
+    "any pollution by 40766 majeure": "any pollution by force majeure",
+    "'Emergency Position Indicating Radio Beacon! is A a survival * craft transponder that, when activated, sends out a signal automatically when a pulse from a nearby radar reaches it.": (
+        "'Emergency Position Indicating Radio Beacon' is a survival craft transponder that, when activated, sends out a signal automatically when a pulse from a nearby radar reaches it."
+    ),
+    "® Automatic ; Identification oo System (AIS)": "Automatic Identification System (AIS)",
+    "표 is necessary that": "It is necessary that",
+    "\u00ae Automatic ; Identification oo System (AIS)": "Automatic Identification System (AIS)",
+    "\ud45c is necessary that": "It is necessary that",
+}
+
+_ENGLISH_OCR_TOKEN_PATTERN = re.compile(
+    r"(?<![0-9A-Za-z])(?:"
+    + "|".join(
+        re.escape(token)
+        for token in sorted(ENGLISH_OCR_TOKEN_REPLACEMENTS, key=len, reverse=True)
+    )
+    + r")(?![0-9A-Za-z])"
+)
+_OCR_EXACT_PHRASE_PATTERN = re.compile(
+    "|".join(
+        re.escape(token)
+        for token in sorted(OCR_EXACT_PHRASE_REPLACEMENTS, key=len, reverse=True)
+    )
+)
+
+
+def repair_ocr_confusable_artifacts(value: str) -> str:
+    """Repair only source-confirmed OCR character confusions.
+
+    Unlike :func:`repair_extracted_text_artifacts`, this intentionally avoids
+    whitespace, formula, and sentence-order rewrites so it can be used for a
+    conservative repair pass over an existing database.
+    """
+
+    text = normalize_private_math_glyphs(value)
+    text = repair_common_english_ocr_confusables(text)
+    return repair_common_korean_ocr_confusables(text)
+
+
 def repair_common_english_ocr_confusables(text: str) -> str:
     """Repair unambiguous zero/one and capital-I OCR substitutions in prose."""
 
     raw = str(text or "")
-    token_replacements = {
-        "lnternational": "International",
-        "InternationaI": "International",
-        "C011ision": "Collision",
-        "C011isions": "Collisions",
-        "C0IIision": "Collision",
-        "C0IIisions": "Collisions",
-        "011e": "one",
-        "011t": "out",
-        "0f": "of",
-        "t0": "to",
-        "0i1": "oil",
-        "A11": "All",
-        "a11": "all",
-        "ManuaI": "Manual",
-        "RuIe": "Rule",
-        "TerritoriaI": "Territorial",
-        "CaIIing": "Calling",
-        "ldentification": "Identification",
-        "sh1P": "ship",
-        "sh1Ps": "ships",
-        "tO": "to",
-        "Of": "of",
-        "whO": "who",
-        "alSO": "also",
-        "ThiS": "This",
-        "compr1S1ng": "comprising",
-        "mportant": "important",
-        "Convent10n": "Convention",
-        "t011S": "tons",
-    }
-    for damaged, repaired in token_replacements.items():
-        raw = re.sub(
-            rf"(?<![0-9A-Za-z]){re.escape(damaged)}(?![0-9A-Za-z])",
-            repaired,
-            raw,
-        )
     raw = re.sub(
         r"(?<![0-9A-Za-z])f011[^0-9A-Za-z\s]{0,3}Ming(?![0-9A-Za-z])",
         "following",
         raw,
     )
+    raw = re.sub(r"(?<![0-9A-Za-z])f0110[ⅰ-ⅹⅧ\W_]*ng(?![0-9A-Za-z])", "following", raw)
+    raw = re.sub(r"(?<![0-9A-Za-z])f0110[₩\\]*s(?![0-9A-Za-z])", "follows", raw)
+    raw = re.sub(r"(?<![0-9A-Za-z])f0110[₩\\]*ed(?![0-9A-Za-z])", "followed", raw)
+    raw = _ENGLISH_OCR_TOKEN_PATTERN.sub(
+        lambda match: ENGLISH_OCR_TOKEN_REPLACEMENTS[match.group(0)],
+        raw,
+    )
+    raw = _OCR_EXACT_PHRASE_PATTERN.sub(
+        lambda match: OCR_EXACT_PHRASE_REPLACEMENTS[match.group(0)],
+        raw,
+    )
+    raw = re.sub(
+        r"(?<![0-9A-Za-z])Automatic;\s*Identification\s+oo\s+System(?![0-9A-Za-z])",
+        "Automatic Identification System",
+        raw,
+    )
+    raw = re.sub(r"(?<![0-9A-Za-z])c0S(?=\d)", "cos", raw)
+    raw = re.sub(r"(?<![0-9A-Za-z])C02(?![0-9A-Za-z])", "CO2", raw)
+    raw = re.sub(r"(?<![0-9A-Za-z])H2(?:0|\(\))(?![0-9A-Za-z])", "H2O", raw)
+    # A macron placed between lowercase word fragments is the PDF OCR layer's
+    # substitute for a printed hyphen.  Uppercase/formula overbars are retained
+    # and handled by the rich-text equation pipeline instead.
+    raw = re.sub(r"(?<=[a-z])¯(?=[a-z])", "-", raw)
+    raw = re.sub(r"(?<=Clearance\))7b(?=\s*규정)", "가", raw)
+    raw = raw.replace("p쑈it1011", "position")
+    raw = raw.replace("B10`v by", "blow-by")
+    raw = raw.replace("B10\\v by", "blow-by")
+    raw = re.sub(r"Soot\s+B10[^\s)]*r", "Soot Blower", raw)
+    raw = raw.replace("rlAMSAR", "「IAMSAR")
+    raw = raw.replace("rlSPS", "「ISPS")
+    raw = raw.replace("rlnternational", "「International")
+    raw = raw.replace("IAMSAR Manual,2l", "IAMSAR Manual상")
     return raw
 
 
@@ -211,8 +812,28 @@ def repair_common_korean_ocr_confusables(text: str) -> str:
 
     raw = str(text or "")
     raw = re.sub(r"(?<![가-힣])(다읔|디음)(?=\s)", "다음", raw)
+    raw = raw.replace("다음°", "다음은")
     raw = re.sub(r"^\s*[c口](?=음\s)", "다", raw)
     raw = re.sub(r"오으\s*것", "옳은 것", raw)
+    raw = raw.replace("오은 거 은", "옳은 것은")
+    raw = re.sub(
+        r'^CkS\s+2\s+["“]IAMSAR\s+manual\s+Volume\s+I(?:ll|II),\s*at\s*#012\}\s*'
+        r'정의가\s+가장\s+[율옳]은\s+것은\?',
+        '다음 중 「IAMSAR manual Volume Ⅲ」상 용어와 정의가 가장 옳은 것은?',
+        raw,
+        flags=re.IGNORECASE,
+    )
+    raw = re.sub(
+        r'^[A-Za-z]{1,8}\d*\s*<[^>\r\n]{1,16}>\s*(?:[=#&]\s*|[S3]\s+)?',
+        '다음 <보기>는 ',
+        raw,
+    )
+    raw = re.sub(
+        r'^(다음\s+<보기>는)\s*[‘\'\"](?=(?:International|SOLAS|COLREG|IAMSAR|SMCP))',
+        r'\1 「',
+        raw,
+        flags=re.IGNORECASE,
+    )
     raw = re.sub(r"(?<![가-힣])云치", "조치", raw)
     raw = re.sub(r"조\s*大\s*1(?=\s*(?:를|가|를 다))", "조치", raw)
     raw = re.sub(r"수리\s*八치", "수리 조치", raw)
@@ -223,6 +844,106 @@ def repair_common_korean_ocr_confusables(text: str) -> str:
     )
     raw = re.sub(r"(\d+)(년|개월)口卜다", r"\1\2마다", raw)
     raw = raw.replace("해잉오염", "해양오염")
+    # These replacements are bounded by complete technical terms or phrases;
+    # they do not reinterpret question content or numeric formulae.
+    replacements = {
+        "홉 • 배기": "흡·배기",
+        "홉·배기": "흡·배기",
+        "AI해역": "A1해역",
+        "고립장OH표지": "고립장애표지",
+        "원A(Winch)": "윈치(Winch)",
+        "캡스kI(Capstan)": "캡스턴(Capstan)",
+        "Kn㈎k": "Knock",
+        "Kn예k": "Knock",
+        "발호PI간": "발화기간",
+        "삭화지연": "착화지연",
+        "익스팬더eJ": "익스팬더 링",
+        "발사6는": "발사하는",
+        "일어L는": "일어나는",
+        "마우스링(M앤th ring)": "마우스링(Mouth ring)",
+        "블로우4의": "블로워의",
+        "0.6결s": "0.6㎲",
+        "n끄기e": "nozzle",
+        "no끠e": "nozzle",
+        "노ä(pintle nozzle)": "노즐(pintle nozzle)",
+        "C예trol rack": "Control rack",
+        "피1놀프탈레인": "페놀프탈레인",
+        "안니1날개": "안내날개",
+        "솔리1노이드": "솔레노이드",
+        "피1킹그랜드": "패킹그랜드",
+        "니1식성": "내식성",
+        "속도지1어": "속도제어",
+        "임필1리": "임펠러",
+        "음기관": "흡기관",
+        "음입": "흡입",
+        "방줄": "방출",
+        "리1저": "레저",
+        "리l저": "레저",
+        "수통!레저인전법": "수상레저안전법",
+        "배E적 경제수역": "배타적 경제수역",
+        "입형h꿰 관한": "입항에 관한",
+        "관리히여야": "관리하여야",
+        "선1착소유자": "선박소유자",
+        "사망씰종": "사망·실종",
+        "사망씰송": "사망·실종",
+        "해양경살": "해양경찰",
+        "신고하여아": "신고하여야",
+        "게시하여아": "게시하여야",
+        "관의 징에게": "관의 장에게",
+        "짧게결1게": "짧게 길게",
+        "야7느뻬는": "야간에는",
+        "외국이선": "외국어선",
+        "이 법고lr수신업법」": "이 법과 「수산업법」",
+        "「수신뗩법」": "「수산업법」",
+        "미1이두는": "매어두는",
+        "피1기물": "폐기물",
+        "멸실쎰1몰": "멸실·침몰",
+        "선지피1수": "선저폐수",
+        "중디1한": "중대한",
+        "받0뺘 한다": "받아야 한다",
+        "귀1항 사이": "외국항 사이",
+        "INFORYIATION": "INFORMATION",
+        "Tffs": "This",
+        "Sltuations": "situations",
+        "etC": "etc",
+        "들어7는": "들어가는",
+        "h이i제10f": "horizon of",
+        "nght aft": "right aft",
+        "aft 011 each": "aft on each",
+        "선서손싱1의": "선저손상의",
+        "형버근1고 한다": "향하려고 한다",
+        "조다상티1에": "조타상태에",
+        "비리1한다는": "비례한다는",
+        "두/기1를": "두께를",
+        "픓v로 줄어든다": "1/25V로 줄어든다",
+        "제1선수각 3이 제2선수각 60": "제1선수각 30°, 제2선수각 60°",
+        "제1선수각 3이 제2선수각 90": "제1선수각 30°, 제2선수각 90°",
+        "제1선수각 451 제2선수각 90": "제1선수각 45°, 제2선수각 90°",
+        "제1선수각 451 제2선수각 135。": "제1선수각 45°, 제2선수각 135°",
+        "내이주거나": "내어주거나",
+        "수직죽": "수직축",
+        "마 살저항을 술이기": "마찰저항을 줄이기",
+        "캠죽": "캠축",
+        "RPM)E}고": "RPM)이라고",
+        "폰입": "혼입",
+        "압죽기": "압축기",
+        "흡입관즉": "흡입관 측",
+        "실린더 라이니": "실린더 라이너",
+        "서정 선": "서징선",
+        "C이는": "CO2는",
+        "승가시기기": "증가시키기",
+        "풀러터": "플러터",
+        "익스팬더 링을 설치한 다": "익스팬더 링을 설치한다",
+        "가장 널리 사용된 다": "가장 널리 사용된다",
+        "고속이 될수록Ⅰ 심해진다": "고속이 될수록 심해진다",
+        "기르히호프의 제1법식": "키르히호프의 제1법칙",
+        "전류의 법식": "전류의 법칙",
+        "협 약의 부속서에 띠라 여객 또는 회물": "협약의 부속서에 따라 여객 또는 화물",
+        "해°°뻬 배출되는": "해양에 배출되는",
+        "중°。뻠정기관": "중앙행정기관",
+    }
+    for damaged, repaired in replacements.items():
+        raw = raw.replace(damaged, repaired)
     return raw
 
 
@@ -311,8 +1032,13 @@ def has_suspicious_text_artifact(value: str) -> bool:
     return any(re.search(pattern, text) for pattern in suspect_patterns)
 
 
+_RESIDUAL_NUMERIC_EXACT_REPAIRS = None
+
+
 def _repair_residual_numeric_whole_text(text: str) -> str:
-    exact = {
+    global _RESIDUAL_NUMERIC_EXACT_REPAIRS
+    if _RESIDUAL_NUMERIC_EXACT_REPAIRS is None:
+        _RESIDUAL_NUMERIC_EXACT_REPAIRS = {
         '국제해상충돌방지규칙상 서로 시계 안에서 척의 동2 력선이 상대의 진로를 횡단할 경우 충돌의 위험이 있을 때 항법으로 옳지 않은 것은?':
             '국제해상충돌방지규칙상 서로 시계 안에서 2척의 동력선이 상대의 진로를 횡단할 경우 충돌의 위험이 있을 때 항법으로 옳지 않은 것은?',
         '횡단상태 항법은 후진 중인 선박들 간에도 적 용한다.':
@@ -515,12 +1241,17 @@ def _repair_residual_numeric_whole_text(text: str) -> str:
             '육상의 감시국에서 관측하여 송신한 본선과 위성까지의 거리',
         '본선의 위치 결정에 이용한 개 위성간의 거리2':
             '본선의 위치 결정에 이용한 2개 위성간의 거리',
-    }
-    return exact.get(text, text)
+        }
+    return _RESIDUAL_NUMERIC_EXACT_REPAIRS.get(text, text)
 
 
 def _repair_common_residual_numeric_patterns(text: str) -> str:
     raw = str(text or '')
+    raw = re.sub(
+        r'(?<![\d,])(?P<thousands>\d)\s+(?P<rest>\d{3})\s*\[rpm\]',
+        r'\g<thousands>,\g<rest> [rpm]',
+        raw,
+    )
     raw = re.sub(r'\b(?P<number>\d+)\s+(?P<unit>초|톤|미터|센티미터|인|회|년|개월|시간)\b', r'\g<number>\g<unit>', raw)
     raw = re.sub(r'센티(?P<number>\d+)\s*미터', r'\g<number>센티미터', raw)
     raw = re.sub(r'길(?P<number>\d+)\s+이\s+미터', r'길이 \g<number>미터', raw)
@@ -531,10 +1262,15 @@ def _repair_common_residual_numeric_patterns(text: str) -> str:
     return raw
 
 
+_DB_AUDIT_EXACT_REPAIRS = None
+
+
 def _repair_db_audit_findings(text: str) -> str:
     """Repair high-confidence residual DB audit findings observed after parsing."""
     raw = str(text or '').strip()
-    exact = {
+    global _DB_AUDIT_EXACT_REPAIRS
+    if _DB_AUDIT_EXACT_REPAIRS is None:
+        _DB_AUDIT_EXACT_REPAIRS = {
         '"수동시동이 유효하다는 것을 입증 할 수 없는 한, 30 분 이내에 추가하여 3회의 시동을 하기 위한 제의2에너지원을 비치하여야 한다."를 영문으로 옮길 때 ()에 각각 알맞은 것은? "A second source of energy shall be provided for (A) within 30minutes unless manual starting can (B) to be effective."':
             '"수동시동이 유효하다는 것을 입증 할 수 없는 한, 30분 이내에 추가하여 3회의 시동을 하기 위한 제2의 에너지원을 비치하여야 한다."를 영문으로 옮길 때 (   )에 각각 알맞은 것은? "A second source of energy shall be provided for (A) within 30 minutes unless manual starting can (B) to be effective."',
         '1 함수 f(t)=¯2sin2t의 라플라스 변환으로 옳은 것은? (단, s는 복소수이다.)':
@@ -757,7 +1493,8 @@ def _repair_db_audit_findings(text: str) -> str:
             '각 세정 단계의 사이에는 노즐의 작동각에 어느 정도의 Over-lapping 각을 주는 것이 좋다.',
         '미국 석유 협회American petroleum institute() 가 만든 비중단위이다.':
             '미국 석유 협회(American Petroleum Institute)가 만든 비중단위이다.',
-    }
+        }
+    exact = _DB_AUDIT_EXACT_REPAIRS
     if raw in exact:
         return exact[raw]
 
@@ -782,6 +1519,10 @@ def repair_misordered_prompt_artifacts(text: str) -> str:
 
 def repair_reversed_choice_fragments(text: str) -> str:
     raw = str(text or '').strip()
+    # Choice numbering is stored separately.  These leading glyphs are damaged
+    # OCR renderings of the printed circled marker, never answer content.
+    raw = re.sub(r'^\s*(?:(?:@\s*)?[\u00a9\u00ae]\s*)+', '', raw)
+    raw = re.sub(r'^\s*\u2462\s+(?=[0-9A-Za-z])', '', raw)
     raw = _repair_displaced_sequence_arrows(raw)
     raw = _repair_known_choice_misorders(raw)
     raw = re.sub(
@@ -2251,6 +2992,146 @@ def apply_overline_marks(text: str, overline_marks: List) -> str:
     return ''.join(output)
 
 
+def apply_text_decorations(
+    text: str,
+    decorations: List,
+    *,
+    minimum_confidence: float = 0.78,
+) -> FormattedText:
+    """Apply positioned layout decorations and return stable rich-text spans.
+
+    Marks are first resolved through their complete source line.  This avoids
+    applying a body underline to an identical token in the Korean prompt (for
+    example the three underlined ``This`` occurrences in a maritime-English
+    reference passage).  A text-only fallback is used only when the source
+    line no longer survives OCR cleanup.
+    """
+
+    raw = str(text or '')
+    resolved = []
+    occupied: list[tuple[int, int]] = []
+    fallback_cursor = 0
+    for mark in decorations or []:
+        kind, marked_text, line_text, start, end, confidence = _text_decoration_parts(mark)
+        if (
+            kind not in {'underline', 'overline', 'radical'}
+            or not marked_text
+            or confidence < float(minimum_confidence)
+        ):
+            continue
+        match = _find_positioned_mark(raw, line_text, start, end, 0)
+        if match is None:
+            match = _find_contextual_decoration_match(
+                raw,
+                marked_text,
+                line_text,
+                fallback_cursor,
+            )
+        if match is None:
+            continue
+        target_start, target_end = match
+        if any(target_start < used_end and target_end > used_start for used_start, used_end in occupied):
+            continue
+        resolved.append((target_start, target_end, kind, confidence))
+        occupied.append((target_start, target_end))
+        fallback_cursor = target_end
+
+    if not resolved:
+        return normalize_latex_text(raw)
+
+    output = []
+    spans = []
+    position = 0
+    for start, end, kind, _confidence in sorted(resolved, key=lambda item: (item[0], item[1])):
+        output.append(raw[position:start])
+        output_start = len(''.join(output))
+        value = raw[start:end]
+        if kind == 'underline':
+            output.append(value)
+            spans.append({
+                'start': output_start,
+                'end': output_start + len(value),
+                'underline': True,
+            })
+        else:
+            inner = _normalize_formula_inner(value)
+            command = 'sqrt' if kind == 'radical' else 'overline'
+            latex = rf'\{command}{{{inner}}}'
+            output.append(latex)
+            spans.append({
+                'start': output_start,
+                'end': output_start + len(latex),
+                'latex': latex,
+            })
+        position = end
+    output.append(raw[position:])
+    decorated = ''.join(output)
+    normalized = normalize_latex_text(decorated)
+    if normalized.text == decorated:
+        return FormattedText(normalized.text, merge_spans(spans, normalized.spans))
+
+    mapped = []
+    for span in spans:
+        start = _nearest_mapped_position(normalized.raw_to_normalized, int(span['start']), True)
+        end = _nearest_mapped_position(normalized.raw_to_normalized, int(span['end']) - 1, False)
+        if start is None or end is None:
+            continue
+        mapped.append({**span, 'start': start, 'end': end + 1})
+    return FormattedText(normalized.text, merge_spans(mapped, normalized.spans))
+
+
+def _text_decoration_parts(mark):
+    if isinstance(mark, dict):
+        getter = mark.get
+    else:
+        getter = lambda key, default=None: getattr(mark, key, default)
+    try:
+        confidence = float(getter('confidence', 1.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return (
+        str(getter('kind', '') or '').strip().lower(),
+        str(getter('text', '') or ''),
+        str(getter('line_text', '') or ''),
+        _safe_int(getter('start')),
+        _safe_int(getter('end')),
+        confidence,
+    )
+
+
+def _find_contextual_decoration_match(
+    raw: str,
+    marked_text: str,
+    line_text: str,
+    search_from: int,
+):
+    compact_line = re.sub(r'\s+', ' ', str(line_text or '')).strip()
+    if compact_line:
+        compact_raw = re.sub(r'\s+', ' ', raw)
+        line_offset = compact_raw.find(compact_line)
+        if line_offset >= 0:
+            relative = compact_line.find(marked_text)
+            if relative >= 0:
+                compact_target = compact_raw[line_offset + relative:line_offset + relative + len(marked_text)]
+                candidate = raw.find(compact_target, max(0, search_from - 8))
+                if candidate >= 0:
+                    return candidate, candidate + len(compact_target)
+    return _find_next_text_match(raw, marked_text, search_from)
+
+
+def _nearest_mapped_position(mapping, index: int, forward: bool):
+    if not mapping:
+        return None
+    index = min(max(0, index), len(mapping) - 1)
+    direction = 1 if forward else -1
+    position = index
+    while 0 <= position < len(mapping):
+        if mapping[position] is not None:
+            return mapping[position]
+        position += direction
+    return None
+
+
 def merge_spans(*span_groups: List[dict]) -> List[dict]:
     """Merge span groups, combining attributes for identical ranges."""
     by_range = {}
@@ -2333,6 +3214,11 @@ def _normalize_formula_expression(value: str) -> str:
     )
     expr = re.sub(
         r'√\s*\{\s*([^{}]+?)\s*\}',
+        lambda match: rf'\sqrt{{{_normalize_formula_inner(match.group(1))}}}',
+        expr,
+    )
+    expr = re.sub(
+        r'√\s*[¯‾]\s*([0-9]+(?:\.[0-9]+)?|[A-Za-z][A-Za-z0-9_]*)',
         lambda match: rf'\sqrt{{{_normalize_formula_inner(match.group(1))}}}',
         expr,
     )

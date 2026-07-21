@@ -312,6 +312,89 @@ def test_mounted_repository_get_question_uses_namespaced_id(tmp_path):
     assert question["choices"][0]["id"].startswith("main::")
 
 
+def test_mounted_repository_search_treats_special_characters_as_literals(tmp_path):
+    db_path = tmp_path / "main.db"
+    _make_db(db_path, '문항에 "@ Beach (to):"와 기호_기능이 함께 들어간 내용')
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [MountedDatabase(id="main", label="Main", domain="all", path=db_path)],
+    )
+
+    repository = MountedExamRepository(manifest)
+
+    by_phrase = repository.search_questions(search_text='@ Beach (to):')
+    by_underscore = repository.search_questions(search_text='기호_기능')
+
+    assert [q["question_text"] for q in by_phrase] == ['문항에 "@ Beach (to):"와 기호_기능이 함께 들어간 내용']
+    assert [q["question_text"] for q in by_underscore] == ['문항에 "@ Beach (to):"와 기호_기능이 함께 들어간 내용']
+
+
+def test_mounted_repository_searches_format_display_text_and_shared_passage(tmp_path):
+    db_path = tmp_path / "main.db"
+    _make_db(db_path, "일반 본문")
+    question_format_json = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "rows": [["@ Beach (to): To run a vessel up on a beach"]],
+            "cells": [{
+                "row": 0,
+                "col": 0,
+                "text": "@ Beach (to): To run a vessel up on a beach",
+            }],
+        }],
+    })
+    choice_format_json = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "rows": [["선택지 JSON 표시 문구"]],
+            "cells": [{
+                "row": 0,
+                "col": 0,
+                "text": "선택지 JSON 표시 문구",
+            }],
+        }],
+    })
+    with sqlite3.connect(db_path) as conn:
+        question_id, exam_subject_id = conn.execute(
+            "SELECT id, exam_subject_id FROM questions"
+        ).fetchone()
+        group_cursor = conn.execute(
+            """
+            INSERT INTO question_groups (
+                exam_subject_id, year, session, group_number, shared_text
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (exam_subject_id, 2024, 1, 1, "공유 지문 전용 검색 문구"),
+        )
+        conn.execute(
+            "UPDATE questions SET question_format_json = ?, group_id = ? WHERE id = ?",
+            (question_format_json, group_cursor.lastrowid, question_id),
+        )
+        conn.execute(
+            """
+            UPDATE question_choices
+            SET choice_format_json = ?
+            WHERE question_id = ? AND choice_number = 1
+            """,
+            (choice_format_json, question_id),
+        )
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [MountedDatabase(id="main", label="Main", domain="all", path=db_path)],
+    )
+    repository = MountedExamRepository(manifest)
+
+    by_question_format = repository.search_questions(search_text="@ Beach (to):")
+    by_choice_format = repository.search_questions(search_text="선택지 JSON 표시")
+    by_shared_passage = repository.search_questions(search_text="공유 지문 전용")
+
+    assert [q["id"] for q in by_question_format] == ["main::1"]
+    assert [q["id"] for q in by_choice_format] == ["main::1"]
+    assert [q["id"] for q in by_shared_passage] == ["main::1"]
+
+
 def test_mounted_repository_routes_writes_to_read_only_marked_owner(tmp_path):
     first_db = tmp_path / "first.db"
     second_db = tmp_path / "second.db"

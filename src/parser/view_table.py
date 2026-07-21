@@ -56,6 +56,7 @@ def _one_cell_spec(
     offset: int,
     table_id: str,
     reason: str,
+    cell_spans: Optional[list[dict]] = None,
 ) -> dict:
     offset = min(len(text), max(0, int(offset)))
     value = str(cell_text or "")
@@ -72,6 +73,7 @@ def _one_cell_spec(
                     "col_span": 1,
                     "horizontal_alignment": "left",
                     "vertical_alignment": "center",
+                    "spans": list(cell_spans or []),
                 }
             ],
             "anchor": {
@@ -92,6 +94,7 @@ def add_one_cell_table(
     cell_text: str,
     offset: int,
     reason: str = "manual_editor",
+    cell_spans: Optional[list[dict]] = None,
 ) -> Optional[str]:
     """Append an editable one-cell table at a bounded text anchor."""
     owner_text = str(text or "")
@@ -105,6 +108,7 @@ def add_one_cell_table(
             offset,
             table_id,
             reason,
+            cell_spans,
         )
     )
     payload["tables"] = tables
@@ -222,7 +226,25 @@ def _replace_single_cell_text(table: dict, value: str, owner_text: str) -> dict:
             "vertical_alignment": "center",
         }
         cells.append(target)
+    old_text = str(target.get("text") or "")
+    old_spans = list(target.get("spans") or [])
     target["text"] = value
+    if old_text == value:
+        target["spans"] = old_spans
+    elif old_text.endswith(value):
+        shift = len(old_text) - len(value)
+        target["spans"] = [
+            {
+                **span,
+                "start": int(span["start"]) - shift,
+                "end": int(span["end"]) - shift,
+            }
+            for span in old_spans
+            if int(span.get("start", -1)) >= shift
+            and int(span.get("end", -1)) <= len(old_text)
+        ]
+    else:
+        target["spans"] = []
     updated["cells"] = cells
     offset = len(owner_text)
     updated["anchor"] = {
@@ -315,17 +337,43 @@ def promote_view_block(
     if not candidates:
         return value, serialize_format_payload(payload), False
     start, end, marker_text, broken = candidates[-1]
-    trailing = value[end:].strip()
+    raw_trailing = value[end:]
+    leading_trim = len(raw_trailing) - len(raw_trailing.lstrip())
+    trailing = raw_trailing.strip()
 
     prefix = _repair_question_tail(value[:start])
     marker_text = CANONICAL_VIEW_MARKER if broken else marker_text
     cell_text = f"{marker_text}\n{trailing}" if trailing else marker_text
+    cell_prefix_length = len(marker_text) + (1 if trailing else 0)
+    cell_spans = []
+    prefix_spans = []
+    for span in payload.get("spans") or []:
+        try:
+            span_start = int(span.get("start"))
+            span_end = int(span.get("end"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if span_end <= start:
+            prefix_spans.append(dict(span))
+            continue
+        trailing_start = end + leading_trim
+        if span_start >= trailing_start and span_end <= len(value):
+            local = dict(span)
+            local["start"] = cell_prefix_length + span_start - trailing_start
+            local["end"] = cell_prefix_length + span_end - trailing_start
+            cell_spans.append(local)
+    if prefix_spans:
+        payload["spans"] = prefix_spans
+    else:
+        payload.pop("spans", None)
+
     encoded = add_one_cell_table(
         prefix,
         payload,
         cell_text,
         len(prefix),
         reason="recovered_broken_view_marker" if broken else "explicit_view_marker",
+        cell_spans=cell_spans,
     )
     encoded_payload = parse_format_payload(encoded)
     prefix, encoded_payload, _repaired = _repair_existing_view_boundary(

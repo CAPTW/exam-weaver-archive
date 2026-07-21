@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 from .extractor import PDFExtractor
+from .figure_crop import materialize_offline_figure_crops
 from .layout import StructuredPage
 from .offline_exam import OfflineExamParser, ParsedOfflineQuestion
 from .offline_quality import validate_offline_question
@@ -111,6 +112,13 @@ def parse_offline_question_pdf(
 
     pages = extract_offline_structured_pages(source_path, frozen_metadata)
     candidates = OfflineExamParser().parse_pages(pages)
+    output_dir = Path(frozen_metadata.get("extract_dir", "outputs/offline_parser_cache"))
+    candidates = list(materialize_offline_figure_crops(
+        source_path,
+        pages,
+        candidates,
+        output_dir,
+    ))
 
     accepted: list[ParsedOfflineQuestion] = []
     rejected: list[RejectedOfflineQuestion] = []
@@ -260,7 +268,10 @@ def select_group_questions(
         if source_page_numbers:
             candidates = OfflineExamParser().parse_pages(list(scoped_pages))
             scoped_questions: list[ParsedOfflineQuestion] = []
+            expected_count = int(group.get("question_count", 0) or 0)
             for candidate in candidates:
+                if expected_count and not 1 <= candidate.number <= expected_count:
+                    continue
                 candidate = apply_audited_source_repair(
                     candidate, Path(source_path)
                 )

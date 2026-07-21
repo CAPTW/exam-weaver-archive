@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import gc
+import gzip
 import hashlib
 import json
 import os
@@ -14,8 +15,9 @@ import tempfile
 import time
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
@@ -25,11 +27,13 @@ from src.database.repository import ExamRepository
 from src.database.validator import QuestionValidator
 from src.parser.offline_sources import (
     DocumentRole,
+    OfflineParseResult,
     RejectedOfflineQuestion,
     classify_offline_document,
     parse_offline_question_pdf,
 )
 from src.parser.question import ALL_CHOICES_CORRECT, Choice, Question
+from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, TextDecoration
 from src.parser.view_table import promote_view_block
 
 
@@ -58,8 +62,154 @@ STAGING_BLOCKING_QUALITY_CODES = frozenset(
         "missing_model_answer",
     }
 )
+from src.parser.offline_exam import ParsedOfflineQuestion
+from src.parser.offline_quality import validate_offline_question
+from src.parser.offline_repairs import apply_audited_source_repair
+from src.parser.formatting import (
+    merge_spans,
+    normalize_latex_text,
+    repair_extracted_text_artifacts,
+)
+from src.parser.text_quality import text_quality_issue_codes
+
+_REGISTERED_PAGE_CACHE_SCHEMA = 1
 
 
+def _structured_page_cache_path(
+    report_dir: Path,
+    source_digest: str,
+) -> Path:
+    """Return a parser-versioned cache path for expensive PDF layout data."""
+
+    root = Path(__file__).resolve().parents[2]
+    parser_digest = hashlib.sha256()
+    for relative in ("src/parser/extractor.py", "src/parser/layout.py"):
+        parser_digest.update((root / relative).read_bytes())
+    token = parser_digest.hexdigest()[:16]
+    return Path(report_dir) / "structured_page_cache" / f"{source_digest}_{token}.json.gz"
+
+
+def _write_structured_page_cache(path: Path, pages: Sequence[StructuredPage]) -> None:
+    """Atomically persist source-backed layout records for rebuild retries."""
+
+    payload = {
+        "schema_version": _REGISTERED_PAGE_CACHE_SCHEMA,
+        "pages": [asdict(page) for page in pages],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with gzip.open(temporary, "wt", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+    os.replace(temporary, path)
+
+
+def _read_structured_page_cache(path: Path) -> tuple[StructuredPage, ...] | None:
+    """Load a validated cache, treating corruption as a normal cache miss."""
+
+    if not path.is_file():
+        return None
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        if int(payload.get("schema_version", 0) or 0) != _REGISTERED_PAGE_CACHE_SCHEMA:
+            return None
+        pages: list[StructuredPage] = []
+        for raw_page in payload.get("pages", []):
+            lines: list[LayoutLine] = []
+            for raw_line in raw_page.get("lines", []):
+                words = tuple(
+                    LayoutWord(**raw_word) for raw_word in raw_line.get("words", [])
+                )
+                decorations = tuple(
+                    TextDecoration(**raw_decoration)
+                    for raw_decoration in raw_line.get("decorations", [])
+                )
+                lines.append(LayoutLine(
+                    words=words,
+                    bbox=tuple(raw_line["bbox"]),
+                    page=int(raw_line["page"]),
+                    column=int(raw_line["column"]),
+                    decorations=decorations,
+                ))
+            pages.append(StructuredPage(
+                number=int(raw_page["number"]),
+                width=float(raw_page["width"]),
+                height=float(raw_page["height"]),
+                kind=str(raw_page["kind"]),
+                lines=tuple(lines),
+                images=tuple(tuple(value) for value in raw_page.get("images", [])),
+            ))
+        return tuple(pages)
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+
+
+_SEVERE_CACHED_OCR_PATTERN = re.compile(
+    r"(?:S\s+iS\s+an\s+0\s+ration|Law\s+하\s+the|Configuous|"
+    r"CkS\s+2\s+[\"\u201c]IAMSAR\s+manual\s+Volume|"
+    r"any\s+pollution\s+by\s+40766\s+majeure)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _cached_page_ocr_damage_score(page: StructuredPage) -> int:
+    """Return a conservative score for severe, retry-worthy cached OCR."""
+
+    text = "\n".join(line.text for line in page.lines)
+    severe_count = len(_SEVERE_CACHED_OCR_PATTERN.findall(text))
+    if not severe_count:
+        return 0
+    score = 25 * severe_count
+    score += 10 * sum(
+        bool(text_quality_issue_codes(line.text)) for line in page.lines
+    )
+    return score
+
+
+def _refresh_suspicious_cached_pages(
+    source_path: Path,
+    pages: Sequence[StructuredPage],
+) -> tuple[tuple[StructuredPage, ...], bool]:
+    """Retry only damaged cached scan pages and keep a proven improvement.
+
+    Windows OCR can vary slightly between runs.  The original cache remains the
+    baseline; a fresh page is accepted only when it retains every detected
+    question number and strictly lowers the severe-damage score.
+    """
+
+    damaged = {
+        page.number: _cached_page_ocr_damage_score(page)
+        for page in pages
+        if _cached_page_ocr_damage_score(page) > 0
+    }
+    if not damaged:
+        return tuple(pages), False
+
+    import fitz
+    from src.parser.extractor import PDFExtractor
+
+    extractor = PDFExtractor()
+    refreshed = list(pages)
+    changed = False
+    with fitz.open(source_path) as document:
+        for index, baseline in enumerate(refreshed):
+            baseline_score = damaged.get(baseline.number)
+            if baseline_score is None or not (1 <= baseline.number <= len(document)):
+                continue
+            candidate = extractor._extract_ocr_structured_page(
+                document[baseline.number - 1], baseline.number
+            )
+            if not candidate.lines:
+                continue
+            if not extractor._preserves_question_number_coverage(
+                baseline, candidate
+            ):
+                continue
+            if _cached_page_ocr_damage_score(candidate) >= baseline_score:
+                continue
+            refreshed[index] = candidate
+            changed = True
+    return tuple(refreshed), changed
 def _question_from_offline_candidate(
     candidate,
     metadata: Mapping[str, object],
@@ -68,7 +218,8 @@ def _question_from_offline_candidate(
     """Preserve view blocks and aligned answer fields during DB ingestion."""
 
     question_text, question_format_json, _promoted = promote_view_block(
-        candidate.stem
+        candidate.stem,
+        getattr(candidate, "question_format_json", None),
     )
     return Question(
         number=candidate.number,
@@ -93,7 +244,28 @@ def _question_from_offline_candidate(
         session=int(metadata["session"]),
         exam_type=str(metadata["exam_type"]),
         format_json=question_format_json,
+        has_image=bool(getattr(candidate, "image_path", None)),
+        image_path=getattr(candidate, "image_path", None),
     )
+
+
+def _normalize_question_for_staging(question: Question) -> Question:
+    """Apply one rich-text normalization path to every provider question."""
+
+    question.text, question.format_json = _normalize_stored_rich_text(
+        question.text,
+        question.format_json,
+    )
+    question.text, question.format_json, _promoted = promote_view_block(
+        question.text,
+        question.format_json,
+    )
+    for choice in question.choices:
+        choice.text, choice.format_json = _normalize_stored_rich_text(
+            choice.text,
+            choice.format_json,
+        )
+    return question
 
 
 REQUIRED_SCHEMA: Mapping[str, frozenset[str]] = {
@@ -395,6 +567,7 @@ def build_staging_database(
         [Path, Path, Sequence[Mapping[str, object]]], Sequence[RegisteredExamSet]
     ]
     | None = None,
+    validated_baseline_db: str | Path | None = None,
 ) -> RebuildSummary:
     """Inventory PDFs and build a new database without touching a mounted DB."""
 
@@ -461,8 +634,19 @@ def build_staging_database(
     rejected_count = 0
     errors: list[str] = []
     if inventory_contract is not None:
-        provider = registered_set_provider or _build_registered_corpus_sets
-        registered_sets = tuple(provider(source_root, reports, inventory))
+        if registered_set_provider is None:
+            registered_sets = tuple(
+                _build_registered_corpus_sets(
+                    source_root,
+                    reports,
+                    inventory,
+                    validated_baseline_db=validated_baseline_db,
+                )
+            )
+        else:
+            registered_sets = tuple(
+                registered_set_provider(source_root, reports, inventory)
+            )
         if not registered_sets:
             raise ValueError("registered corpus provider returned no expected exam sets")
         if inventory_contract == STRICT_CORPUS_INVENTORY:
@@ -1262,8 +1446,12 @@ def _persist_registered_set(
         source_record_hash,
         answer,
     )
+    normalized_questions = [
+        _normalize_question_for_staging(question)
+        for question in registered.questions
+    ]
     repository.save_questions(
-        list(registered.questions),
+        normalized_questions,
         SimpleNamespace(year=expected.year, session=expected.session, exam_type=expected.exam_type),
     )
     _attach_provenance(database_path, metadata, expected.question_numbers, source_id)
@@ -1307,10 +1495,472 @@ def _registered_parser_from_cache(
     return parse
 
 
+def _validated_baseline_repair_map(
+    database_path: str | Path | None,
+) -> dict[tuple[str, int, int], ParsedOfflineQuestion]:
+    """Load only strict-quality legacy edits keyed to one source location.
+
+    This preserves earlier user/manual corrections when a fresh OCR candidate
+    fails closed.  File name, PDF page, and printed question number must all
+    match, and the baseline text itself must pass the current parser quality
+    gate before it is eligible.  A supplied but unhealthy database is an error,
+    never a reason to relax the new staging build.
+    """
+
+    if database_path is None:
+        return {}
+    path = Path(database_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"validated baseline database does not exist: {path}")
+    repairs: dict[tuple[str, int, int], ParsedOfflineQuestion] = {}
+    conflicts: set[tuple[str, int, int]] = set()
+    with _readonly_connection(path) as connection:
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise sqlite3.DatabaseError("validated baseline integrity_check failed")
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT q.id, qs.source_url, q.source_page, q.question_number,
+                   q.question_text, q.question_format_json, q.image_path
+            FROM questions q
+            JOIN question_sources qs ON qs.id = q.source_id
+            WHERE q.source_page IS NOT NULL
+              AND q.question_number > 0
+              AND TRIM(COALESCE(q.question_text, '')) <> ''
+            ORDER BY q.id
+            """
+        ).fetchall()
+        for row in rows:
+            choices = connection.execute(
+                """
+                SELECT choice_text, choice_format_json
+                FROM question_choices
+                WHERE question_id = ?
+                ORDER BY choice_number
+                """,
+                (int(row["id"]),),
+            ).fetchall()
+            if len(choices) not in (4, 5):
+                continue
+            format_values = [
+                row["question_format_json"],
+                *(choice["choice_format_json"] for choice in choices),
+            ]
+            try:
+                for value in format_values:
+                    if value:
+                        payload = json.loads(value)
+                        if not isinstance(payload, dict):
+                            raise ValueError("format payload is not an object")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            question_text, question_format_json = _normalize_stored_rich_text(
+                str(row["question_text"]), row["question_format_json"]
+            )
+            normalized_choices = [
+                _normalize_stored_rich_text(
+                    str(choice["choice_text"]), choice["choice_format_json"]
+                )
+                for choice in choices
+            ]
+            candidate = ParsedOfflineQuestion(
+                number=int(row["question_number"]),
+                stem=question_text,
+                choices=[value for value, _format in normalized_choices],
+                source_page=int(row["source_page"]),
+                confidence=1.0,
+                diagnostics=("validated_baseline_recovery",),
+                choice_format_jsons=tuple(
+                    format_json for _value, format_json in normalized_choices
+                ),
+                question_format_json=question_format_json,
+                image_path=row["image_path"],
+            )
+            if not validate_offline_question(candidate).importable:
+                continue
+            key = (
+                _url_filename(str(row["source_url"])).casefold(),
+                candidate.source_page,
+                candidate.number,
+            )
+            previous = repairs.get(key)
+            if previous is not None and (
+                previous.stem != candidate.stem
+                or previous.choices != candidate.choices
+            ):
+                conflicts.add(key)
+                repairs.pop(key, None)
+                continue
+            if key not in conflicts:
+                repairs[key] = candidate
+    return repairs
+
+
+def _normalize_stored_rich_text(
+    text: str, format_json: str | None
+) -> tuple[str, str | None]:
+    """Repair legacy OCR/math while retaining and remapping rich metadata."""
+
+    raw = str(text or "")
+    repaired = repair_extracted_text_artifacts(raw)
+    formatted = normalize_latex_text(repaired)
+    try:
+        payload = json.loads(format_json) if format_json else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    def repair_offset(value: object, *, prefer_end: bool = False) -> int:
+        """Map an old string boundary across conservative OCR repairs."""
+
+        offset = max(0, min(len(raw), int(value or 0)))
+        if raw == repaired:
+            return offset
+        for tag, old_start, old_end, new_start, new_end in SequenceMatcher(
+            None, raw, repaired, autojunk=False
+        ).get_opcodes():
+            if offset < old_start:
+                return new_start
+            if old_start <= offset <= old_end:
+                if tag == "equal":
+                    return new_start + min(offset - old_start, new_end - new_start)
+                if offset == old_end:
+                    return new_end
+                return new_end if prefer_end else new_start
+        return len(repaired)
+
+    def normalized_offset(value: object, *, prefer_end: bool = False) -> int:
+        offset = repair_offset(value, prefer_end=prefer_end)
+        return len(normalize_latex_text(repaired[:offset]).text)
+
+    remapped_spans = []
+    for span in payload.get("spans", ()) or ():
+        if not isinstance(span, Mapping):
+            continue
+        item = dict(span)
+        item["start"] = normalized_offset(item.get("start"))
+        item["end"] = normalized_offset(item.get("end"), prefer_end=True)
+        if 0 <= item["start"] < item["end"] <= len(formatted.text):
+            remapped_spans.append(item)
+    spans = merge_spans(remapped_spans, formatted.spans)
+    if spans:
+        payload["spans"] = spans
+    else:
+        payload.pop("spans", None)
+
+    for table in payload.get("tables", ()) or ():
+        if not isinstance(table, dict):
+            continue
+        anchor = table.get("anchor")
+        if isinstance(anchor, dict) and "offset" in anchor:
+            anchor["offset"] = normalized_offset(anchor.get("offset"))
+        rows = table.get("rows")
+        for cell in table.get("cells", ()) or ():
+            if not isinstance(cell, dict):
+                continue
+            cell_text = str(cell.get("text", "") or "")
+            normalized_cell_text = cell_text.replace("\r\n", "\n").replace("\r", "\n")
+            repaired_cell_text = "\n".join(
+                repair_extracted_text_artifacts(line)
+                for line in normalized_cell_text.split("\n")
+            )
+            cell_formatted = normalize_latex_text(repaired_cell_text)
+            cell["text"] = cell_formatted.text
+            cell_spans = []
+            cell_matcher = SequenceMatcher(
+                None, cell_text, repaired_cell_text, autojunk=False
+            )
+
+            def cell_offset(value: object, *, prefer_end: bool = False) -> int:
+                offset = max(0, min(len(cell_text), int(value or 0)))
+                repaired_offset = offset
+                if cell_text != repaired_cell_text:
+                    for tag, old_start, old_end, new_start, new_end in cell_matcher.get_opcodes():
+                        if offset < old_start:
+                            repaired_offset = new_start
+                            break
+                        if old_start <= offset <= old_end:
+                            if tag == "equal":
+                                repaired_offset = new_start + min(
+                                    offset - old_start, new_end - new_start
+                                )
+                            elif offset == old_end:
+                                repaired_offset = new_end
+                            else:
+                                repaired_offset = new_end if prefer_end else new_start
+                            break
+                    else:
+                        repaired_offset = len(repaired_cell_text)
+                return len(normalize_latex_text(repaired_cell_text[:repaired_offset]).text)
+
+            for span in cell.get("spans", ()) or ():
+                if not isinstance(span, Mapping):
+                    continue
+                item = dict(span)
+                item["start"] = cell_offset(item.get("start"))
+                item["end"] = cell_offset(item.get("end"), prefer_end=True)
+                if 0 <= item["start"] < item["end"] <= len(cell_formatted.text):
+                    cell_spans.append(item)
+            cell_spans = merge_spans(cell_spans, cell_formatted.spans)
+            cell["spans"] = cell_spans
+            row = int(cell.get("row", -1) or 0)
+            col = int(cell.get("col", -1) or 0)
+            if (
+                isinstance(rows, list)
+                and 0 <= row < len(rows)
+                and isinstance(rows[row], list)
+                and 0 <= col < len(rows[row])
+            ):
+                rows[row][col] = cell_formatted.text
+
+    return (
+        formatted.text,
+        json.dumps(payload, ensure_ascii=False) if payload else None,
+    )
+
+
+def _validated_baseline_year_map(
+    database_path: str | Path | None,
+) -> dict[tuple[str, int], int]:
+    """Return unambiguous source-page years from an integrity-checked baseline."""
+
+    if database_path is None:
+        return {}
+    path = Path(database_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"validated baseline database does not exist: {path}")
+    years: dict[tuple[str, int], int] = {}
+    conflicts: set[tuple[str, int]] = set()
+    with _readonly_connection(path) as connection:
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise sqlite3.DatabaseError("validated baseline integrity_check failed")
+        rows = connection.execute(
+            """
+            SELECT qs.source_url, q.source_page, q.year
+            FROM questions q
+            JOIN question_sources qs ON qs.id = q.source_id
+            WHERE q.source_page IS NOT NULL
+              AND q.source_page > 0
+              AND q.year > 0
+            ORDER BY q.id
+            """
+        ).fetchall()
+        for source_url, source_page, year in rows:
+            key = (_url_filename(str(source_url)).casefold(), int(source_page))
+            value = int(year)
+            previous = years.get(key)
+            if previous is not None and previous != value:
+                conflicts.add(key)
+                years.pop(key, None)
+                continue
+            if key not in conflicts:
+                years[key] = value
+    return years
+
+
+def _hydrate_registered_group_years(
+    groups: Sequence[Mapping[str, object]],
+    year_by_page: Mapping[tuple[str, int], int],
+) -> list[dict[str, object]]:
+    """Stabilize OCR-derived group years using only unanimous source-page metadata."""
+
+    hydrated: list[dict[str, object]] = []
+    for raw_group in groups:
+        group = dict(raw_group)
+        page_years = {
+            year_by_page[(
+                Path(str(page.get("source_path", "") or "")).name.casefold(),
+                int(page.get("page", 0) or 0),
+            )]
+            for page in list(group.get("pages", ()) or ())
+            if isinstance(page, Mapping)
+            and (
+                Path(str(page.get("source_path", "") or "")).name.casefold(),
+                int(page.get("page", 0) or 0),
+            ) in year_by_page
+        }
+        if len(page_years) == 1:
+            group["year"] = next(iter(page_years))
+        hydrated.append(group)
+    return hydrated
+
+
+def _recover_from_validated_baseline(
+    candidate: ParsedOfflineQuestion,
+    source_path: Path,
+    repairs: Mapping[tuple[str, int, int], ParsedOfflineQuestion],
+) -> ParsedOfflineQuestion:
+    """Recover rejected text or richer spans from a strict baseline twin."""
+
+    baseline = repairs.get(
+        (source_path.name.casefold(), candidate.source_page, candidate.number)
+    )
+    if validate_offline_question(candidate).importable:
+        if baseline is None:
+            return candidate
+        return _merge_validated_baseline_spans(candidate, baseline)
+    if baseline is None:
+        return candidate
+    return replace(
+        candidate,
+        stem=baseline.stem,
+        choices=list(baseline.choices),
+        confidence=1.0,
+        diagnostics=("validated_baseline_recovery",),
+        question_format_json=baseline.question_format_json,
+        choice_format_jsons=tuple(baseline.choice_format_jsons),
+        image_path=baseline.image_path or candidate.image_path,
+    )
+
+
+def _merge_validated_baseline_spans(
+    candidate: ParsedOfflineQuestion,
+    baseline: ParsedOfflineQuestion,
+) -> ParsedOfflineQuestion:
+    """Keep source-backed spans when a new OCR pass preserves the same text."""
+
+    def comparable(value: str) -> str:
+        return re.sub(
+            r"\s+",
+            " ",
+            repair_extracted_text_artifacts(str(value or "")),
+        ).strip()
+
+    if comparable(candidate.stem) != comparable(baseline.stem):
+        return candidate
+    if [comparable(value) for value in candidate.choices] != [
+        comparable(value) for value in baseline.choices
+    ]:
+        return candidate
+
+    question_format = _merge_richer_top_level_spans(
+        candidate.question_format_json,
+        baseline.question_format_json,
+    )
+    choice_formats = []
+    changed = question_format != candidate.question_format_json
+    for index in range(len(candidate.choices)):
+        current = (
+            candidate.choice_format_jsons[index]
+            if index < len(candidate.choice_format_jsons)
+            else None
+        )
+        previous = (
+            baseline.choice_format_jsons[index]
+            if index < len(baseline.choice_format_jsons)
+            else None
+        )
+        merged = _merge_richer_top_level_spans(current, previous)
+        choice_formats.append(merged)
+        changed = changed or merged != current
+    if not changed:
+        return candidate
+    return replace(
+        candidate,
+        question_format_json=question_format,
+        choice_format_jsons=tuple(choice_formats),
+        diagnostics=tuple(dict.fromkeys((
+            *candidate.diagnostics,
+            "validated_baseline_format_recovery",
+        ))),
+    )
+
+
+def _merge_richer_top_level_spans(
+    current_json: str | None,
+    baseline_json: str | None,
+) -> str | None:
+    try:
+        current = json.loads(current_json) if current_json else {}
+        baseline = json.loads(baseline_json) if baseline_json else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return current_json
+    if not isinstance(current, dict) or not isinstance(baseline, dict):
+        return current_json
+    current_spans = current.get("spans", ()) or ()
+    baseline_spans = baseline.get("spans", ()) or ()
+    if len(baseline_spans) <= len(current_spans):
+        return current_json
+    merged = dict(current)
+    merged["spans"] = baseline_spans
+    merged["schema_version"] = max(
+        int(current.get("schema_version", 0) or 0),
+        int(baseline.get("schema_version", 0) or 0),
+        2,
+    )
+    return json.dumps(merged, ensure_ascii=False)
+
+
+def _recover_missing_from_validated_baseline(
+    selected: Mapping[int, ParsedOfflineQuestion],
+    group: Mapping[str, object],
+    repairs: Mapping[tuple[str, int, int], ParsedOfflineQuestion],
+) -> dict[int, ParsedOfflineQuestion]:
+    """Fill parser omissions only from strict baseline rows inside this page scope."""
+
+    recovered = dict(selected)
+    page_scopes = {
+        (
+            Path(str(page.get("source_path", "") or "")).name.casefold(),
+            int(page.get("page", 0) or 0),
+        )
+        for page in list(group.get("pages", ()) or ())
+        if isinstance(page, Mapping)
+        and page.get("source_path")
+        and int(page.get("page", 0) or 0) > 0
+    }
+    for (filename, page, number), baseline in repairs.items():
+        if (filename, page) in page_scopes and number not in recovered:
+            recovered[number] = baseline
+    return recovered
+
+
+def _select_native_candidates_with_recovery(
+    parsed: OfflineParseResult,
+    source_path: Path,
+    expected_numbers: Sequence[int],
+    repairs: Mapping[tuple[str, int, int], ParsedOfflineQuestion],
+) -> tuple[dict[int, ParsedOfflineQuestion], int]:
+    """Apply the same strict recovery policy to standalone native PDFs."""
+
+    expected = {int(number) for number in expected_numbers}
+    selected: dict[int, ParsedOfflineQuestion] = {}
+    rejected_numbers: set[int] = set()
+    candidates = [*parsed.questions, *(item.question for item in parsed.rejected)]
+    for candidate in candidates:
+        if candidate.number not in expected:
+            continue
+        repaired = apply_audited_source_repair(candidate, source_path)
+        repaired = _recover_from_validated_baseline(repaired, source_path, repairs)
+        if validate_offline_question(repaired).importable:
+            current = selected.get(repaired.number)
+            if current is None or repaired.confidence > current.confidence:
+                selected[repaired.number] = repaired
+            rejected_numbers.discard(repaired.number)
+        elif repaired.number not in selected:
+            rejected_numbers.add(repaired.number)
+
+    selected = _recover_missing_from_validated_baseline(
+        selected,
+        {
+            "pages": [
+                {"source_path": str(source_path), "page": page.number}
+                for page in parsed.structured_pages
+            ]
+        },
+        repairs,
+    )
+    rejected_numbers.difference_update(selected)
+    return selected, len(rejected_numbers)
+
+
 def _build_registered_corpus_sets(
     root: Path,
     report_dir: Path,
     inventory: Sequence[Mapping[str, object]],
+    *,
+    validated_baseline_db: str | Path | None = None,
 ) -> Sequence[RegisteredExamSet]:
     """Run the registered Ronpark subject builders plus native-2023 adapters."""
 
@@ -1322,11 +1972,37 @@ def _build_registered_corpus_sets(
     page_records: list[dict[str, object]] = []
     native_paths: list[Path] = []
     parsed_source_cache: dict[str, object] = {}
+    digest_by_relative_path = {
+        str(row["relative_path"]): str(row["sha256"])
+        for row in inventory
+        if row.get("relative_path") and row.get("sha256")
+    }
     for path in question_paths:
         if path.name in {"2023 2차 - 물리.pdf", "2023 2차 - 항해.pdf"}:
             native_paths.append(path)
             continue
-        parsed = parse_offline_question_pdf(path, {"probe": {"role": "question"}})
+        relative_path = str(path.relative_to(root))
+        source_digest = digest_by_relative_path.get(relative_path) or _sha256_file(path)
+        cache_path = _structured_page_cache_path(report_dir, source_digest)
+        cached_pages = _read_structured_page_cache(cache_path)
+        if cached_pages is None:
+            parsed = parse_offline_question_pdf(path, {"probe": {"role": "question"}})
+            _write_structured_page_cache(cache_path, parsed.structured_pages)
+        else:
+            cached_pages, cache_refreshed = _refresh_suspicious_cached_pages(
+                path,
+                cached_pages,
+            )
+            if cache_refreshed:
+                _write_structured_page_cache(cache_path, cached_pages)
+            parsed = OfflineParseResult(
+                path=path,
+                role=DocumentRole.QUESTION,
+                metadata={"probe": {"role": "question"}, "cache": str(cache_path)},
+                questions=(),
+                rejected=(),
+                structured_pages=cached_pages,
+            )
         parsed_source_cache[str(path.resolve())] = parsed
         for page in parsed.structured_pages:
             text_value = "\n".join(
@@ -1348,6 +2024,8 @@ def _build_registered_corpus_sets(
     from scripts import import_police_navigation_pdf as police_navigation
 
     modules = (maritime_law, maritime_english, police_navigation, police_engineering)
+    baseline_repairs = _validated_baseline_repair_map(validated_baseline_db)
+    baseline_years = _validated_baseline_year_map(validated_baseline_db)
     registered: list[RegisteredExamSet] = []
     for module in modules:
         if hasattr(module, "KNOWN_GROUPS"):
@@ -1362,9 +2040,49 @@ def _build_registered_corpus_sets(
         module_report = report_dir / f"provider_{module.__name__.split('.')[-1]}"
         module_report.mkdir(parents=True, exist_ok=True)
         original_parser = module.parse_subject_question_pdf
+        original_selector = module.select_group_questions
+        original_build_groups = module.build_groups
         module.parse_subject_question_pdf = _registered_parser_from_cache(
             parsed_source_cache, original_parser
         )
+
+        def build_groups_with_validated_baseline(page_records):
+            return _hydrate_registered_group_years(
+                original_build_groups(page_records), baseline_years
+            )
+
+        module.build_groups = build_groups_with_validated_baseline
+
+        def select_with_validated_baseline(
+            group,
+            parse_source,
+            cache,
+            metadata=None,
+            candidate_transform=None,
+        ):
+            def transform(candidate, source_path):
+                recovered = _recover_from_validated_baseline(
+                    candidate, source_path, baseline_repairs
+                )
+                if candidate_transform is not None:
+                    recovered = candidate_transform(recovered, source_path)
+                return recovered
+
+            selected, rejected_count = original_selector(
+                group,
+                parse_source,
+                cache,
+                metadata,
+                candidate_transform=transform,
+            )
+            return (
+                _recover_missing_from_validated_baseline(
+                    selected, group, baseline_repairs
+                ),
+                rejected_count,
+            )
+
+        module.select_group_questions = select_with_validated_baseline
         try:
             if module is police_engineering:
                 original_gate = module.require_complete_offline_set
@@ -1407,13 +2125,23 @@ def _build_registered_corpus_sets(
                 )
         finally:
             module.parse_subject_question_pdf = original_parser
-        groups = module.build_groups(records)
+            module.select_group_questions = original_selector
+            module.build_groups = original_build_groups
+        groups = _hydrate_registered_group_years(
+            original_build_groups(records), baseline_years
+        )
         sessions = module.build_session_map(groups)
         items_by_group: dict[int, list[object]] = {}
         for item in parsed_items:
             items_by_group.setdefault(int(item.group_index), []).append(item)
         for group_index, group in enumerate(groups, start=1):
             items = items_by_group.get(group_index, [])
+            for item in items:
+                item.question.text, item.question.format_json, _promoted = (
+                    promote_view_block(
+                        item.question.text, item.question.format_json
+                    )
+                )
             if hasattr(module, "merge_tags"):
                 for item in items:
                     item.question.tags = module.merge_tags(
@@ -1473,13 +2201,19 @@ def _build_registered_corpus_sets(
         answers = _resolve_standalone_answer_key(
             answer_path, spec.subject_name, expected_numbers
         )
+        selected_candidates, rejected_count = _select_native_candidates_with_recovery(
+            parsed, path, expected_numbers, baseline_repairs
+        )
         questions = tuple(
             _question_from_offline_candidate(
                 item,
                 metadata,
                 int(answers.get(item.number, 0)),
             )
-            for item in parsed.questions
+            for item in (
+                selected_candidates[number]
+                for number in sorted(selected_candidates)
+            )
         )
         from src.parser.offline_sources import require_complete_offline_set
 
@@ -1488,7 +2222,7 @@ def _build_registered_corpus_sets(
             questions_by_number,
             expected_numbers=expected_numbers,
             answers=[int(answers.get(number, 0)) for number in expected_numbers],
-            rejected_count=len(parsed.rejected),
+            rejected_count=rejected_count,
             choice_counts={
                 number: len(question.choices)
                 for number, question in questions_by_number.items()
@@ -1503,7 +2237,7 @@ def _build_registered_corpus_sets(
                 questions,
                 path,
                 answer_path,
-                len(parsed.rejected),
+                rejected_count,
                 official_key=spec.official_key,
             )
         )

@@ -75,6 +75,31 @@ def _clean_numbers(value: Any) -> list[float]:
     return numbers
 
 
+def _clean_inline_spans(text: str, value: Any) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    spans = []
+    for raw_span in value:
+        if not isinstance(raw_span, dict):
+            continue
+        try:
+            start = int(raw_span.get("start"))
+            end = int(raw_span.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= start < end <= len(text):
+            continue
+        span = {"start": start, "end": end}
+        if raw_span.get("underline"):
+            span["underline"] = True
+        latex = str(raw_span.get("latex") or "")
+        if latex and text[start:end] == latex:
+            span["latex"] = latex
+        if len(span) > 2:
+            spans.append(span)
+    return sorted(spans, key=lambda item: (item["start"], item["end"]))
+
+
 def _normalized_widths(value: Any, column_count: int) -> list[float]:
     numbers = _clean_numbers(value)
     if (
@@ -114,6 +139,7 @@ def normalize_table_spec(table: Any, index: int = 0) -> dict:
         cell["vertical_alignment"] = str(
             cell.get("vertical_alignment") or "center"
         )
+        cell["spans"] = _clean_inline_spans(cell["text"], cell.get("spans"))
         cells.append(cell)
     normalized["cells"] = cells
 
@@ -189,6 +215,27 @@ def parse_format_payload(value: Any) -> dict:
     if not isinstance(payload.get("spans"), list):
         payload.pop("spans", None)
     return payload
+
+
+def format_display_text(value: Any) -> str:
+    """Flatten user-visible table text from a formatting payload for search."""
+    payload = _as_dict(value)
+    fragments = []
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+
+        rows = table.get("rows") or []
+        for row in rows:
+            if not isinstance(row, (list, tuple)):
+                continue
+            fragments.extend(str(cell or "") for cell in row)
+
+        cells = table.get("cells") or []
+        for cell in cells:
+            if isinstance(cell, dict):
+                fragments.append(str(cell.get("text") or ""))
+    return "\n".join(fragment for fragment in fragments if fragment)
 
 
 def serialize_format_payload(payload: dict) -> Optional[str]:

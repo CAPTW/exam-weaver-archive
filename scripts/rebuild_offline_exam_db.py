@@ -62,7 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     receipt_path = Path(args.receipt) if args.receipt else report_dir / "replacement_receipt.json"
     validate_rebuild_paths(staging_db, mounted_db, backup_dir, receipt_path)
 
-    summary = build_staging_database(root, staging_db, report_dir)
+    summary = build_staging_database(
+        root,
+        staging_db,
+        report_dir,
+        validated_baseline_db=mounted_db if mounted_db.is_file() else None,
+    )
     validation = validate_staging_database(staging_db, summary.expected_sets)
     report_dir.mkdir(parents=True, exist_ok=True)
     validation_path = report_dir / "validation.json"

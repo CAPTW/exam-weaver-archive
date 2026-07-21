@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any, Mapping, Sequence
 
 from ..utils.tagger import build_tags
 from ..parser.question import ALL_CHOICES_CORRECT
+from ..parser.table_format import format_display_text
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,14 @@ class ExamRepository:
         self._initialized = False
 
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        connection = sqlite3.connect(self.db_path)
+        connection.create_function(
+            "FORMAT_DISPLAY_TEXT",
+            1,
+            format_display_text,
+            deterministic=True,
+        )
+        return connection
 
     def _ensure_initialized(self):
         if not self._initialized:
@@ -692,21 +700,29 @@ class ExamRepository:
         if search_text:
             tokens = [t.strip() for t in search_text.split() if t.strip()]
             for token in tokens:
-                like = f"%{token.lower()}%"
+                token = token.lower().strip()
+                if not token:
+                    continue
+                like = f"%{_escape_like(token)}%"
                 query += """
                     AND (
-                        LOWER(q.question_text) LIKE ?
-                        OR LOWER(COALESCE(q.model_answer, '')) LIKE ?
-                        OR LOWER(q.tags) LIKE ?
+                        LOWER(q.question_text) LIKE ? ESCAPE '\\'
+                        OR LOWER(COALESCE(q.model_answer, '')) LIKE ? ESCAPE '\\'
+                        OR LOWER(COALESCE(q.tags, '')) LIKE ? ESCAPE '\\'
+                        OR LOWER(FORMAT_DISPLAY_TEXT(q.question_format_json)) LIKE ? ESCAPE '\\'
+                        OR LOWER(COALESCE(qg.shared_text, '')) LIKE ? ESCAPE '\\'
                         OR EXISTS (
                             SELECT 1
                             FROM question_choices qc
                             WHERE qc.question_id = q.id
-                              AND LOWER(qc.choice_text) LIKE ?
+                              AND (
+                                  LOWER(COALESCE(qc.choice_text, '')) LIKE ? ESCAPE '\\'
+                                  OR LOWER(FORMAT_DISPLAY_TEXT(qc.choice_format_json)) LIKE ? ESCAPE '\\'
+                              )
                         )
                     )
                 """
-                params.extend([like, like, like, like])
+                params.extend([like] * 7)
 
         if question_numbers:
             qnums = sorted({int(n) for n in question_numbers})

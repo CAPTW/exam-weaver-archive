@@ -16,6 +16,7 @@ from typing import Mapping
 
 from .aligned_choice_table import build_aligned_choice_payloads
 from .offline_exam import ParsedOfflineQuestion
+from .formatting import merge_spans, normalize_latex_text
 
 
 RepairKey = tuple[str, int, int]
@@ -28,6 +29,22 @@ _CHOICE_DIAGNOSTICS = {
     "invalid_choice_count",
     "invalid_choice_sequence",
 }
+
+
+def _normalized_rich_text(value: str, format_json: str | None = None) -> tuple[str, str | None]:
+    formatted = normalize_latex_text(str(value or ""))
+    try:
+        payload = json.loads(format_json) if format_json else {}
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    spans = merge_spans(payload.get("spans") or [], formatted.spans)
+    if spans:
+        payload["spans"] = spans
+    else:
+        payload.pop("spans", None)
+    return formatted.text, json.dumps(payload, ensure_ascii=False) if payload else None
 
 
 @lru_cache(maxsize=1)
@@ -70,9 +87,47 @@ def apply_audited_source_repair(
 
     raw_stem = repair.get("repaired_stem")
     stem = str(raw_stem).strip() if raw_stem is not None else candidate.stem
+    stem, question_format_json = _normalized_rich_text(
+        stem,
+        candidate.question_format_json if raw_stem is None else None,
+    )
+    raw_question_spans = repair.get("repaired_question_spans")
+    if raw_question_spans is not None:
+        if not isinstance(raw_question_spans, list):
+            raise ValueError(f"invalid audited question spans for {key!r}")
+        try:
+            payload = json.loads(question_format_json) if question_format_json else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        verified_spans = []
+        for raw_span in raw_question_spans:
+            if not isinstance(raw_span, Mapping):
+                raise ValueError(f"invalid audited question span for {key!r}")
+            span = dict(raw_span)
+            start = int(span.get("start", -1))
+            end = int(span.get("end", -1))
+            if not 0 <= start < end <= len(stem):
+                raise ValueError(f"invalid audited question span range for {key!r}")
+            if not span.get("underline") and not span.get("latex"):
+                raise ValueError(f"unsupported audited question span for {key!r}")
+            span["start"] = start
+            span["end"] = end
+            verified_spans.append(span)
+        payload["spans"] = merge_spans(payload.get("spans") or [], verified_spans)
+        question_format_json = json.dumps(payload, ensure_ascii=False)
     raw_choices = repair.get("repaired_choices")
     raw_choice_overrides = repair.get("repaired_choice_overrides")
     raw_choice_fields = repair.get("repaired_choice_fields")
+    raw_question_image_path = repair.get("repaired_question_image_path")
+    image_path = (
+        str(raw_question_image_path).strip()
+        if raw_question_image_path is not None
+        else candidate.image_path
+    )
+    if raw_question_image_path is not None and not image_path:
+        raise ValueError(f"invalid audited question image path for {key!r}")
     if sum(
         value is not None
         for value in (raw_choices, raw_choice_overrides, raw_choice_fields)
@@ -91,8 +146,12 @@ def apply_audited_source_repair(
     elif raw_choices is not None:
         if not isinstance(raw_choices, list) or len(raw_choices) not in (4, 5):
             raise ValueError(f"invalid audited choices for {key!r}")
-        choices = [str(value).strip() for value in raw_choices]
-        choice_format_jsons = ()
+        normalized = [
+            _normalized_rich_text(str(value).strip())
+            for value in raw_choices
+        ]
+        choices = [value for value, _format in normalized]
+        choice_format_jsons = tuple(format_json for _value, format_json in normalized)
         if any(not value for value in choices):
             raise ValueError(f"empty audited choice for {key!r}")
         diagnostics = [
@@ -112,9 +171,28 @@ def apply_audited_source_repair(
         for raw_number, raw_value in raw_choice_overrides.items():
             number = int(raw_number)
             value = str(raw_value).strip()
-            if number < 1 or number > len(choices) or not value:
+            if number < 1 or not value:
                 raise ValueError(f"invalid audited choice override for {key!r}")
-            choices[number - 1] = value
+            if number > len(choices):
+                return replace(
+                    candidate,
+                    stem=stem,
+                    confidence=1.0 if raw_stem is not None else candidate.confidence,
+                    diagnostics=tuple(
+                        dict.fromkeys(
+                            (*candidate.diagnostics, "audited_choice_override_unapplied")
+                        )
+                    ),
+                    question_format_json=question_format_json,
+                    image_path=image_path,
+                )
+            normalized_value, normalized_format = _normalized_rich_text(value)
+            choices[number - 1] = normalized_value
+            formats = list(choice_format_jsons)
+            while len(formats) < len(choices):
+                formats.append(None)
+            formats[number - 1] = normalized_format
+            choice_format_jsons = tuple(formats)
         diagnostics = [
             value for value in diagnostics if value not in _CHOICE_DIAGNOSTICS
         ]
@@ -128,6 +206,9 @@ def apply_audited_source_repair(
         candidate,
         stem=stem,
         choices=list(choices),
+        confidence=1.0,
         diagnostics=tuple(dict.fromkeys(diagnostics)),
+        question_format_json=question_format_json,
         choice_format_jsons=tuple(choice_format_jsons),
+        image_path=image_path,
     )

@@ -719,6 +719,16 @@ class TableEditorDialog(QDialog):
                 column = int(cell["col"])
                 text = str(cell.get("text") or "")
                 item = QTableWidgetItem(text)
+                spans = list(cell.get("spans") or [])
+                if any(
+                    span.get("underline")
+                    and int(span.get("start", -1)) == 0
+                    and int(span.get("end", -1)) == len(text)
+                    for span in spans
+                ):
+                    font = item.font()
+                    font.setUnderline(True)
+                    item.setFont(font)
                 item.setTextAlignment(int(cell_qt_alignment(cell)))
                 item.setToolTip(text)
                 self.grid.setItem(row, column, item)

@@ -1006,6 +1006,124 @@ def test_search_questions_matches_question_and_choice_text(repo, sample_metadata
     assert [q['question_number'] for q in by_choice] == [1]
 
 
+def test_search_questions_treats_special_characters_as_literals(repo, sample_metadata):
+    special_question = Question(
+        number=1,
+        text='문항 내용에 "@ Beach (to):"와 치환_문자가 들어간 문제',
+        choices=[
+            Choice(number=1, symbol='㉮', text='가'),
+            Choice(number=2, symbol='㉯', text='나'),
+            Choice(number=3, symbol='㉪', text='다'),
+            Choice(number=4, symbol='㉵', text='아'),
+        ],
+        correct_answer=1,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    repo.save_questions([special_question], sample_metadata)
+
+    by_phrase = repo.search_questions(search_text='@ Beach (to):', limit=10)
+    by_underscore = repo.search_questions(search_text='치환_문자', limit=10)
+
+    assert [q['question_number'] for q in by_phrase] == [1]
+    assert [q['question_number'] for q in by_underscore] == [1]
+
+
+def test_search_questions_matches_question_format_display_text(repo, sample_metadata):
+    format_json = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "rows": [["@ Beach (to): To run a vessel up on a beach"]],
+            "cells": [{
+                "row": 0,
+                "col": 0,
+                "text": "@ Beach (to): To run a vessel up on a beach",
+            }],
+        }],
+    })
+    question = Question(
+        number=1,
+        text='표 안의 용어를 묻는 문제',
+        format_json=format_json,
+        choices=[
+            Choice(number=1, symbol='㉮', text='가'),
+            Choice(number=2, symbol='㉯', text='나'),
+            Choice(number=3, symbol='㉴', text='사'),
+            Choice(number=4, symbol='㉵', text='아'),
+        ],
+        correct_answer=1,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    repo.save_questions([question], sample_metadata)
+
+    found = repo.search_questions(search_text='@ Beach (to):', limit=10)
+
+    assert [q['question_number'] for q in found] == [1]
+
+
+def test_search_questions_matches_choice_format_display_text(repo, sample_metadata):
+    choice_format_json = json.dumps({
+        "schema_version": 2,
+        "tables": [{
+            "rows": [["선택지 JSON 표시 문구"]],
+            "cells": [{
+                "row": 0,
+                "col": 0,
+                "text": "선택지 JSON 표시 문구",
+            }],
+        }],
+    })
+    question = Question(
+        number=1,
+        text='선택지 표를 묻는 문제',
+        choices=[
+            Choice(number=1, symbol='㉮', text='표 선택지', format_json=choice_format_json),
+            Choice(number=2, symbol='㉯', text='나'),
+            Choice(number=3, symbol='㉴', text='사'),
+            Choice(number=4, symbol='㉵', text='아'),
+        ],
+        correct_answer=1,
+        subject_name='기관1',
+        year=2024,
+        session=1,
+        exam_type='3급기관사',
+    )
+    repo.save_questions([question], sample_metadata)
+
+    found = repo.search_questions(search_text='선택지 JSON 표시', limit=10)
+
+    assert [q['question_number'] for q in found] == [1]
+
+
+def test_search_questions_matches_shared_passage(repo, sample_metadata, sample_question):
+    repo.save_questions([sample_question], sample_metadata)
+    with sqlite3.connect(repo.db_path) as conn:
+        question_id, exam_subject_id = conn.execute(
+            "SELECT id, exam_subject_id FROM questions"
+        ).fetchone()
+        cursor = conn.execute(
+            """
+            INSERT INTO question_groups (
+                exam_subject_id, year, session, group_number, shared_text
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (exam_subject_id, 2024, 1, 1, '공유 지문 전용 검색 문구'),
+        )
+        conn.execute(
+            "UPDATE questions SET group_id = ? WHERE id = ?",
+            (cursor.lastrowid, question_id),
+        )
+
+    found = repo.search_questions(search_text='공유 지문 전용', limit=10)
+
+    assert [q['question_number'] for q in found] == [1]
+
+
 def test_search_questions_tag_query_matches_exact_hashtag_token(repo, sample_metadata):
     subject_tag_only = Question(
         number=1,

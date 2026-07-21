@@ -5,7 +5,7 @@ from docx import Document
 from docx.shared import Pt, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.text import WD_COLOR_INDEX
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_SECTION
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -35,7 +35,7 @@ from .table_layout import fallback_table_layout, resolve_table_layout
 logger = logging.getLogger(__name__)
 
 class DocxExporter:
-    FONT_NAME = '경기천년제목OTF Light'
+    FONT_NAME = 'Pretendard'
     BODY_LINE_TWIPS = '160'
     COLUMN_SPACE_TWIPS = '425'
 
@@ -635,7 +635,11 @@ class DocxExporter:
             and hasattr(doc, 'add_section')
         )
         if use_wide_section:
-            wide_section = doc.add_section(WD_SECTION.CONTINUOUS)
+            # Word can overlap a continuous one-column section with text that
+            # has already flowed into the second column.  Start true wide
+            # tables on a fresh page so the 180 mm table can never cross or
+            # cover an adjacent column.
+            wide_section = doc.add_section(WD_SECTION.NEW_PAGE)
             self._set_columns(wide_section, 1)
         try:
             return self._render_one_format_table(doc, table_spec, layout)
@@ -776,6 +780,13 @@ class DocxExporter:
     def _set_fixed_table_widths(cls, table, widths_mm):
         table.autofit = False
         table_pr = table._tbl.tblPr
+        total_width_twips = cls._width_twips(sum(widths_mm))
+        table_width = table_pr.find(qn('w:tblW'))
+        if table_width is None:
+            table_width = OxmlElement('w:tblW')
+            table_pr.insert(0, table_width)
+        table_width.set(qn('w:type'), 'dxa')
+        table_width.set(qn('w:w'), str(total_width_twips))
         table_layout = table_pr.find(qn('w:tblLayout'))
         if table_layout is None:
             table_layout = OxmlElement('w:tblLayout')
@@ -811,6 +822,10 @@ class DocxExporter:
             return False
 
         table = doc.add_table(rows=len(rows), cols=column_count)
+        # Center a fixed-width table inside its current Word column.  A
+        # left-aligned 82 mm table can visually touch the separator of a
+        # two-column section even though its declared width is valid.
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
         try:
             table.style = 'Table Grid'
         except Exception:
@@ -865,8 +880,12 @@ class DocxExporter:
                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
                 else:
                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                run = paragraph.add_run(str(text or ''))
-                self._format_run(run, size_pt=9)
+                self._add_formatted_text(
+                    paragraph,
+                    str(text or ''),
+                    {"spans": list(spec.get("spans") or [])},
+                    size_pt=9,
+                )
         return True
 
     def _add_table_image(self, doc, table_spec, layout=None):

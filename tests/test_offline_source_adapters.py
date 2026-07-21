@@ -60,6 +60,42 @@ def _page_with_question(choice_count: int = 4) -> StructuredPage:
     return StructuredPage(1, 1, 1, "scanned", tuple(lines), ())
 
 
+def test_grouping_keeps_late_header_metadata_inside_a_continuing_exam():
+    from scripts.analyze_maritime_english_pdfs import build_groups
+
+    filename = "[기출문제]해사영어(24년-13년).pdf"
+    records = [
+        {
+            "filename": filename,
+            "pdf_id": "english-archive",
+            "page": 1,
+            "text": (
+                "2018년 해사영어\n"
+                "1. 다음 중 옳은 것을 고르시오. 충분한 문제 본문입니다.\n"
+                "7. 다음 중 옳은 것을 고르시오. 충분한 문제 본문입니다.\n"
+                "13. 다음 중 옳은 것을 고르시오. 충분한 문제 본문입니다."
+            ),
+            "source_path": filename,
+        },
+        {
+            "filename": filename,
+            "pdf_id": "english-archive",
+            "page": 2,
+            "text": (
+                "2018년 제3차 해사영어\n"
+                "14. 다음 중 옳은 것을 고르시오. 충분한 문제 본문입니다.\n"
+                "20. 다음 중 옳은 것을 고르시오. 충분한 문제 본문입니다."
+            ),
+            "source_path": filename,
+        },
+    ]
+
+    groups = build_groups(records)
+
+    assert len(groups) == 1
+    assert [page["page"] for page in groups[0]["pages"]] == [1, 2]
+
+
 def test_engineering_registered_source_repairs_are_explicit_and_importable():
     from scripts.import_police_engineering_pdf import repair_registered_source_candidate
     from src.parser.offline_exam import ParsedOfflineQuestion
@@ -223,6 +259,149 @@ def test_bundled_audit_repairs_reported_echo_sounder_stem_and_choices():
     ]
 
 
+def test_bundled_audit_repairs_law_question_with_merged_leading_choices():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_quality import validate_offline_question
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        5,
+        "다음 중 수상레저 운항규칙은? ① OCR 잡음",
+        ["합쳐진 선지 3", "합쳐진 선지 4"],
+        2,
+        0.91,
+        ("invalid_choice_sequence", "invalid_choice_count"),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]해사법규(21년 경사-13년).pdf"),
+    )
+
+    assert repaired.stem.endswith("가장 옳지 않은 것은?")
+    assert len(repaired.choices) == 4
+    assert repaired.choices[0].startswith("다이빙대·계류장")
+    assert repaired.choices[3].endswith("진로를 피하여야 한다.")
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_exact_source_repair_marks_confidence_as_source_verified():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+    from src.parser.offline_quality import validate_offline_question
+
+    candidate = ParsedOfflineQuestion(
+        19,
+        "깨진 발문",
+        ["가", "나", "다", "라"],
+        5,
+        0.4,
+        (),
+    )
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("english.pdf"),
+        repairs={
+            ("english.pdf", 5, 19): {
+                "confidence": "exact_source",
+                "repaired_stem": "원문에서 확인한 정상 발문은?",
+                "repaired_choices": ["하나", "둘", "셋", "넷"],
+            }
+        },
+    )
+
+    assert repaired.confidence == 1.0
+    assert validate_offline_question(repaired).importable is True
+
+
+def test_unapplicable_exact_choice_override_stays_rejectable_for_baseline_recovery():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    candidate = ParsedOfflineQuestion(
+        17,
+        "발문",
+        ["한 선지만 인식됨"],
+        67,
+        0.8,
+        ("invalid_choice_count",),
+    )
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("english.pdf"),
+        repairs={
+            ("english.pdf", 67, 17): {
+                "confidence": "exact_source",
+                "repaired_choice_overrides": {"2": "원문 둘째 선지"},
+            }
+        },
+    )
+
+    assert "audited_choice_override_unapplied" in repaired.diagnostics
+
+
+def test_exact_source_repair_carries_verified_question_image_path():
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    candidate = ParsedOfflineQuestion(
+        3,
+        "그림을 보고 답하시오.",
+        ["가", "나", "다", "라"],
+        1,
+        0.9,
+        (),
+    )
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("physics.pdf"),
+        repairs={
+            ("physics.pdf", 1, 3): {
+                "confidence": "exact_source",
+                "repaired_question_image_path": "data/question_images/physics_q3.png",
+            }
+        },
+    )
+
+    assert repaired.image_path == "data/question_images/physics_q3.png"
+    assert repaired.confidence == 1.0
+
+
+def test_exact_source_repair_carries_verified_question_spans():
+    import json
+
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    candidate = ParsedOfflineQuestion(
+        18,
+        "깨진 본문",
+        ["가", "나", "다", "라"],
+        20,
+        0.4,
+        (),
+    )
+    repaired = apply_audited_source_repair(
+        candidate,
+        Path("english.pdf"),
+        repairs={
+            ("english.pdf", 20, 18): {
+                "confidence": "exact_source",
+                "repaired_stem": "This and This",
+                "repaired_question_spans": [
+                    {"start": 0, "end": 4, "underline": True},
+                    {"start": 9, "end": 13, "underline": True},
+                ],
+            }
+        },
+    )
+
+    assert json.loads(repaired.question_format_json)["spans"] == [
+        {"start": 0, "end": 4, "underline": True},
+        {"start": 9, "end": 13, "underline": True},
+    ]
+
+
 def test_bundled_audit_repairs_residual_ohm_unit_corruption():
     from src.parser.offline_exam import ParsedOfflineQuestion
     from src.parser.offline_repairs import apply_audited_source_repair
@@ -270,6 +449,35 @@ def test_bundled_audit_repairs_structurally_broken_english_table_choices():
     assert len(repaired.choices) == 4
     assert repaired.choices[0].startswith("㉠ Windward ㉡ Veering")
     assert validate_offline_question(repaired).importable is True
+
+
+def test_bundled_logic_choice_repair_preserves_source_overline_as_latex():
+    import json
+
+    from src.parser.offline_exam import ParsedOfflineQuestion
+    from src.parser.offline_repairs import apply_audited_source_repair
+
+    damaged = ParsedOfflineQuestion(
+        10,
+        "다음의 진리표와 같이 출력하는 논리 함수는?",
+        ["X=A·B", "X=A+B", "X=¬(A·B)", "X=A⊕B"],
+        42,
+        0.91,
+        (),
+    )
+
+    repaired = apply_audited_source_repair(
+        damaged,
+        Path("[기출문제]경찰직 기관술(학)(24-13년).pdf"),
+    )
+
+    assert repaired.choices[2] == r"X=\overline{A \cdot B}"
+    payload = json.loads(repaired.choice_format_jsons[2])
+    assert payload["spans"] == [{
+        "start": 2,
+        "end": len(repaired.choices[2]),
+        "latex": r"\overline{A \cdot B}",
+    }]
 
 
 def test_audited_source_repair_can_replace_only_confirmed_choices():
@@ -415,6 +623,48 @@ def test_registered_group_applies_audited_repair_before_quality_gate(monkeypatch
     )
 
     assert selected[1].choices == ["선지 1", "선지 2", "선지 3", "선지 4"]
+    assert rejected_count == 0
+
+
+def test_registered_group_ignores_out_of_range_footer_candidate(monkeypatch):
+    from src.parser import offline_sources as sources
+    from src.parser.offline_exam import ParsedOfflineQuestion
+
+    valid = ParsedOfflineQuestion(
+        1, "정상 문제는?", ["가", "나", "다", "라"], 1, 0.99, ()
+    )
+    footer = ParsedOfflineQuestion(
+        21,
+        "하단 광고를 잘못 읽은 내용",
+        [],
+        1,
+        0.0,
+        ("invalid_choice_count", "ambiguous_bottom_margin"),
+    )
+
+    class FakeParser:
+        def parse_pages(self, pages):
+            return [valid, footer]
+
+    monkeypatch.setattr(sources, "OfflineExamParser", FakeParser)
+    parsed = sources.OfflineParseResult(
+        Path("questions.pdf"),
+        sources.DocumentRole.QUESTION,
+        {},
+        (),
+        (),
+        (StructuredPage(1, 1, 1, "scanned", (), ()),),
+    )
+    group = {
+        "question_count": 20,
+        "pages": [{"page": 1, "source_path": "questions.pdf"}],
+    }
+
+    selected, rejected_count = sources.select_group_questions(
+        group, lambda path, metadata: parsed, {}
+    )
+
+    assert selected == {1: valid}
     assert rejected_count == 0
 
 
@@ -746,8 +996,10 @@ def test_maritime_english_builder_preserves_official_unavailable_answer(
 )
 def test_every_subject_builder_applies_complete_set_gate(module_name):
     module = importlib.import_module(module_name)
+    source = inspect.getsource(module.build_questions)
 
-    assert "require_complete_offline_set" in inspect.getsource(module.build_questions)
+    assert "require_complete_offline_set" in source
+    assert source.count("format_json=") >= 2
     assert "require_persistable_offline_questions" in inspect.getsource(module.import_into_db)
 
 
@@ -1212,6 +1464,15 @@ def test_shared_text_quality_flags_english_zero_one_ocr_confusables():
     )
     assert text_quality_issue_codes(
         "International Regulations for Preventing Collisions at Sea"
+    ) == ()
+    assert "ocr_noise" in text_quality_issue_codes(
+        "CIearance가 작고 CoIIisions가 발생한다."
+    )
+    assert "ocr_noise" in text_quality_issue_codes(
+        "발호PI간이 짧고 일어L는 현상이다."
+    )
+    assert text_quality_issue_codes(
+        "A1해역, 제1조, 10cm, NaOH, 지진파의 S파"
     ) == ()
 
 

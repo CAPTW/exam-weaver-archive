@@ -2,7 +2,9 @@ from src.parser.formatting import (
     has_suspicious_text_artifact,
     normalize_latex_text,
     repair_extracted_text_artifacts,
+    repair_ocr_confusable_artifacts,
 )
+from src.parser.text_quality import text_quality_issue_codes
 
 
 def test_repair_extracted_text_artifacts_normalizes_private_math_glyphs_and_linewraps():
@@ -67,6 +69,39 @@ def test_repair_extracted_text_artifacts_fixes_high_confidence_english_ocr_token
     ) == (
         "This Convention is important to persons who are also comprising a watch."
     )
+
+
+def test_repair_ocr_confusables_repairs_i_l_zero_and_korean_intrusions_only():
+    assert repair_ocr_confusable_artifacts(
+        "홉 • 배기 밸브의 CIearance)7b 규정과 CoIIisions, lnformation"
+    ) == "흡·배기 밸브의 Clearance)가 규정과 Collisions, Information"
+    assert repair_ocr_confusable_artifacts(
+        "A1해역, 제1조, 10cm, NaOH, H20, C02, c0S30"
+    ) == "A1해역, 제1조, 10cm, NaOH, H2O, CO2, cos30"
+    assert repair_ocr_confusable_artifacts(
+        "This f0110Ⅷng message uses moblle eqtllpment intO the area."
+    ) == "This following message uses mobile equipment into the area."
+    assert repair_ocr_confusable_artifacts(
+        "수상리1저활동 중 사망씰종 사고는 해양경살관서에 신고하여아 한다."
+    ) == "수상레저활동 중 사망·실종 사고는 해양경찰관서에 신고하여야 한다."
+
+
+def test_repair_ocr_confusables_repairs_source_pdf_roman_glyph_intrusions():
+    assert repair_ocr_confusable_artifacts(
+        "effective *ⅵ1에1 known, normally used yⅵ1리1 an aircraft"
+    ) == "effective when known, normally used when an aircraft"
+    assert repair_ocr_confusable_artifacts(
+        "Most effective \\ⅵ1에1 the position is Ⅲ1k11()vⅤ1 within close limits."
+    ) == "Most effective when the position is known within close limits."
+    assert repair_ocr_confusable_artifacts(
+        "행정이 0.81뿌, 엔진회전수가 1,80011)1뿌, 지시마력(Ⅱ-IP)"
+    ) == "행정이 0.8m, 엔진회전수가 1,800rpm, 지시마력(IHP)"
+    assert repair_ocr_confusable_artifacts(
+        "행정이 0.81끠, 엔진회전수가 1,80011)1끠, 지시마력(Ⅱ-IP)"
+    ) == "행정이 0.8m, 엔진회전수가 1,800rpm, 지시마력(IHP)"
+    assert repair_ocr_confusable_artifacts(
+        "\\Ⅵ1011 ship A is commg up and the vessel is on her osⅥ1 side."
+    ) == "When ship A is coming up and the vessel is on her own side."
 
 
 def test_repair_extracted_text_artifacts_fixes_high_confidence_korean_ocr_tokens():
@@ -212,6 +247,44 @@ def test_repair_extracted_text_artifacts_restores_displaced_sequence_arrows():
         "정적압축 정적팽창 단열팽창 단열압축→ → →"
     ) == "정적압축→정적팽창→단열팽창→단열압축"
     assert repair_extracted_text_artifacts("1 2 3 4→ → →") == "1→2→3→4"
+
+
+def test_repair_extracted_text_artifacts_repairs_source_confirmed_uncclos_english_ocr():
+    text = (
+        "ArticIe 33. Contiguous zone 1. ln a zone contiguous to its (㉠), "
+        "the coastal State may exerclse control over lmn긔gration laws. "
+        "The breadth of the terrltorlal sea IS measured."
+    )
+
+    assert repair_extracted_text_artifacts(text) == (
+        "Article 33. Contiguous zone\n1. In a zone contiguous to its (㉠), "
+        "the coastal State may exercise control over immigration laws. "
+        "The breadth of the territorial sea is measured."
+    )
+
+
+def test_repair_extracted_text_artifacts_repairs_source_confirmed_uncclos_choices():
+    assert repair_extracted_text_artifacts(
+        "ntigUOUS /01다e beyond 24 nautical miles"
+    ) == "contiguous zone beyond 24 nautical miles"
+
+
+def test_repair_extracted_text_artifacts_repairs_profiled_english_ocr_words():
+    assert repair_extracted_text_artifacts(
+        "The clrcumstances require a VesseI to use satellte communicatlons."
+    ) == "The circumstances require a Vessel to use satellite communications."
+
+
+def test_repair_extracted_text_artifacts_repairs_second_pass_spelling_profile():
+    assert repair_extracted_text_artifacts(
+        "The manne envil℃nment requires usmg satellite Cornmunication."
+    ) == "The marine environment requires using satellite Communication."
+
+
+def test_repair_extracted_text_artifacts_repairs_split_english_ocr_tokens():
+    assert repair_extracted_text_artifacts(
+        "an incident of navlgatl()ll, or ()ther occurrence"
+    ) == "an incident of navigation, or other occurrence"
 
 
 def test_repair_extracted_text_artifacts_does_not_guess_ambiguous_tail_arrows():
@@ -905,6 +978,50 @@ def test_repair_extracted_text_artifacts_fixes_db_audit_formula_findings():
     ) == "개루프 전달함수가 G(s)=10/((s+1)(s+2))이고 단위피드백 시스템일 때 단위계단 입력에 대한 정상편차는?"
 
 
+def test_repair_extracted_text_artifacts_fixes_source_verified_residual_ocr():
+    assert repair_extracted_text_artifacts(
+        "다음° 「UNCLOS(United Nations Convention on the Law 하 the Sea)」"
+    ) == "다음은 「UNCLOS(United Nations Convention on the Law of the Sea)」"
+    assert repair_extracted_text_artifacts("가장 오은 거 은?") == "가장 옳은 것은?"
+    assert repair_extracted_text_artifacts(
+        "Territorial Sea and Configuous Zone Act"
+    ) == "Territorial Sea and Contiguous Zone Act"
+    assert repair_extracted_text_artifacts(
+        "Navigation is only possible with ice¯breaker assistance."
+    ) == "Navigation is only possible with ice-breaker assistance."
+    assert repair_extracted_text_artifacts(
+        "극수가 6극인 동기 발전기가 1 200 [rpm]으로 회전했다."
+    ) == "극수가 6극인 동기 발전기가 1,200 [rpm]으로 회전했다."
+
+
+def test_repair_extracted_text_artifacts_fixes_source_verified_english_choices():
+    assert repair_extracted_text_artifacts(
+        "any exercise or practice with weapons of any kind:"
+    ) == "any exercise or practice with weapons of any kind"
+    assert repair_extracted_text_artifacts(
+        "any pollution by 40766 majeure"
+    ) == "any pollution by force majeure"
+    assert repair_extracted_text_artifacts(
+        "\u00ae Automatic ; Identification oo System (AIS)"
+    ) == "Automatic Identification System (AIS)"
+    assert repair_extracted_text_artifacts(
+        "\ud45c is necessary that the officer keeps watch."
+    ) == "It is necessary that the officer keeps watch."
+    assert repair_extracted_text_artifacts(
+        "\u00ae \u00ae sinking MMSI \u00a9 approaching \u00a9 port of destination"
+    ) == "sinking MMSI \u00a9 approaching \u00a9 port of destination"
+
+
+def test_quality_gate_flags_new_residual_ocr_patterns_before_repair():
+    for text in (
+        "다음° 보기",
+        "가장 오은 거 은?",
+        "ice¯breaker assistance",
+        "해°°뻬 배출되는 폐기물",
+    ):
+        assert "ocr_noise" in text_quality_issue_codes(text)
+
+
 def test_normalize_latex_text_uses_repaired_private_math_glyphs():
     formatted = normalize_latex_text("P = \ue05c\ue06d\ue036 × \ue004 × \ue008 × cos\ue0a4")
 
@@ -942,4 +1059,18 @@ def test_normalize_latex_text_limits_sqrt_digit_before_adjacent_numbers():
             "end": len(r"e=\sqrt{2}200sin314t"),
             "latex": r"e=\sqrt{2}200sin314t",
         }
+    ]
+
+
+def test_normalize_latex_text_repairs_split_radical_bar_and_combining_overline():
+    radical = normalize_latex_text("속도는 √¯ 20 m/s")
+    overline = normalize_latex_text("A\u0305B")
+
+    assert radical.text == r"속도는 \sqrt{20} m/s"
+    assert radical.spans == [
+        {"start": 4, "end": 13, "latex": r"\sqrt{20}"}
+    ]
+    assert overline.text == r"\overline{A}B"
+    assert overline.spans == [
+        {"start": 0, "end": 12, "latex": r"\overline{A}"}
     ]

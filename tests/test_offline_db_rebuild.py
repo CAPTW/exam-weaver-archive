@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
@@ -20,7 +21,19 @@ from src.database.staging import (
     replace_mounted_database,
     validate_staging_database,
     registered_provider_preflight,
+    _read_structured_page_cache,
+    _cached_page_ocr_damage_score,
+    _refresh_suspicious_cached_pages,
+    _recover_from_validated_baseline,
+    _recover_missing_from_validated_baseline,
+    _hydrate_registered_group_years,
+    _select_native_candidates_with_recovery,
+    _normalize_stored_rich_text,
+    _normalize_question_for_staging,
+    _validated_baseline_repair_map,
+    _write_structured_page_cache,
 )
+from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, TextDecoration
 from src.parser.offline_exam import ParsedOfflineQuestion
 from src.parser.offline_sources import (
     DocumentRole,
@@ -28,6 +41,401 @@ from src.parser.offline_sources import (
     RejectedOfflineQuestion,
 )
 from src.parser.question import Choice, Question
+
+
+def test_structured_page_retry_cache_round_trips_decorations(tmp_path):
+    word = LayoutWord("A", (0.1, 0.2, 0.2, 0.3), 0.98, 1, True, False)
+    decoration = TextDecoration(
+        "overline", "A", "A", 0, 1, (0.1, 0.19, 0.2, 0.19), 0.97, "raster"
+    )
+    page = StructuredPage(
+        1,
+        100.0,
+        200.0,
+        "scanned",
+        (LayoutLine((word,), (0.1, 0.2, 0.2, 0.3), 1, 1, (decoration,)),),
+        ((0.3, 0.4, 0.5, 0.6),),
+    )
+    cache_path = tmp_path / "pages.json.gz"
+
+    _write_structured_page_cache(cache_path, (page,))
+    restored = _read_structured_page_cache(cache_path)
+
+    assert restored == (page,)
+
+
+def test_structured_page_retry_cache_treats_corruption_as_miss(tmp_path):
+    cache_path = tmp_path / "pages.json.gz"
+    cache_path.write_bytes(b"not gzip")
+
+    assert _read_structured_page_cache(cache_path) is None
+
+
+def test_cached_ocr_damage_score_detects_retry_worthy_page_only():
+    damaged = _structured_page_with_text(1, "14. S iS an 0 ration, norm ally")
+    clean = _structured_page_with_text(1, "14. 'Rescue' is an operation, normally")
+    ordinary_quality_warning = _structured_page_with_text(1, "\ub2e4\uc74c\u00b0 \ubcf4\uae30")
+
+    assert _cached_page_ocr_damage_score(damaged) > 0
+    assert _cached_page_ocr_damage_score(clean) == 0
+    assert _cached_page_ocr_damage_score(ordinary_quality_warning) == 0
+
+
+def test_suspicious_cached_page_is_replaced_only_by_verified_improvement(
+    tmp_path, monkeypatch
+):
+    import fitz
+    from src.parser.extractor import PDFExtractor
+
+    source_path = tmp_path / "source.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(source_path)
+    document.close()
+    baseline = _structured_page_with_text(1, "14. S iS an 0 ration, norm ally")
+    candidate = _structured_page_with_text(1, "14. 'Rescue' is an operation, normally")
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_extract_ocr_structured_page",
+        lambda self, page, page_number: candidate,
+    )
+    monkeypatch.setattr(
+        PDFExtractor,
+        "_preserves_question_number_coverage",
+        lambda self, previous, current: True,
+    )
+
+    pages, changed = _refresh_suspicious_cached_pages(source_path, (baseline,))
+
+    assert changed is True
+    assert pages == (candidate,)
+
+
+def _structured_page_with_text(number: int, text: str) -> StructuredPage:
+    word = LayoutWord(text, (0.1, 0.1, 0.9, 0.2), 0.9, 1)
+    line = LayoutLine((word,), word.bbox, number, 1)
+    return StructuredPage(number, 100.0, 200.0, "scanned", (line,), ())
+
+
+def test_validated_baseline_recovers_only_rejected_matching_source_candidate(tmp_path):
+    baseline_path = tmp_path / "baseline.db"
+    _database(baseline_path, [_question(3)])
+    with sqlite3.connect(baseline_path) as connection:
+        source_id = connection.execute(
+            """
+            INSERT INTO question_sources(
+                provider, source_url, content_hash, attachment_filename
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                "offline_pdf",
+                "file:///E:/archive/source-law.pdf",
+                "a" * 64,
+                "answers.pdf",
+            ),
+        ).lastrowid
+        question_id = connection.execute(
+            "SELECT id FROM questions WHERE question_number = 3"
+        ).fetchone()[0]
+        connection.execute(
+            """
+            UPDATE questions
+            SET source_id = ?, source_page = 2,
+                question_text = '다음 중 올바른 것은?'
+            WHERE id = ?
+            """,
+            (source_id, question_id),
+        )
+        connection.executemany(
+            "UPDATE question_choices SET choice_text = ? "
+            "WHERE question_id = ? AND choice_number = ?",
+            [(f"정상 선지 {number}", question_id, number) for number in range(1, 5)],
+        )
+
+    repairs = _validated_baseline_repair_map(baseline_path)
+    rejected = ParsedOfflineQuestion(
+        number=3,
+        stem="깨진 문제",
+        choices=["선지 하나"],
+        source_page=2,
+        confidence=0.4,
+        diagnostics=("invalid_choice_count",),
+    )
+    recovered = _recover_from_validated_baseline(
+        rejected, Path("source-law.pdf"), repairs
+    )
+
+    assert recovered.stem == "다음 중 올바른 것은?"
+    assert recovered.choices == [f"정상 선지 {number}" for number in range(1, 5)]
+    assert recovered.diagnostics == ("validated_baseline_recovery",)
+    assert recovered.confidence == 1.0
+
+
+def test_validated_baseline_never_overwrites_a_healthy_new_parse(tmp_path):
+    healthy = ParsedOfflineQuestion(
+        number=1,
+        stem="새 OCR의 정상 문제는?",
+        choices=["하나", "둘", "셋", "넷"],
+        source_page=1,
+        confidence=0.95,
+        diagnostics=(),
+    )
+    older = ParsedOfflineQuestion(
+        number=1,
+        stem="기존 교정본",
+        choices=["가", "나", "다", "라"],
+        source_page=1,
+        confidence=1.0,
+        diagnostics=("validated_baseline_recovery",),
+    )
+
+    recovered = _recover_from_validated_baseline(
+        healthy,
+        Path("source.pdf"),
+        {("source.pdf", 1, 1): older},
+    )
+
+    assert recovered is healthy
+
+
+def test_validated_baseline_restores_only_richer_spans_for_identical_text():
+    healthy = ParsedOfflineQuestion(
+        number=18,
+        stem="This is used for communication.",
+        choices=["A", "B", "C", "D"],
+        source_page=33,
+        confidence=0.99,
+        diagnostics=(),
+    )
+    baseline = replace(
+        healthy,
+        question_format_json=json.dumps(
+            {
+                "schema_version": 2,
+                "spans": [
+                    {"start": 0, "end": 4, "underline": True},
+                ],
+            }
+        ),
+    )
+
+    recovered = _recover_from_validated_baseline(
+        healthy,
+        Path("source.pdf"),
+        {("source.pdf", 33, 18): baseline},
+    )
+
+    assert recovered.stem == healthy.stem
+    assert recovered.choices == healthy.choices
+    assert json.loads(recovered.question_format_json)["spans"] == [
+        {"start": 0, "end": 4, "underline": True}
+    ]
+    assert "validated_baseline_format_recovery" in recovered.diagnostics
+
+
+def test_validated_baseline_fills_only_missing_questions_inside_group_pages():
+    baseline = ParsedOfflineQuestion(
+        number=6,
+        stem="검증된 기존 문항",
+        choices=["가", "나", "다", "라"],
+        source_page=2,
+        confidence=1.0,
+        diagnostics=("validated_baseline_recovery",),
+    )
+    outside = replace(baseline, number=7, source_page=9)
+
+    recovered = _recover_missing_from_validated_baseline(
+        {},
+        {
+            "pages": [
+                {"source_path": "source.pdf", "page": 1},
+                {"source_path": "source.pdf", "page": 2},
+            ]
+        },
+        {
+            ("source.pdf", 2, 6): baseline,
+            ("source.pdf", 9, 7): outside,
+        },
+    )
+
+    assert recovered == {6: baseline}
+
+
+def test_registered_group_year_uses_only_unanimous_source_page_baseline():
+    groups = [
+        {
+            "year": None,
+            "pages": [
+                {"source_path": "archive.pdf", "page": 10},
+                {"source_path": "archive.pdf", "page": 11},
+            ],
+        },
+        {
+            "year": 2099,
+            "pages": [
+                {"source_path": "archive.pdf", "page": 20},
+                {"source_path": "archive.pdf", "page": 21},
+            ],
+        },
+    ]
+
+    hydrated = _hydrate_registered_group_years(
+        groups,
+        {
+            ("archive.pdf", 10): 2022,
+            ("archive.pdf", 11): 2022,
+            ("archive.pdf", 20): 2021,
+            ("archive.pdf", 21): 2020,
+        },
+    )
+
+    assert hydrated[0]["year"] == 2022
+    assert hydrated[1]["year"] == 2099
+
+
+def test_native_candidate_recovery_rechecks_rejected_and_fills_parser_omissions():
+    rejected_candidate = ParsedOfflineQuestion(
+        number=1,
+        stem="깨진 문항",
+        choices=["한 선지"],
+        source_page=1,
+        confidence=0.3,
+        diagnostics=("invalid_choice_count",),
+    )
+    recovered_one = replace(
+        rejected_candidate,
+        stem="검증된 1번",
+        choices=["가", "나", "다", "라"],
+        confidence=1.0,
+        diagnostics=("validated_baseline_recovery",),
+    )
+    recovered_two = replace(
+        recovered_one,
+        number=2,
+        stem="검증된 2번",
+    )
+    parsed = OfflineParseResult(
+        path=Path("native.pdf"),
+        role=DocumentRole.QUESTION,
+        metadata={},
+        questions=(),
+        rejected=(RejectedOfflineQuestion(rejected_candidate, ("invalid_choice_count",)),),
+        structured_pages=(StructuredPage(1, 1, 1, "native", (), ()),),
+    )
+
+    selected, rejected_count = _select_native_candidates_with_recovery(
+        parsed,
+        Path("native.pdf"),
+        (1, 2),
+        {
+            ("native.pdf", 1, 1): recovered_one,
+            ("native.pdf", 1, 2): recovered_two,
+        },
+    )
+
+    assert selected == {1: recovered_one, 2: recovered_two}
+    assert rejected_count == 0
+
+
+def test_legacy_baseline_math_is_normalized_with_latex_span():
+    text, format_json = _normalize_stored_rich_text("√¯ 20 m/s", None)
+
+    assert text == r"\sqrt{20} m/s"
+    assert json.loads(format_json)["spans"] == [
+        {"start": 0, "end": 9, "latex": r"\sqrt{20}"}
+    ]
+
+
+def test_legacy_baseline_ocr_is_repaired_and_existing_spans_are_remapped():
+    raw = "Law 하 the 뒤"
+    format_json = json.dumps(
+        {"spans": [{"start": raw.index("뒤"), "end": raw.index("뒤") + 1, "underline": True}]},
+        ensure_ascii=False,
+    )
+
+    text, repaired_format = _normalize_stored_rich_text(raw, format_json)
+
+    assert text == "Law of the 뒤"
+    assert json.loads(repaired_format)["spans"] == [
+        {"start": text.index("뒤"), "end": text.index("뒤") + 1, "underline": True}
+    ]
+
+
+def test_legacy_table_cells_receive_the_same_ocr_and_math_normalization():
+    payload = {
+        "tables": [
+            {
+                "rows": [["Navigation with ice¯breaker at √¯ 20 m/s"]],
+                "cells": [
+                    {
+                        "row": 0,
+                        "col": 0,
+                        "text": "Navigation with ice¯breaker at √¯ 20 m/s",
+                        "spans": [],
+                    }
+                ],
+            }
+        ]
+    }
+
+    _text, repaired_format = _normalize_stored_rich_text(
+        "질문",
+        json.dumps(payload, ensure_ascii=False),
+    )
+
+    table = json.loads(repaired_format)["tables"][0]
+    assert table["rows"] == [[r"Navigation with ice-breaker at \sqrt{20} m/s"]]
+    assert table["cells"][0]["text"] == r"Navigation with ice-breaker at \sqrt{20} m/s"
+    assert table["cells"][0]["spans"] == [
+        {"start": 31, "end": 40, "latex": r"\sqrt{20}"}
+    ]
+
+
+def test_legacy_table_cell_repairs_preserve_source_line_breaks():
+    payload = {
+        "tables": [
+            {
+                "rows": [["<보기>\nNavigation with ice¯breaker assistance."]],
+                "cells": [
+                    {
+                        "row": 0,
+                        "col": 0,
+                        "text": "<보기>\nNavigation with ice¯breaker assistance.",
+                        "spans": [],
+                    }
+                ],
+            }
+        ]
+    }
+
+    _text, repaired_format = _normalize_stored_rich_text(
+        "질문", json.dumps(payload, ensure_ascii=False)
+    )
+
+    table = json.loads(repaired_format)["tables"][0]
+    assert table["rows"] == [["<보기>\nNavigation with ice-breaker assistance."]]
+    assert table["cells"][0]["text"] == (
+        "<보기>\nNavigation with ice-breaker assistance."
+    )
+
+
+def test_every_provider_question_uses_the_same_staging_normalization_path():
+    question = Question(
+        number=1,
+        text="다음° <보기> Navigation with ice¯breaker assistance.",
+        choices=[Choice(1, "㉮", "√¯ 20 m/s")],
+    )
+
+    normalized = _normalize_question_for_staging(question)
+
+    assert normalized.text == "다음은"
+    assert json.loads(normalized.format_json)["tables"][0]["cells"][0]["text"] == (
+        "<보기>\nNavigation with ice-breaker assistance."
+    )
+    assert normalized.choices[0].text == r"\sqrt{20} m/s"
+    assert json.loads(normalized.choices[0].format_json)["spans"] == [
+        {"start": 0, "end": 9, "latex": r"\sqrt{20}"}
+    ]
 
 
 def _question(number: int, *, answer: int = 1, placeholder: bool = False) -> Question:
@@ -272,6 +680,32 @@ def test_offline_candidate_ingestion_preserves_view_and_choice_tables():
     assert question.text == "질문은?"
     assert json.loads(question.format_json)["tables"][0]["source"]["kind"] == "view_block_text"
     assert question.choices[0].format_json == formats[0]
+
+
+def test_offline_candidate_ingestion_preserves_heuristic_figure_crop(tmp_path):
+    from src.database.staging import _question_from_offline_candidate
+
+    image_path = tmp_path / "figure.png"
+    image_path.write_bytes(b"figure")
+    candidate = ParsedOfflineQuestion(
+        number=1,
+        stem="다음 그림을 보고 답하시오.",
+        choices=["가", "나", "다", "라"],
+        source_page=1,
+        confidence=1.0,
+        diagnostics=("figure_crop_heuristic",),
+        image_path=str(image_path),
+        image_bbox=(0.1, 0.2, 0.4, 0.5),
+    )
+
+    question = _question_from_offline_candidate(
+        candidate,
+        {"subject_name": "기관학", "exam_type": "해양경찰", "year": 2014, "session": 1},
+        1,
+    )
+
+    assert question.has_image is True
+    assert question.image_path == str(image_path)
 
 
 def test_applies_id_based_repair_only_when_source_document_matches(tmp_path):
@@ -1469,7 +1903,11 @@ def test_cli_is_dry_run_by_default_and_requires_explicit_replace(tmp_path, monke
     summary = SimpleNamespace(expected_sets=(), to_dict=lambda: {})
     validation = SimpleNamespace(valid=True, to_dict=lambda: {"valid": True})
 
-    monkeypatch.setattr(cli, "build_staging_database", lambda *_args: calls.append("build") or summary)
+    monkeypatch.setattr(
+        cli,
+        "build_staging_database",
+        lambda *_args, **_kwargs: calls.append("build") or summary,
+    )
     monkeypatch.setattr(cli, "validate_staging_database", lambda *_args: calls.append("validate") or validation)
     monkeypatch.setattr(cli, "replace_mounted_database", lambda *_args: calls.append("replace"))
 

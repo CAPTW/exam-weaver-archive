@@ -84,6 +84,11 @@ class TableEditSession(QObject):
         def operation(table: dict) -> dict:
             for cell in table["cells"]:
                 if int(cell["row"]) == row and int(cell["col"]) == column:
+                    if cell.get("text") != value:
+                        # Character offsets are no longer trustworthy after a
+                        # plain QTableWidget edit.  Clear them rather than
+                        # applying an underline/LaTeX span to the wrong text.
+                        cell["spans"] = []
                     cell["text"] = value
                     table["rows"][row][column] = value
                     break
@@ -104,6 +109,7 @@ class TableEditSession(QObject):
                 if coordinate not in targets:
                     continue
                 cell["text"] = ""
+                cell["spans"] = []
                 table["rows"][coordinate[0]][coordinate[1]] = ""
             return table
 

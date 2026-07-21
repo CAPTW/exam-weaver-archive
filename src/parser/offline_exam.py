@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass, replace
 from statistics import fmean
 from typing import Iterable, Sequence
@@ -12,6 +13,7 @@ from .aligned_choice_table import (
     canonical_aligned_choice_text,
 )
 from .layout import LayoutLine, LayoutWord, StructuredPage
+from .formatting import apply_text_decorations, merge_spans
 
 
 _QUESTION_START = re.compile(
@@ -68,6 +70,9 @@ class ParsedOfflineQuestion:
     confidence: float
     diagnostics: tuple[str, ...]
     choice_format_jsons: tuple[str, ...] = ()
+    question_format_json: str | None = None
+    image_path: str | None = None
+    image_bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,7 @@ class _LineRecord:
     bbox: tuple[float, float, float, float]
     page: int
     column: int | None
+    decorations: tuple = ()
     ambiguous_bottom_margin: bool = False
     ambiguous_top_margin: bool = False
 
@@ -241,6 +247,7 @@ class OfflineExamParser:
             bbox=bbox,  # type: ignore[arg-type]
             page=int(getattr(line, "page", fallback_page)),
             column=getattr(line, "column", None),
+            decorations=tuple(getattr(line, "decorations", ()) or ()),
         )
 
     def _reading_order_key(self, line: LayoutLine, original_index: int) -> tuple:
@@ -792,6 +799,8 @@ class OfflineExamParser:
             damaged_indexes, damaged_choices = damaged_recovery
 
         stem_parts = [first_stem_text] if first_stem_text else []
+        stem_record_indexes: set[int] = {0} if first_stem_text else set()
+        choice_record_indexes: dict[int, set[int]] = {}
         explicit_choices: dict[int, str] = {}
         explicit_marker_numbers: list[int] = []
         explicit_choice_indexes: set[int] = set()
@@ -845,6 +854,7 @@ class OfflineExamParser:
         for index, record in enumerate(region[1:], start=1):
             if visual_choice_start is not None and index < visual_choice_start:
                 stem_parts.append(record.text)
+                stem_record_indexes.add(index)
                 continue
             if use_table_recovery and index in table_indexes:
                 continue
@@ -866,6 +876,7 @@ class OfflineExamParser:
                 stripped = self._strip_overlaid_visual_prefix(record)
                 if stripped:
                     stem_parts.append(stripped)
+                    stem_record_indexes.add(index)
                 continue
             pieces = (
                 []
@@ -881,6 +892,7 @@ class OfflineExamParser:
                             part for part in (table_first_choice_prefix, text) if part
                         )
                     explicit_choices[choice_number] = text
+                    choice_record_indexes.setdefault(choice_number, set()).add(index)
                     active_choice = choice_number
                     active_choice_origin_x = float(record.bbox[0])
                 continue
@@ -899,8 +911,10 @@ class OfflineExamParser:
                     explicit_choices[active_choice] = " ".join(
                         part for part in (previous, continuation) if part
                     )
+                    choice_record_indexes.setdefault(active_choice, set()).add(index)
             else:
                 stem_parts.append(record.text)
+                stem_record_indexes.add(index)
 
         diagnostics: list[str] = []
         explicit_sequence_valid = False
@@ -987,6 +1001,50 @@ class OfflineExamParser:
                     for number, row in enumerate(repaired_rows, start=1)
                 )
                 diagnostics.append("aligned_choice_table_recovery")
+
+        stem = "\n".join(part.strip() for part in stem_parts if part.strip())
+        stem = self._repair_stem_ocr_damage(stem)
+        stem_decorations = [
+            decoration
+            for index in sorted(stem_record_indexes)
+            for decoration in region[index].decorations
+        ]
+        formatted_stem = apply_text_decorations(stem, stem_decorations)
+        stem = formatted_stem.text
+        question_format_json = self._merge_span_format_json(
+            None,
+            formatted_stem.spans,
+        )
+
+        formatted_choices = []
+        formatted_choice_jsons = []
+        for choice_number, choice in enumerate(choices, start=1):
+            owned_decorations = [
+                decoration
+                for index in sorted(choice_record_indexes.get(choice_number, set()))
+                for decoration in region[index].decorations
+            ]
+            if underlined_choices and choice_number <= len(underlined_choices):
+                owned_decorations.append({
+                    "kind": "underline",
+                    "text": choice,
+                    "line_text": choice,
+                    "start": 0,
+                    "end": len(choice),
+                    "confidence": 1.0,
+                })
+            formatted_choice = apply_text_decorations(choice, owned_decorations)
+            formatted_choices.append(formatted_choice.text)
+            existing_format = (
+                choice_format_jsons[choice_number - 1]
+                if choice_number <= len(choice_format_jsons)
+                else None
+            )
+            formatted_choice_jsons.append(
+                self._merge_span_format_json(existing_format, formatted_choice.spans)
+            )
+        choices = formatted_choices
+        choice_format_jsons = tuple(formatted_choice_jsons)
         if explicit_sequence_valid and len(set(choices)) != len(choices):
             diagnostics.append("source_duplicate_choices")
         if len(choices) not in (4, 5):
@@ -1056,16 +1114,32 @@ class OfflineExamParser:
             diagnostics.append("ambiguous_top_margin")
 
         confidence = self._region_confidence(region)
-        stem = "\n".join(part.strip() for part in stem_parts if part.strip())
         return ParsedOfflineQuestion(
             number=number,
-            stem=self._repair_stem_ocr_damage(stem),
+            stem=stem,
             choices=choices,
             source_page=region[0].page,
             confidence=confidence,
             diagnostics=tuple(diagnostics),
+            question_format_json=question_format_json,
             choice_format_jsons=choice_format_jsons,
         )
+
+    @staticmethod
+    def _merge_span_format_json(format_json: str | None, spans: Sequence[dict]) -> str | None:
+        try:
+            payload = json.loads(format_json) if format_json else {}
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        existing = payload.get("spans") or []
+        merged = merge_spans(existing, list(spans or []))
+        if merged:
+            payload["spans"] = merged
+        else:
+            payload.pop("spans", None)
+        return json.dumps(payload, ensure_ascii=False) if payload else None
 
     def _visual_choice_sequence_start(
         self, region: Sequence[_LineRecord],

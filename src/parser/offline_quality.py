@@ -17,8 +17,7 @@ _PLACEHOLDER = re.compile(
     re.IGNORECASE,
 )
 _CONTAMINATION = re.compile(
-    r"(?:\b\d{1,3}(?:\s+/\s*|\s*/\s+)\d{1,3}\b"
-    r"|(?:^|\s)\d{1,3}\s*[.)]\s*(?=(?:다음|아래|[「<]))"
+    r"(?:(?:^|\s)\d{1,3}\s*[.)]\s*(?=(?:다음|아래|[「<]))"
     r"|(?:^|\s)@(?=\s|$)|해양경찰\s*채용시험|\b(?:19|20)\d{2}년\s*도.{0,40}(?:시험|경찰|해양)"
     r"|^\s*(?:\([0O1-5]\)|[0O])\s+"
     r"|무단\s*(?:복제|전재)|정답\s*[:：]?)",
@@ -46,6 +45,7 @@ _NON_BLOCKING_DIAGNOSTICS = {
     "source_unavailable_choices",
     "table_choice_recovery",
     "underlined_choice_recovery",
+    "validated_baseline_recovery",
 }
 
 

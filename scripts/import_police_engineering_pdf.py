@@ -581,7 +581,19 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
                     else "answer_requires_manual_review"
                 )
 
-            choices = [Choice(number=index, symbol=f"{index}", text=text) for index, text in enumerate(choice_texts, start=1)]
+            choices = [
+                Choice(
+                    number=index,
+                    symbol=f"{index}",
+                    text=text,
+                    format_json=(
+                        parsed.choice_format_jsons[index - 1]
+                        if index <= len(parsed.choice_format_jsons)
+                        else None
+                    ),
+                )
+                for index, text in enumerate(choice_texts, start=1)
+            ]
 
             question = Question(
                 number=question_number,
@@ -589,12 +601,14 @@ def build_questions(page_records: list[dict], output_dir: Path, input_dir: Path)
                 choices=choices,
                 correct_answer=correct_answer,
                 answer_available=correct_answer != 0,
-                has_image=False,
+                has_image=bool(getattr(parsed, "image_path", None)),
+                image_path=getattr(parsed, "image_path", None),
                 source_page=page_number,
                 subject_name=SUBJECT_NAME,
                 year=year,
                 session=session,
                 exam_type=EXAM_CODE,
+                format_json=parsed.question_format_json,
             )
             parsed_questions.append(ParsedQuestion(
                 question=question,

@@ -438,6 +438,24 @@ def test_quality_gate_does_not_treat_slash_damaged_percentages_as_page_counters(
     assert result.importable is True
 
 
+def test_quality_gate_accepts_legitimate_slash_delimited_numeric_choices():
+    question = ParsedOfflineQuestion(
+        number=19,
+        stem="빈칸에 들어갈 숫자와 단어를 고르시오.",
+        choices=[
+            "12 / 20 / bell / whistle / 100 / gong",
+            "12 / 20 / whistle / gong / 200 / bell",
+            "10 / 24 / bell / whistle / 100 / gong",
+            "10 / 24 / whistle / gong / 200 / bell",
+        ],
+        source_page=5,
+        confidence=1.0,
+        diagnostics=(),
+    )
+
+    assert validate_offline_question(question).importable is True
+
+
 def test_damaged_third_choice_wrap_is_not_split_in_the_middle_of_a_word():
     page = _page(
         _bbox_line("10. 조업보호본부의 사무로 옳지 않은 것은?", y=0.10, x0=0.02, x1=0.47),

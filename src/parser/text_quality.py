@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 
+from .formatting import ENGLISH_OCR_TOKEN_REPLACEMENTS, OCR_EXACT_PHRASE_REPLACEMENTS
+
 
 OCR_NOISE_PATTERN = re.compile(
-    r"(?:다읔|디음|오으\s*것|0[卜ㅏ]|(?<![A-Za-z])[O0]h(?![A-Za-z])|[卜入人]{2,}|으\s*(?:9|느|그)|으\s+거|"
+    r"(?:다읔|디음|다음°|오으\s*것|오은\s+거\s+은|0[卜ㅏ]|(?<![A-Za-z])[O0]h(?![A-Za-z])|[卜入人]{2,}|으\s*(?:9|느|그)|으\s+거|"
     r"[가-힣A-Za-z][卜入人][가-힣A-Za-z]|[튢飇恤喬盞]|"
+    r"[가-힣]°[°。]?[가-힣]|(?<=[a-z])¯(?=[a-z])|"
     r"\}[~=`^|\s]*[O0]\s*[가-힣ㄱ-ㅎㅏ-ㅣ]|"
     r"(?<![A-Za-z])r(?=[가-힣]{2,}법\])|[己呑粼訃])"
 )
@@ -19,6 +22,34 @@ ENGLISH_OCR_CONFUSABLE_PATTERN = re.compile(
     r"\b[A-Za-z]{1,12}[01]+[A-Za-z][A-Za-z01]*\b|"
     r"\b[A-Za-z][A-Za-z01]*[01]+[A-Za-z]{1,12}\b|"
     r"(?<=[A-Za-z])[㈜ⅰ-ⅹ殂盞飇恤喬訃粼](?=[A-Za-z]))"
+)
+KNOWN_ENGLISH_OCR_CONFUSABLE_PATTERN = re.compile(
+    r"(?<![0-9A-Za-z])(?:"
+    + "|".join(
+        re.escape(token)
+        for token in sorted(ENGLISH_OCR_TOKEN_REPLACEMENTS, key=len, reverse=True)
+    )
+    + r")(?![0-9A-Za-z])"
+)
+KNOWN_OCR_PHRASE_PATTERN = re.compile(
+    "|".join(
+        re.escape(token)
+        for token in sorted(OCR_EXACT_PHRASE_REPLACEMENTS, key=len, reverse=True)
+    )
+)
+VALID_ROMAN_ANNOTATION_PATTERN = re.compile(
+    r"(?<![0-9A-Za-z])[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ](?=(?:의)?(?:\s|[.,:;)\]」]|$))"
+)
+MIXED_ROMAN_OCR_PATTERN = re.compile(
+    r"(?:[0-9A-Za-z가-힣*#()\\][ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]"
+    r"|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ][0-9A-Za-z가-힣*#()\\])"
+)
+VALID_HANGUL_NUMBER_PATTERN = re.compile(
+    r"제\d+(?=[가-힣])|"
+    r"\d+(?:년|개월|일|시간|분|초|회|개|명|인|척|톤|미터|해리|단계|급|종)"
+)
+VALID_MIXED_SCRIPT_TERM_PATTERN = re.compile(
+    r"(?:지진파의[SP]파|A1해역|A2해역|A3해역|A4해역)"
 )
 VALID_CJK_ANNOTATION_PATTERN = re.compile(r"[（(][一-龥]{1,16}[)）]")
 VALID_CJK_PARTY_PATTERN = re.compile(
@@ -52,6 +83,10 @@ def text_quality_issue_codes(text: str) -> tuple[str, ...]:
     if (
         OCR_NOISE_PATTERN.search(value)
         or ENGLISH_OCR_CONFUSABLE_PATTERN.search(value)
+        or KNOWN_ENGLISH_OCR_CONFUSABLE_PATTERN.search(value)
+        or KNOWN_OCR_PHRASE_PATTERN.search(value)
+        or has_mixed_roman_ocr(value)
+        or has_intrusive_latin_digit_ocr(value)
         or has_intrusive_cjk_ocr(value)
     ):
         codes.append("ocr_noise")
@@ -60,6 +95,29 @@ def text_quality_issue_codes(text: str) -> tuple[str, ...]:
     if has_unbalanced_delimiters(value):
         codes.append("unbalanced_delimiter")
     return tuple(codes)
+
+
+def has_mixed_roman_ocr(text: str) -> bool:
+    """Detect Roman numeral glyphs embedded in OCR-corrupted word tokens."""
+
+    value = VALID_ROMAN_ANNOTATION_PATTERN.sub("", str(text or ""))
+    return bool(MIXED_ROMAN_OCR_PATTERN.search(value))
+
+
+def has_intrusive_latin_digit_ocr(text: str) -> bool:
+    """Detect stray OCR ``0/1/I/L`` characters embedded in Korean words.
+
+    Valid legal numbers, units, and domain labels are stripped first. This is
+    deliberately narrower than a generic mixed-script check because maritime
+    questions legitimately contain many formulas and alphanumeric identifiers.
+    """
+
+    value = VALID_HANGUL_NUMBER_PATTERN.sub("", str(text or ""))
+    value = VALID_MIXED_SCRIPT_TERM_PATTERN.sub("", value)
+    return bool(
+        re.search(r"[가-힣](?:[01IL]|[A-Za-z]{1,3})[가-힣]", value)
+        or re.search(r"[가-힣]\)(?:7b)(?=\s|[가-힣])", value)
+    )
 
 
 def has_unbalanced_delimiters(text: str) -> bool:

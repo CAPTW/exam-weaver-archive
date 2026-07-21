@@ -488,14 +488,19 @@ def build_groups(page_records: list[dict]) -> list[dict]:
 
             start_new = current is None
             if current is not None:
+                current_max = max(current_numbers or {0})
+                continues_numbering = bool(
+                    numbers and current_numbers and min(numbers) > current_max
+                )
                 meta_changed = (
                     meta.year is not None and current.get("year") is not None and meta.year != current.get("year")
                 ) or (
                     bool(meta.period or meta.session)
                     and (meta.period, meta.session) != (current.get("period"), current.get("session"))
-                    and max(current_numbers or {0}) >= 10
+                    and current_max >= 10
+                    and not continues_numbering
                 )
-                reset_to_one = 1 in numbers and max(current_numbers or {0}) >= 10
+                reset_to_one = 1 in numbers and current_max >= 10
                 start_new = meta_changed or reset_to_one
 
             if start_new:

@@ -81,6 +81,17 @@ def test_predicted_four_line_wrap_switches_to_wide_layout():
     assert layout.estimated_max_lines <= 3
 
 
+def test_long_one_cell_view_block_wraps_inside_narrow_column():
+    layout = resolve_table_layout({
+        "rows": [["<보기> " + ("긴 지문 내용 " * 80)]],
+        "layout": {"width_mode": "auto"},
+    })
+
+    assert layout.wide is False
+    assert layout.total_width_mm == NARROW_TABLE_WIDTH_MM
+    assert layout.column_widths_mm == pytest.approx((NARROW_TABLE_WIDTH_MM,))
+
+
 def test_explicit_wide_flag_always_wins():
     layout = resolve_table_layout({
         "rows": [["A"]],

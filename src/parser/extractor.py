@@ -23,7 +23,13 @@ from dataclasses import dataclass, field, replace
 import pypdf
 import logging
 
-from src.parser.layout import LayoutLine, LayoutWord, StructuredPage, build_structured_page
+from src.parser.layout import (
+    LayoutLine,
+    LayoutWord,
+    StructuredPage,
+    TextDecoration,
+    build_structured_page,
+)
 from src.parser.formatting import has_suspicious_text_artifact
 from src.parser.text_quality import text_quality_issue_codes
 
@@ -216,7 +222,7 @@ class PDFExtractor:
             ocr_page = self._extract_ocr_structured_page(page, page_number)
             if ocr_page.lines:
                 return ocr_page
-        return native_page
+        return self._attach_native_text_decorations(native_page, page)
 
     def _extract_native_structured_page(self, page, page_number: int) -> StructuredPage:
         rect = getattr(page, 'rect', None)
@@ -862,6 +868,60 @@ class PDFExtractor:
 
         return importable_numbers(windows_page) <= importable_numbers(candidate_page)
 
+    @staticmethod
+    def _preserves_question_number_coverage(
+        baseline_page: StructuredPage,
+        candidate_page: StructuredPage,
+    ) -> bool:
+        """Reject an OCR cleanup that loses a visually detected question.
+
+        The cleanup candidate is allowed to improve text that is not yet
+        importable, but it must retain every question number already found on
+        the baseline page.  This is stricter than comparing raw OCR line counts
+        and directly protects the downstream exam-set completeness contract.
+        """
+
+        from .offline_exam import OfflineExamParser
+
+        def question_numbers(page: StructuredPage) -> set[int]:
+            return {
+                question.number
+                for question in OfflineExamParser().parse_pages([page])
+            }
+
+        return question_numbers(baseline_page) <= question_numbers(candidate_page)
+
+    @classmethod
+    def _should_prefer_high_contrast_ocr_page(
+        cls,
+        baseline_page: StructuredPage,
+        high_contrast_page: StructuredPage,
+    ) -> bool:
+        """Choose the thresholded OCR page only after structural/text gates."""
+
+        if not cls._preserves_question_number_coverage(
+            baseline_page, high_contrast_page
+        ):
+            return False
+        baseline_text = cls._ocr_page_plain_text(baseline_page)
+        candidate_text = cls._ocr_page_plain_text(high_contrast_page)
+        baseline_length = len(re.sub(r"\s+", "", baseline_text))
+        candidate_length = len(re.sub(r"\s+", "", candidate_text))
+        if candidate_length < 0.82 * max(1, baseline_length):
+            return False
+        baseline_noise = sum(
+            cls._ocr_line_noise_score(line.text) for line in baseline_page.lines
+        )
+        candidate_noise = sum(
+            cls._ocr_line_noise_score(line.text)
+            for line in high_contrast_page.lines
+        )
+        # The page-level score is deliberately monotonic rather than requiring
+        # a large percentage gain. A single repaired Hangul syllable can be the
+        # difference between importing and rejecting a question, while the
+        # coverage/length gates above already prevent destructive replacement.
+        return candidate_noise < baseline_noise
+
     @classmethod
     def _merge_tesseract_text_into_windows_layout(
         cls,
@@ -1154,7 +1214,7 @@ class PDFExtractor:
     async def _extract_ocr_structured_page_async(self, page, page_number: int) -> StructuredPage:
         try:
             import fitz
-            from PIL import Image
+            from PIL import Image, ImageOps
             from winrt.windows.graphics.imaging import BitmapDecoder
             from winrt.windows.globalization import Language
             from winrt.windows.media.ocr import OcrEngine
@@ -1171,31 +1231,40 @@ class PDFExtractor:
         page_height = float(getattr(rect, 'height', 0) or 0)
         # The legacy maritime PDFs contain small serif English passages.  At
         # the previous 3x render (roughly 216 dpi on A4) Tesseract routinely
-        # confused o/0 and l/1.  A 4.2x render is close to 300 dpi while the
-        # caps keep memory bounded for unusually large pages.
+        # confused o/0 and l/1.  A 4.2x render is close to 300 dpi.  Legacy
+        # Ronpark pages are unusually tall (about 1222 PDF points), so the old
+        # 4200px height cap silently reduced them to ~247dpi and broke compact
+        # Hangul such as ``징수``.  The larger caps retain the intended 300dpi
+        # while still bounding memory for outlier page sizes.
         zoom = 4.2
         if page_width > 0 and page_height > 0:
-            zoom = min(zoom, 3000 / page_width, 4200 / page_height)
+            zoom = min(zoom, 4200 / page_width, 6000 / page_height)
             zoom = max(0.5, zoom)
 
         pix = self._render_page_pixmap(
             page, matrix=fitz.Matrix(zoom, zoom), alpha=False,
         )
         image = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
+        async def recognize(candidate_image):
+            buffer = io.BytesIO()
+            candidate_image.save(buffer, format='PNG')
+            stream = InMemoryRandomAccessStream()
+            writer = DataWriter(stream.get_output_stream_at(0))
+            writer.write_bytes(buffer.getvalue())
+            await writer.store_async()
+            await writer.flush_async()
+            writer.close()
+            stream.seek(0)
+            decoder = await BitmapDecoder.create_async(stream)
+            bitmap = await decoder.get_software_bitmap_async()
+            # WinRT OCR engines keep internal recognition state. Reusing one
+            # instance for the raw and thresholded bitmap can make the second
+            # pass echo fragments from the first. A fresh engine keeps both
+            # candidates independent and deterministic.
+            candidate_engine = OcrEngine.try_create_from_language(Language('ko'))
+            return await candidate_engine.recognize_async(bitmap)
 
-        stream = InMemoryRandomAccessStream()
-        writer = DataWriter(stream.get_output_stream_at(0))
-        writer.write_bytes(buffer.getvalue())
-        await writer.store_async()
-        await writer.flush_async()
-        writer.close()
-        stream.seek(0)
-
-        decoder = await BitmapDecoder.create_async(stream)
-        bitmap = await decoder.get_software_bitmap_async()
-        result = await engine.recognize_async(bitmap)
+        result = await recognize(image)
 
         detected_split = self._detect_vertical_column_split(image)
         windows_page = self._structured_page_from_ocr_result(
@@ -1211,10 +1280,58 @@ class PDFExtractor:
         # raw OCR prefixes (for example ``0)``/``Q)``) are otherwise liable to
         # overwrite circled choice markers during the Tesseract merge.
         windows_page = self._restore_visual_choice_markers(windows_page, image)
+        used_high_contrast_windows = False
+
+        # Old maritime scans have a light gray paper background and antialiased
+        # Hangul strokes.  On those pages the raw Windows OCR result frequently
+        # turns compact syllables into CJK/Latin fragments (for example
+        # ``징수`` -> ``지入 / 。丁``).  A fixed high-contrast retry at the same
+        # geometry recovers those strokes reliably.  It is intentionally
+        # conditional and is merged line-by-line, so clean pages pay no second
+        # OCR pass and question/choice marker coverage cannot regress.
+        if self._ocr_page_has_repairable_noise(windows_page):
+            high_contrast_image = ImageOps.grayscale(image).point(
+                lambda value: 255 if value > 210 else 0
+            ).convert('RGB')
+            high_contrast_result = await recognize(high_contrast_image)
+            high_contrast_page = self._structured_page_from_ocr_result(
+                high_contrast_result,
+                page_number=page_number,
+                page_width=page_width,
+                page_height=page_height,
+                image_width=image.width,
+                image_height=image.height,
+                divider_x=detected_split,
+            )
+            high_contrast_page = self._restore_visual_choice_markers(
+                # OCR text comes from the thresholded image, while marker
+                # recovery keeps the grayscale/ring evidence from the original
+                # render. Thin circled digits can disappear at threshold 210.
+                high_contrast_page, image, targeted_recovery=False
+            )
+            if self._should_prefer_high_contrast_ocr_page(
+                windows_page, high_contrast_page
+            ):
+                windows_page = high_contrast_page
+                used_high_contrast_windows = True
+            else:
+                merged_windows_page = self._merge_tesseract_text_into_windows_layout(
+                    windows_page, high_contrast_page
+                )
+                merged_windows_page = self._restore_visual_choice_markers(
+                    merged_windows_page, image
+                )
+                if self._preserves_question_number_coverage(
+                    windows_page, merged_windows_page
+                ):
+                    windows_page = merged_windows_page
         tesseract_page = None
         if (
             self._ocr_page_has_english_body(windows_page)
-            or self._ocr_page_has_repairable_noise(windows_page)
+            or (
+                not used_high_contrast_windows
+                and self._ocr_page_has_repairable_noise(windows_page)
+            )
         ):
             tesseract_page = self._extract_tesseract_structured_page(
                 image,
@@ -1240,8 +1357,8 @@ class PDFExtractor:
             if not self._preserves_importable_question_coverage(
                 windows_fallback, structured_page
             ):
-                return windows_fallback
-        return structured_page
+                structured_page = windows_fallback
+        return self._attach_raster_text_decorations(structured_page, image)
 
     @staticmethod
     def _merge_false_split_column_fragments(page: StructuredPage) -> StructuredPage:
@@ -1357,7 +1474,13 @@ class PDFExtractor:
                 fitz.TOOLS.mupdf_display_errors(display_errors)
                 fitz.TOOLS.mupdf_display_warnings(display_warnings)
 
-    def _restore_visual_choice_markers(self, page: StructuredPage, image) -> StructuredPage:
+    def _restore_visual_choice_markers(
+        self,
+        page: StructuredPage,
+        image,
+        *,
+        targeted_recovery: bool = True,
+    ) -> StructuredPage:
         """Restore a complete ①-④ layout only with raster ring evidence."""
         gray = image.convert("L")
         lines = list(page.lines)
@@ -1630,6 +1753,8 @@ class PDFExtractor:
                             replace_existing=replace_existing,
                         )
             page = replace(page, lines=tuple(lines))
+        if not targeted_recovery:
+            return self._mark_raster_underlined_choice_words(page, gray)
         page = self._recover_targeted_ton_hour_rows(page, gray)
         page = self._recover_targeted_three_field_rows(page, gray)
         page = self._recover_targeted_percentage_rows(page, gray)
@@ -5614,6 +5739,384 @@ class PDFExtractor:
         intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
         first_area = max(1e-9, first[2] - first[0]) * max(1e-9, first[3] - first[1])
         return intersection / first_area
+
+    def _attach_native_text_decorations(
+        self,
+        structured_page: StructuredPage,
+        source_page,
+    ) -> StructuredPage:
+        """Attach vector underline/overline ranges to structured text lines."""
+
+        if not structured_page.lines:
+            return structured_page
+        try:
+            segments = self._horizontal_line_segments(source_page)
+        except Exception:
+            return structured_page
+        if not segments:
+            return structured_page
+
+        page_width = max(float(structured_page.width), 1.0)
+        page_height = max(float(structured_page.height), 1.0)
+        normalized = [
+            (float(x0) / page_width, float(y) / page_height, float(x1) / page_width)
+            for x0, y, x1 in segments
+        ]
+        underline_indexes = self._underline_candidate_line_indexes(structured_page)
+        rewritten = []
+        changed = False
+        for line_index, line in enumerate(structured_page.lines):
+            decorations = list(line.decorations)
+            for x0, y, x1 in normalized:
+                top = float(line.bbox[1])
+                bottom = float(line.bbox[3])
+                if line_index in underline_indexes and bottom - 0.0035 <= y <= bottom + 0.0022:
+                    kind = "underline"
+                    distance = abs(y - bottom)
+                elif (
+                    self._line_may_contain_overline(line.text)
+                    and top - 0.009 <= y <= top - 0.0002
+                ):
+                    kind = "overline"
+                    distance = abs(y - top)
+                else:
+                    continue
+                decoration = self._decoration_for_horizontal_segment(
+                    line,
+                    x0,
+                    x1,
+                    y,
+                    kind=kind,
+                    source="native_vector",
+                    confidence=max(0.72, 0.98 - distance * 20),
+                )
+                if decoration is not None:
+                    decorations.append(decoration)
+            decorations = self._deduplicate_text_decorations(decorations)
+            if tuple(decorations) != line.decorations:
+                line = replace(line, decorations=tuple(decorations))
+                changed = True
+            rewritten.append(line)
+        return replace(structured_page, lines=tuple(rewritten)) if changed else structured_page
+
+    @classmethod
+    def _attach_raster_text_decorations(cls, page: StructuredPage, image) -> StructuredPage:
+        """Recover sub-word underline/overline ranges from a rendered scan.
+
+        OCR engines occasionally collapse an entire visual row into one word.
+        Detection therefore works against line pixels and maps the horizontal
+        run back to proportional character boxes instead of relying on OCR word
+        boundaries alone.
+        """
+
+        if not page.lines:
+            return page
+        gray = image.convert("L")
+        width, height = gray.size
+        pixels = gray.load()
+        underline_indexes = cls._underline_candidate_line_indexes(page)
+        rewritten = []
+        changed = False
+        for line_index, line in enumerate(page.lines):
+            found = list(line.decorations)
+            top = float(line.bbox[1])
+            bottom = float(line.bbox[3])
+            bands = []
+            if line_index in underline_indexes:
+                # OCR boxes often include the underline itself.  Keep the band
+                # tight around the baseline so the first strokes of the next
+                # row and the enclosing view-box border cannot be selected.
+                bands.append(("underline", bottom - 0.0035, bottom + 0.0022, 0.014, 0.88))
+            if cls._line_may_contain_overline(line.text):
+                bands.append(("overline", top - 0.0105, top - 0.0002, 0.0045, 0.88))
+            for kind, band_start, band_end, minimum_ratio, minimum_density in bands:
+                candidates = cls._horizontal_raster_runs(
+                    pixels,
+                    width,
+                    height,
+                    float(line.bbox[0]),
+                    float(line.bbox[2]),
+                    band_start,
+                    band_end,
+                    minimum_ratio=minimum_ratio,
+                    minimum_density=minimum_density,
+                )
+                for x0, y, x1, density in candidates:
+                    decoration = cls._decoration_for_horizontal_segment(
+                        line,
+                        x0,
+                        x1,
+                        y,
+                        kind=kind,
+                        source="raster_geometry",
+                        confidence=min(0.99, 0.68 + 0.28 * density),
+                    )
+                    if decoration is not None:
+                        found.append(decoration)
+            found = cls._deduplicate_text_decorations(found)
+            if tuple(found) != line.decorations:
+                line = replace(line, decorations=tuple(found))
+                changed = True
+            rewritten.append(line)
+        return replace(page, lines=tuple(rewritten)) if changed else page
+
+    @staticmethod
+    def _horizontal_raster_runs(
+        pixels,
+        width: int,
+        height: int,
+        line_x0: float,
+        line_x1: float,
+        y0: float,
+        y1: float,
+        *,
+        minimum_ratio: float = 0.010,
+        minimum_density: float = 0.88,
+    ) -> list[tuple[float, float, float, float]]:
+        left = max(0, min(width - 1, int((line_x0 - 0.006) * width)))
+        right = max(left + 1, min(width, int((line_x1 + 0.006) * width)))
+        top = max(0, min(height - 1, int(y0 * height)))
+        bottom = max(top + 1, min(height, int(y1 * height) + 1))
+        minimum = max(9, int(width * minimum_ratio))
+        raw: list[tuple[int, int, int, float]] = []
+        for y in range(top, bottom):
+            dark = [pixels[x, y] < 150 for x in range(left, right)]
+            index = 0
+            while index < len(dark):
+                while index < len(dark) and not dark[index]:
+                    index += 1
+                if index >= len(dark):
+                    break
+                start = index
+                last_dark = index
+                gaps = 0
+                index += 1
+                while index < len(dark):
+                    if dark[index]:
+                        last_dark = index
+                        gaps = 0
+                    else:
+                        gaps += 1
+                        if gaps > 2:
+                            break
+                    index += 1
+                run_end = last_dark + 1
+                run_width = run_end - start
+                if run_width < minimum:
+                    continue
+                dark_count = sum(dark[start:run_end])
+                density = dark_count / max(1, run_width)
+                if density >= minimum_density:
+                    raw.append((left + start, y, left + run_end, density))
+
+        selected: list[tuple[int, int, int, float]] = []
+        for candidate in sorted(raw, key=lambda item: (-item[3], -(item[2] - item[0]))):
+            cx0, cy, cx1, _density = candidate
+            duplicate = False
+            for sx0, sy, sx1, _score in selected:
+                overlap = max(0, min(cx1, sx1) - max(cx0, sx0))
+                shorter = max(1, min(cx1 - cx0, sx1 - sx0))
+                if abs(cy - sy) <= 4 and overlap / shorter >= 0.72:
+                    duplicate = True
+                    break
+            if not duplicate:
+                selected.append(candidate)
+        return [
+            (x0 / width, y / height, x1 / width, density)
+            for x0, y, x1, density in selected
+        ]
+
+    @classmethod
+    def _decoration_for_horizontal_segment(
+        cls,
+        line: LayoutLine,
+        x0: float,
+        x1: float,
+        y: float,
+        *,
+        kind: str,
+        source: str,
+        confidence: float,
+    ) -> TextDecoration | None:
+        if x1 <= x0:
+            return None
+        mapped = cls._line_character_boxes(line)
+        selected = [
+            item for item in mapped
+            if item[2] > x0 - 0.0015 and item[1] < x1 + 0.0015
+        ]
+        if not selected:
+            return None
+        start = min(item[0] for item in selected)
+        end = max(item[0] for item in selected) + 1
+        line_text = line.text
+        while start < end and line_text[start].isspace():
+            start += 1
+        while end > start and line_text[end - 1].isspace():
+            end -= 1
+        if end <= start:
+            return None
+        if kind == "underline":
+            # OCR may expose a whole printed row as one word.  Proportional
+            # mapping can then land on ``. Thi`` or the last two letters of a
+            # neighbouring word.  Snap to the lexical tokens actually crossed
+            # by the visual rule; the subsequent width-fit rejects glyph
+            # strokes that cover only a small part of the expanded token.
+            tokens = list(re.finditer(r"[0-9A-Za-z가-힣]+(?:[-'][0-9A-Za-z가-힣]+)*", line_text))
+            crossed = [token for token in tokens if token.end() > start and token.start() < end]
+            if crossed:
+                start = crossed[0].start()
+                end = crossed[-1].end()
+        text = line_text[start:end]
+        compact = re.sub(r"\s+", "", text)
+        if not compact or compact in {"보기", "<보기>", "＜보기＞", "〈보기〉"}:
+            return None
+        if kind == "underline" and len(compact) < 2:
+            return None
+        if kind == "overline" and not cls._text_may_be_overlined_formula(compact):
+            return None
+        phrase_boxes = [item for item in mapped if start <= item[0] < end]
+        phrase_x0 = min(item[1] for item in phrase_boxes)
+        phrase_x1 = max(item[2] for item in phrase_boxes)
+        phrase_width = max(1e-6, phrase_x1 - phrase_x0)
+        segment_width = x1 - x0
+        fit_ratio = segment_width / phrase_width
+        if fit_ratio < 0.60 or fit_ratio > 1.55:
+            return None
+        if segment_width > max(0.82 * (float(line.bbox[2]) - float(line.bbox[0])), phrase_width * 1.45):
+            return None
+
+        if kind == "overline":
+            prefix = line_text[max(0, start - 4):start]
+            if re.search(r"(?:√|\ue05c|sqrt)\s*$", prefix, re.IGNORECASE):
+                kind = "radical"
+        confidence = min(1.0, max(0.0, confidence - min(0.18, abs(1.0 - fit_ratio) * 0.18)))
+        if confidence < 0.70:
+            return None
+        return TextDecoration(
+            kind=kind,
+            text=text,
+            line_text=line_text,
+            start=start,
+            end=end,
+            bbox=(x0, y, x1, y),
+            confidence=confidence,
+            source=source,
+        )
+
+    @staticmethod
+    def _line_may_contain_overline(text: str) -> bool:
+        """Limit overline recovery to mathematical/logical expressions.
+
+        Scanning every OCR line treats glyph strokes and table borders as
+        overlines.  Exam overlines occur in compact formula rows, normally
+        beside an equality/logic operator or a radical sign.
+        """
+
+        value = str(text or "")
+        if re.search(r"(?:√|\ue05c|sqrt)", value, re.IGNORECASE):
+            return True
+        if not re.search(r"[=≠≈≤≥¬⊕∨∧·∙×÷]", value):
+            return False
+        compact = re.sub(r"\s+", "", value)
+        # A lone OCR digit beside an equals sign is a common failure mode in
+        # scanned Korean body text.  Boolean/electrical overlines in this
+        # corpus always contain at least two Latin symbols in the containing
+        # expression (for example ``X=A·B``).  Requiring that context prevents
+        # random glyph strokes from becoming ``\\overline{9}`` while still
+        # allowing a single overlined operand such as ``A``.
+        latin_symbols = re.findall(r"[A-Za-z]", compact)
+        return len(compact) <= 120 and len(latin_symbols) >= 2
+
+    @staticmethod
+    def _text_may_be_overlined_formula(text: str) -> bool:
+        compact = re.sub(r"\s+", "", str(text or ""))
+        return bool(
+            compact
+            and len(compact) <= 48
+            and re.fullmatch(r"[A-Za-z0-9_.·∙+\-−*/()]+", compact)
+        )
+
+    @staticmethod
+    def _underline_candidate_line_indexes(page: StructuredPage) -> set[int]:
+        """Return body lines belonging to a question that explicitly says 밑줄.
+
+        This semantic gate is deliberately conservative.  It prevents page
+        rules, table borders and ordinary Hangul strokes from being promoted
+        to rich-text underline spans while retaining the exam convention in
+        which an underlined target is introduced by the word ``밑줄``.
+        """
+
+        allowed: set[int] = set()
+        for column in sorted({line.column for line in page.lines}):
+            indexes = sorted(
+                (index for index, line in enumerate(page.lines) if line.column == column),
+                key=lambda index: float(page.lines[index].bbox[1]),
+            )
+            active = False
+            prompt_finished = False
+            for index in indexes:
+                text = str(page.lines[index].text or "")
+                starts_question = bool(_VISUAL_QUESTION_START.match(text))
+                if starts_question:
+                    active = "밑줄" in text
+                    prompt_finished = False
+                elif "밑줄" in text:
+                    active = True
+                if active and re.search(r"[?？]", text):
+                    prompt_finished = True
+                    continue
+                if active and prompt_finished:
+                    allowed.add(index)
+        return allowed
+
+    @staticmethod
+    def _line_character_boxes(line: LayoutLine) -> list[tuple[int, float, float]]:
+        boxes: list[tuple[int, float, float]] = []
+        cursor = 0
+        words = tuple(sorted(line.words, key=lambda word: word.bbox[0]))
+        for word_index, word in enumerate(words):
+            value = str(word.text)
+            if word_index:
+                cursor += 1
+            length = max(1, len(value))
+            x0 = float(word.bbox[0])
+            x1 = float(word.bbox[2])
+            for offset in range(len(value)):
+                boxes.append((
+                    cursor + offset,
+                    x0 + (x1 - x0) * offset / length,
+                    x0 + (x1 - x0) * (offset + 1) / length,
+                ))
+            cursor += len(value)
+        return boxes
+
+    @staticmethod
+    def _deduplicate_text_decorations(values) -> list[TextDecoration]:
+        selected: dict[tuple[str, int, int], TextDecoration] = {}
+        for value in values or []:
+            key = (str(value.kind), int(value.start), int(value.end))
+            current = selected.get(key)
+            if current is None or float(value.confidence) > float(current.confidence):
+                selected[key] = value
+        ordered = [selected[key] for key in sorted(selected, key=lambda item: (item[1], item[2], item[0]))]
+        reduced: list[TextDecoration] = []
+        for candidate in sorted(
+            ordered,
+            key=lambda item: (-float(item.confidence), -(int(item.end) - int(item.start))),
+        ):
+            duplicate = False
+            for current in reduced:
+                if current.kind != candidate.kind:
+                    continue
+                overlap = max(0, min(current.end, candidate.end) - max(current.start, candidate.start))
+                shorter = max(1, min(current.end - current.start, candidate.end - candidate.start))
+                if overlap / shorter >= 0.70:
+                    duplicate = True
+                    break
+            if not duplicate:
+                reduced.append(candidate)
+        return sorted(reduced, key=lambda item: (item.start, item.end, item.kind))
 
     def _extract_underlined_texts(self, page) -> List[str]:
         """Detect underlined text snippets from horizontal drawing lines."""

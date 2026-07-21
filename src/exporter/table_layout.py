@@ -199,7 +199,15 @@ def resolve_table_layout(table_spec: dict) -> TableLayout:
         narrow_lines = _estimated_lines(table, narrow_widths)
         wide = bool(table.get("layout", {}).get("wide")) or column_count >= 5
         wide = wide or column_count * MIN_COLUMN_WIDTH_MM > NARROW_TABLE_WIDTH_MM
-        wide = wide or narrow_lines > MAX_NARROW_WRAP_LINES
+        # A one-cell <보기> block is prose inside a border, so wrapping is the
+        # expected layout.  Promoting it to a full-page table merely because it
+        # wraps creates a 180 mm table inside the two-column exam flow.  Only
+        # multi-column tables use wrap pressure as an automatic wide-layout
+        # signal; an explicit ``layout.wide`` request still wins above.
+        wide = wide or (
+            column_count > 1
+            and narrow_lines > MAX_NARROW_WRAP_LINES
+        )
         total = WIDE_TABLE_WIDTH_MM if wide else NARROW_TABLE_WIDTH_MM
         widths_mm = _allocate_widths(ratios, total)
         final_lines = _estimated_lines(table, widths_mm)
