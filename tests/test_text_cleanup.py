@@ -38,6 +38,27 @@ def test_quality_gate_does_not_flag_email_or_valid_ordered_markers():
     )
 
 
+def test_quality_gate_flags_repeated_circled_numbers_inside_ocr_prose():
+    damaged = (
+        "㉣과 관련하여 ② ② 인근의 ③박 통항량이 ④은 경우, "
+        "일반적으로 쌍묘박이 적합하다."
+    )
+
+    assert "ocr_noise" in text_quality_issue_codes(damaged)
+    assert "ocr_noise" in text_quality_issue_codes(
+        "점화시에 버니 유량을 급히 증가하였을 ④ ④ ④ 때"
+    )
+
+
+def test_quality_gate_accepts_coherent_circled_number_references():
+    valid = (
+        "다음 그림의 ①과 ②의 부분에는 각각 무엇이 들어가는가? "
+        "①은 옳고 ②는 옳지 않다."
+    )
+
+    assert "ocr_noise" not in text_quality_issue_codes(valid)
+
+
 def test_quality_gate_flags_corrupted_enumerator_sequences_in_counting_questions():
     corrupted = (
         "다음 해상보험 용어 설명 중 틀린 표현은 모두 몇 개 인가? "

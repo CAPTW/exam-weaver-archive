@@ -944,6 +944,46 @@ def test_bundled_maritime_english_repairs_restore_verified_enumerator_lists():
         assert text_quality_issue_codes(stem) == ()
 
 
+def test_bundled_repairs_restore_verified_circled_number_ocr_damage():
+    from src.parser.offline_repairs import load_audited_source_repairs
+
+    load_audited_source_repairs.cache_clear()
+    repairs = load_audited_source_repairs()
+    navigation = "[기출문제]경찰직 항해학(24년-13년).pdf".casefold()
+    recent_navigation = (
+        "[기출문제]경찰직 항해학(24년 하반기-25년 하반기).pdf".casefold()
+    )
+    engine = "[기출문제]경찰직 기관술(학)(24-13년).pdf".casefold()
+
+    reported = repairs[(recent_navigation, 14, 13)]
+    assert reported["repaired_choices"][3] == (
+        "㉣과 관련하여 인근의 선박 통항량이 많은 경우, 일반적으로 "
+        "선체의 선회면적이 작은 쌍묘박(Mooring)이 적합하다."
+    )
+
+    anchor = repairs[(navigation, 73, 12)]
+    radar = repairs[(navigation, 73, 13)]
+    flat_keel = repairs[(navigation, 74, 19)]
+    back_fire = repairs[(engine, 62, 7)]
+    assert anchor["repaired_choices"] == [
+        "㉠, ㉤, ㉥",
+        "㉠, ㉡, ㉥",
+        "㉠, ㉢, ㉣",
+        "㉡, ㉣, ㉤",
+    ]
+    assert radar["repaired_choices"] == ["없음", "1개", "2개", "3개"]
+    assert flat_keel["repaired_choices"] == [
+        "㉠, ㉢",
+        "㉡, ㉤",
+        "㉢, ㉣",
+        "㉣, ㉤",
+    ]
+    assert back_fire["repaired_choices"][1:3] == [
+        "노 내의 가스를 완전히 배출하지 않고 점화하였을 때",
+        "점화시에 버너 유량을 급히 증가하였을 때",
+    ]
+
+
 def test_bundled_repairs_restore_all_verified_damaged_view_lists():
     from src.parser.text_quality import text_quality_issue_codes
 

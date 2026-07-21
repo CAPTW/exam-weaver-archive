@@ -75,6 +75,9 @@ CJK_PATTERN = re.compile(r"[一-龥]")
 DAMAGED_LIST_MARKER_PATTERN = re.compile(
     r"(?m)^\s*@(?=\s*[A-Za-z가-힣])"
 )
+REPEATED_CIRCLED_NUMBER_OCR_PATTERN = re.compile(
+    r"([①-⑳])(?:\s+\1)+"
+)
 COUNTING_LIST_PROMPT_PATTERN = re.compile(
     r"(?:모두|총)\s*몇\s*(?:개|가지|명|척)"
 )
@@ -117,6 +120,7 @@ def text_quality_issue_codes(text: str) -> tuple[str, ...]:
         or has_mixed_roman_ocr(value)
         or has_intrusive_latin_digit_ocr(value)
         or has_intrusive_cjk_ocr(value)
+        or REPEATED_CIRCLED_NUMBER_OCR_PATTERN.search(value)
     ):
         codes.append("ocr_noise")
     if BROKEN_UNIT_PATTERN.search(value):
