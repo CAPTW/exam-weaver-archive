@@ -45,6 +45,7 @@ from ...choice_markers import (
 )
 from ..table_editor import TableEditorDialog
 from ..table_preview import TablePreviewCard
+from ..explanation_image_editor import ExplanationImageEditor
 
 
 MIN_CHOICE_COUNT = 4
@@ -63,9 +64,11 @@ class QuestionEditor(QDialog):
         subject_options=None,
         create_mode=False,
         choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+        explanation_image_store=None,
     ):
         super().__init__(parent)
         self.create_mode = bool(create_mode)
+        self.explanation_image_store = explanation_image_store
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.setModal(True)
         self.question_data = question_data or {}
@@ -664,8 +667,18 @@ class QuestionEditor(QDialog):
         self.explanationEditor = TextEdit(self.explanationSidecar)
         self.explanationEditor.setPlaceholderText("이 문제의 상세 해설을 입력하세요.")
         self.explanationEditor.setPlainText(self.question_data.get('explanation') or '')
-        self.explanationEditor.setMinimumHeight(420)
+        self.explanationEditor.setMinimumHeight(260)
         sideLayout.addWidget(self.explanationEditor, 1)
+
+        self.explanationImageEditor = ExplanationImageEditor(
+            self.explanationSidecar,
+            image_store=self.explanation_image_store,
+        )
+        explanation_images = self.question_data.get('explanation_images') or []
+        self.explanationImageEditor.set_attachment(
+            explanation_images[0] if explanation_images else None
+        )
+        sideLayout.addWidget(self.explanationImageEditor, 0)
 
         self.explanationDockLayout.addWidget(
             self.explanationToggleButton,
@@ -673,7 +686,21 @@ class QuestionEditor(QDialog):
             Qt.AlignmentFlag.AlignTop,
         )
         self.explanationDockLayout.addWidget(self.explanationSidecar)
-        self.set_explanation_sidecar_expanded(bool(self.question_data.get('explanation')))
+        self.set_explanation_sidecar_expanded(
+            bool(self.question_data.get('explanation') or explanation_images)
+        )
+
+    def set_explanation_image_store(self, image_store):
+        self.explanation_image_store = image_store
+        self.explanationImageEditor.set_image_store(image_store)
+        explanation_images = self.question_data.get('explanation_images') or []
+        self.explanationImageEditor.set_attachment(
+            explanation_images[0] if explanation_images else None
+        )
+
+    def reject(self):
+        self.explanationImageEditor.discard_pending()
+        super().reject()
 
     def toggle_explanation_sidecar(self):
         self.set_explanation_sidecar_expanded(not self.explanation_sidecar_expanded)
@@ -1316,6 +1343,7 @@ class QuestionEditor(QDialog):
             if question_type == QUESTION_TYPE_DESCRIPTIVE
             else self.answerCombo.currentData()
         )
+        explanation_images = self.question_data.get('explanation_images') or []
         return {
             'year': self.yearInput.value(),
             'session': self.sessionInput.value(),
@@ -1330,6 +1358,9 @@ class QuestionEditor(QDialog):
             'answer_available': question_type != QUESTION_TYPE_DESCRIPTIVE and correct_answer != 0,
             'tags': self.tagsInput.text(),
             'explanation': self.explanationEditor.toPlainText().strip() or None,
+            'explanation_image_change': self.explanationImageEditor.image_change(
+                force_copy=self.create_mode and bool(explanation_images)
+            ),
             'image_path': self.imagePath,
             'choices': choices
         }

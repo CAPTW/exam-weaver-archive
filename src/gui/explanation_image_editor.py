@@ -58,6 +58,12 @@ class ExplanationImageEditor(QWidget):
         self.pasteButton.clicked.connect(self.paste_image)
         self.removeButton.clicked.connect(self.remove_image)
 
+    def set_image_store(self, image_store: ExplanationImageStore | None) -> None:
+        self.discard_pending()
+        self._attachment = None
+        self.store = image_store or ExplanationImageStore()
+        self._show_saved_attachment()
+
     def set_attachment(self, attachment: Mapping[str, Any] | None) -> None:
         self.discard_pending()
         self._attachment = dict(attachment) if attachment else None

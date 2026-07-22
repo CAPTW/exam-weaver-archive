@@ -159,7 +159,7 @@ class MountedExamRepository:
         self.manifest_path = Path(manifest_path).resolve()
         self.mounts = [mount for mount in load_manifest(self.manifest_path) if mount.enabled]
         self._mounts_by_id = {mount.id: mount for mount in self.mounts}
-        self.explanation_image_store = explanation_image_store
+        self.explanation_image_store = explanation_image_store or ExplanationImageStore()
 
     def init_database(self) -> None:
         self.validate_mounts()

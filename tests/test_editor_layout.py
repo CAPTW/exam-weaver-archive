@@ -247,6 +247,7 @@ def test_question_editor_has_collapsible_explanation_sidecar():
     editor.explanationEditor.setPlainText('수정한 해설')
 
     assert editor.get_data()['explanation'] == '수정한 해설'
+    assert editor.explanationSidecar.layout().indexOf(editor.explanationImageEditor) > -1
 
     editor.deleteLater()
     APP.processEvents()
@@ -458,6 +459,7 @@ def test_browser_manual_add_button_creates_personal_question(repo, monkeypatch):
             subject_options=None,
             create_mode=False,
             choice_marker_style=None,
+            explanation_image_store=None,
         ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options
@@ -548,6 +550,7 @@ def test_browser_clone_button_creates_customized_personal_question(repo, monkeyp
             subject_options=None,
             create_mode=False,
             choice_marker_style=None,
+            explanation_image_store=None,
         ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options
@@ -603,6 +606,7 @@ def test_browser_descriptive_add_button_creates_model_answer_question(repo, monk
             subject_options=None,
             create_mode=False,
             choice_marker_style=None,
+            explanation_image_store=None,
         ):
             self.captured_question_data = question_data
             self.captured_subject_options = subject_options

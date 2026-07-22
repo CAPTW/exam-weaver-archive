@@ -15,6 +15,7 @@ from ...choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     normalize_choice_marker_style,
 )
+from ..explanation_image_editor import ExplanationImageEditor
 from .editor import QuestionEditor
 
 class BrowserInterface(QWidget):
@@ -56,6 +57,9 @@ class BrowserInterface(QWidget):
         self.load_data()
 
     def set_repository(self, repository):
+        self.explanationImageEditor.set_image_store(
+            getattr(repository, "explanation_image_store", None)
+        )
         self.repo = repository
         self.validator = QuestionValidator(repository)
         self.validation_mode = False
@@ -236,6 +240,12 @@ class BrowserInterface(QWidget):
         self.explanationEditor.setPlaceholderText("사용자 해설을 입력하세요.")
         self.explanationEditor.setMinimumHeight(280)
         sideLayout.addWidget(self.explanationEditor, 1)
+
+        self.explanationImageEditor = ExplanationImageEditor(
+            self.explanationSidecar,
+            image_store=getattr(self.repo, "explanation_image_store", None),
+        )
+        sideLayout.addWidget(self.explanationImageEditor, 0)
 
         buttonLayout = QHBoxLayout()
         self.saveExplanationButton = PrimaryPushButton("저장", self.explanationSidecar)
@@ -477,6 +487,10 @@ class BrowserInterface(QWidget):
             subject_options=repository.get_subject_options(editor_question.get('exam_code')),
             choice_marker_style=self.choice_marker_style,
         )
+        if hasattr(dialog, "set_explanation_image_store"):
+            dialog.set_explanation_image_store(
+                getattr(repository, "explanation_image_store", None)
+            )
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._open_editors[question_id] = dialog
@@ -514,6 +528,13 @@ class BrowserInterface(QWidget):
             )
             return
 
+        saved_question = repository.get_question(question_id)
+        if saved_question and hasattr(dialog, "explanationImageEditor"):
+            attachments = saved_question.get('explanation_images') or []
+            dialog.explanationImageEditor.set_attachment(
+                attachments[0] if attachments else None
+            )
+
         InfoBar.success(
             title='수정 완료',
             content="문제가 성공적으로 수정되었습니다.",
@@ -540,11 +561,17 @@ class BrowserInterface(QWidget):
             create_mode=True,
             choice_marker_style=self.choice_marker_style,
         )
+        if hasattr(dialog, "set_explanation_image_store"):
+            dialog.set_explanation_image_store(
+                getattr(self.repo, "explanation_image_store", None)
+            )
         if not dialog.exec():
             return
 
         data = dialog.get_data()
         question_id = self.repo.create_manual_question(data)
+        if hasattr(dialog, "explanationImageEditor"):
+            dialog.explanationImageEditor.discard_pending()
         if question_id:
             InfoBar.success(
                 title='추가 완료',
@@ -575,11 +602,17 @@ class BrowserInterface(QWidget):
             create_mode=True,
             choice_marker_style=self.choice_marker_style,
         )
+        if hasattr(dialog, "set_explanation_image_store"):
+            dialog.set_explanation_image_store(
+                getattr(self.repo, "explanation_image_store", None)
+            )
         if not dialog.exec():
             return
 
         data = dialog.get_data()
         question_id = self.repo.create_manual_question(data)
+        if hasattr(dialog, "explanationImageEditor"):
+            dialog.explanationImageEditor.discard_pending()
         if question_id:
             InfoBar.success(
                 title='추가 완료',
@@ -619,11 +652,17 @@ class BrowserInterface(QWidget):
             create_mode=True,
             choice_marker_style=self.choice_marker_style,
         )
+        if hasattr(dialog, "set_explanation_image_store"):
+            dialog.set_explanation_image_store(
+                getattr(self.repo, "explanation_image_store", None)
+            )
         if not dialog.exec():
             return
 
         data = dialog.get_data()
         new_question_id = self.repo.create_manual_question(data)
+        if hasattr(dialog, "explanationImageEditor"):
+            dialog.explanationImageEditor.discard_pending()
         if new_question_id:
             InfoBar.success(
                 title='복제 완료',
@@ -713,6 +752,10 @@ class BrowserInterface(QWidget):
         self.current_explanation_question_id = question_id
         self.explanationInfoLabel.setText(self._format_info(q))
         self.explanationEditor.setPlainText(q.get('explanation') or '')
+        attachments = q.get('explanation_images') or []
+        self.explanationImageEditor.set_attachment(
+            attachments[0] if attachments else None
+        )
         self.set_explanation_sidecar_expanded(True)
 
     def save_current_explanation(self):
@@ -724,12 +767,18 @@ class BrowserInterface(QWidget):
             updated = self.repo.update_question_explanation(
                 self.current_explanation_question_id,
                 self.explanationEditor.toPlainText(),
+                image_change=self.explanationImageEditor.image_change(),
             )
         except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
             self._show_write_error("해설 저장", exc)
             return
 
         if updated:
+            question = self.repo.get_question(self.current_explanation_question_id)
+            attachments = question.get('explanation_images') if question else []
+            self.explanationImageEditor.set_attachment(
+                attachments[0] if attachments else None
+            )
             InfoBar.success(title='저장 완료', content="문제 해설을 저장했습니다.", parent=self)
             if self.validation_mode:
                 self.load_validation_results()
