@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Mapping, Sequence
 
+from ..explanation_images import ExplanationImageChange, ExplanationImageStore
 from ..utils.tagger import build_tags
 from ..parser.question import ALL_CHOICES_CORRECT
 from ..parser.table_format import format_display_text
@@ -48,8 +49,13 @@ def _escape_like(value: str) -> str:
 
 
 class ExamRepository:
-    def __init__(self, db_path: str):
+    def __init__(
+        self,
+        db_path: str,
+        explanation_image_store: ExplanationImageStore | None = None,
+    ):
         self.db_path = db_path
+        self.explanation_image_store = explanation_image_store or ExplanationImageStore()
         self._initialized = False
 
     def _get_connection(self):
@@ -1151,6 +1157,7 @@ class ExamRepository:
                 question_type,
             ),
             'explanation': source.get('explanation'),
+            'explanation_images': list(source.get('explanation_images') or []),
             'image_path': source.get('image_path'),
             'choices': [] if question_type == QUESTION_TYPE_DESCRIPTIVE else choices,
         })
@@ -1179,6 +1186,7 @@ class ExamRepository:
     def create_manual_question(self, data: Dict[str, Any]) -> Optional[int]:
         """Insert a user-authored question under the manual question bucket."""
         self._ensure_initialized()
+        prepared_explanation_path = None
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -1207,6 +1215,9 @@ class ExamRepository:
                         correct_answer,
                         list(data.get('choices') or []),
                     )
+                _, prepared_explanation_path = self._prepare_explanation_image(
+                    data.get('explanation_image_change')
+                )
                 cursor.execute("""
                     INSERT INTO questions (
                         exam_subject_id, year, session, question_number,
@@ -1231,6 +1242,11 @@ class ExamRepository:
                     tags,
                 ))
                 question_id = cursor.lastrowid
+                self._write_explanation_image_row(
+                    cursor,
+                    int(question_id),
+                    prepared_explanation_path,
+                )
                 choice_rows = []
                 if not is_descriptive:
                     for choice in data.get('choices', []):
@@ -1257,6 +1273,7 @@ class ExamRepository:
                 conn.commit()
                 return int(question_id)
         except Exception as e:
+            self._remove_prepared_explanation_file(prepared_explanation_path)
             logger.error("Failed to create manual question: %s", e)
             return None
 
@@ -1341,9 +1358,103 @@ class ExamRepository:
             tokens.append(DESCRIPTIVE_TAG)
         return ", ".join(tokens)
 
+    @staticmethod
+    def _normalize_explanation_image_change(
+        change: ExplanationImageChange | Mapping[str, Any] | None,
+    ) -> ExplanationImageChange:
+        if change is None:
+            return ExplanationImageChange.keep()
+        if isinstance(change, ExplanationImageChange):
+            return change
+        if isinstance(change, Mapping):
+            action = str(change.get('action') or 'keep')
+            if action == 'keep':
+                return ExplanationImageChange.keep()
+            if action == 'remove':
+                return ExplanationImageChange.remove()
+            if action == 'replace':
+                return ExplanationImageChange.replace(change.get('source_path'))
+        raise ValueError("올바르지 않은 해설 이미지 변경 요청입니다.")
+
+    def _prepare_explanation_image(
+        self,
+        change: ExplanationImageChange | Mapping[str, Any] | None,
+    ) -> tuple[ExplanationImageChange, Optional[str]]:
+        normalized = self._normalize_explanation_image_change(change)
+        if normalized.action == 'keep':
+            return normalized, None
+        if normalized.action == 'remove':
+            return normalized, ''
+        return normalized, self.explanation_image_store.import_file(normalized.source_path)
+
+    @staticmethod
+    def _current_explanation_image_paths(
+        cursor: sqlite3.Cursor,
+        question_ids: Sequence[int],
+    ) -> List[str]:
+        if not question_ids:
+            return []
+        placeholders = ",".join("?" for _ in question_ids)
+        cursor.execute(
+            f"""
+            SELECT image_path
+            FROM question_explanation_images
+            WHERE question_id IN ({placeholders})
+            """,
+            list(question_ids),
+        )
+        return [str(row[0]) for row in cursor.fetchall() if row[0]]
+
+    def _write_explanation_image_row(
+        self,
+        cursor: sqlite3.Cursor,
+        question_id: int,
+        prepared_path: Optional[str],
+    ) -> None:
+        if prepared_path is None:
+            return
+        cursor.execute(
+            """
+            DELETE FROM question_explanation_images
+            WHERE question_id = ? AND display_order = 0
+            """,
+            (question_id,),
+        )
+        if prepared_path:
+            cursor.execute(
+                """
+                INSERT INTO question_explanation_images (
+                    question_id, image_path, display_order
+                ) VALUES (?, ?, 0)
+                """,
+                (question_id, prepared_path),
+            )
+
+    def _cleanup_unreferenced_explanation_files(
+        self,
+        image_paths: Sequence[str],
+    ) -> None:
+        for image_path in set(image_paths):
+            if not image_path:
+                continue
+            with self._get_connection() as conn:
+                referenced = conn.execute(
+                    "SELECT 1 FROM question_explanation_images WHERE image_path = ? LIMIT 1",
+                    (image_path,),
+                ).fetchone()
+            if referenced is None:
+                self.explanation_image_store.remove_managed(image_path)
+
+    def _remove_prepared_explanation_file(self, prepared_path: Optional[str]) -> None:
+        if prepared_path:
+            self.explanation_image_store.remove_managed(prepared_path)
+
     def update_question(self, question_id: int, data: Dict) -> bool:
         """Update question data"""
         self._ensure_initialized()
+        prepared_explanation_path = None
+        old_explanation_paths = []
+        explanation_image_changed = False
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -1358,6 +1469,14 @@ class ExamRepository:
                 current = cursor.fetchone()
                 if not current:
                     return False
+                old_explanation_paths = self._current_explanation_image_paths(
+                    cursor,
+                    [question_id],
+                )
+                image_change, prepared_explanation_path = self._prepare_explanation_image(
+                    data.get('explanation_image_change')
+                )
+                explanation_image_changed = image_change.action != 'keep'
 
                 exam_subject_id = data.get('exam_subject_id')
                 if not exam_subject_id and data.get('exam_code') and data.get('subject_code'):
@@ -1460,35 +1579,75 @@ class ExamRepository:
                         )
                         for choice in data.get('choices', [])
                     ])
+                self._write_explanation_image_row(
+                    cursor,
+                    question_id,
+                    prepared_explanation_path,
+                )
                 conn.commit()
-                return True
+            if explanation_image_changed:
+                self._cleanup_unreferenced_explanation_files(old_explanation_paths)
+            return True
         except Exception as e:
+            self._remove_prepared_explanation_file(prepared_explanation_path)
             logger.error(f"Failed to update question {question_id}: {e}")
             return False
 
-    def update_question_explanation(self, question_id: int, explanation: Optional[str]) -> bool:
-        """Update only the user-authored explanation for a question."""
+    def update_question_explanation(
+        self,
+        question_id: int,
+        explanation: Optional[str],
+        image_change: ExplanationImageChange | Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Update the user-authored explanation and optional managed image."""
         self._ensure_initialized()
+        prepared_explanation_path = None
+        old_explanation_paths = []
+        explanation_image_changed = False
         try:
             normalized = str(explanation or '').strip() or None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM questions WHERE id = ?", (question_id,))
+                if cursor.fetchone() is None:
+                    return False
+                old_explanation_paths = self._current_explanation_image_paths(
+                    cursor,
+                    [question_id],
+                )
+                normalized_change, prepared_explanation_path = self._prepare_explanation_image(
+                    image_change
+                )
+                explanation_image_changed = normalized_change.action != 'keep'
                 cursor.execute(
                     "UPDATE questions SET explanation = ? WHERE id = ?",
                     (normalized, question_id),
                 )
+                self._write_explanation_image_row(
+                    cursor,
+                    question_id,
+                    prepared_explanation_path,
+                )
                 conn.commit()
-                return cursor.rowcount > 0
+            if explanation_image_changed:
+                self._cleanup_unreferenced_explanation_files(old_explanation_paths)
+            return True
         except Exception as e:
+            self._remove_prepared_explanation_file(prepared_explanation_path)
             logger.error(f"Failed to update explanation for question {question_id}: {e}")
             return False
 
     def delete_question(self, question_id: int) -> bool:
         """Delete a question and dependent rows."""
         self._ensure_initialized()
+        explanation_paths = []
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                explanation_paths = self._current_explanation_image_paths(
+                    cursor,
+                    [question_id],
+                )
                 cursor.execute(
                     "DELETE FROM mock_exam_questions WHERE question_id = ?",
                     (question_id,)
@@ -1501,8 +1660,11 @@ class ExamRepository:
                     "DELETE FROM questions WHERE id = ?",
                     (question_id,)
                 )
+                deleted = cursor.rowcount > 0
                 conn.commit()
-                return cursor.rowcount > 0
+            if deleted:
+                self._cleanup_unreferenced_explanation_files(explanation_paths)
+            return deleted
         except Exception as e:
             logger.error(f"Failed to delete question {question_id}: {e}")
             return False
@@ -1515,9 +1677,11 @@ class ExamRepository:
             return 0
 
         placeholders = ",".join(["?"] * len(ids))
+        explanation_paths = []
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                explanation_paths = self._current_explanation_image_paths(cursor, ids)
                 cursor.execute(
                     f"DELETE FROM mock_exam_questions WHERE question_id IN ({placeholders})",
                     ids
@@ -1532,7 +1696,9 @@ class ExamRepository:
                 )
                 deleted_count = cursor.rowcount
                 conn.commit()
-                return deleted_count
+            if deleted_count:
+                self._cleanup_unreferenced_explanation_files(explanation_paths)
+            return deleted_count
         except Exception as e:
             logger.error(f"Failed to delete questions {ids}: {e}")
             return 0

@@ -1,7 +1,11 @@
 import sqlite3
 import json
-import pytest
+from pathlib import Path
 
+import pytest
+from PyQt5.QtGui import QImage
+
+from src.explanation_images import ExplanationImageChange, ExplanationImageStore
 from src.parser.merger import DataMerger
 from src.parser.question import Choice, Question
 from src.database.repository import (
@@ -17,6 +21,13 @@ from src.web_import.models import ComcbtParsedExam, ComcbtQuestionGroup
 
 def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _test_image(path: Path) -> str:
+    image = QImage(8, 6, QImage.Format.Format_RGB32)
+    image.fill(0xFF4477AA)
+    assert image.save(str(path), "PNG")
+    return str(path)
 
 
 def test_init_database_backfills_missing_tags_and_reference_data(repo):
@@ -785,6 +796,178 @@ def test_explanation_image_table_is_migrated_and_exposed(
     }
     assert loaded["explanation_images"][0]["alt_text"] == "출력 계산식"
     assert listed["explanation_images"][0]["image_path"].endswith("a.png")
+
+
+def test_explanation_image_add_replace_and_remove(
+    tmp_path,
+    sample_metadata,
+    sample_question,
+):
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(
+        str(tmp_path / "bank.db"),
+        explanation_image_store=store,
+    )
+    repository.init_database()
+    repository.save_questions([sample_question], sample_metadata)
+    question_id = repository.get_questions_with_choices(limit=1)[0]["id"]
+    first = _test_image(tmp_path / "first.png")
+    second = _test_image(tmp_path / "second.png")
+
+    assert repository.update_question_explanation(
+        question_id,
+        "해설",
+        ExplanationImageChange.replace(first),
+    )
+    first_path = repository.get_question(question_id)["explanation_images"][0]["image_path"]
+    assert store.resolve(first_path).exists()
+
+    assert repository.update_question_explanation(
+        question_id,
+        "교체",
+        ExplanationImageChange.replace(second),
+    )
+    second_path = repository.get_question(question_id)["explanation_images"][0]["image_path"]
+    assert first_path != second_path
+    assert not store.resolve(first_path).exists()
+    assert store.resolve(second_path).exists()
+
+    assert repository.update_question_explanation(
+        question_id,
+        "텍스트만",
+        ExplanationImageChange.remove(),
+    )
+    assert repository.get_question(question_id)["explanation_images"] == []
+    assert not store.resolve(second_path).exists()
+
+
+def test_failed_explanation_image_write_rolls_back_database_and_new_file(
+    tmp_path,
+    sample_metadata,
+    sample_question,
+    monkeypatch,
+):
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(
+        str(tmp_path / "bank.db"),
+        explanation_image_store=store,
+    )
+    repository.init_database()
+    repository.save_questions([sample_question], sample_metadata)
+    question_id = repository.get_questions_with_choices(limit=1)[0]["id"]
+    first = _test_image(tmp_path / "first.png")
+    second = _test_image(tmp_path / "second.png")
+    assert repository.update_question_explanation(
+        question_id,
+        "원본",
+        ExplanationImageChange.replace(first),
+    )
+    original = repository.get_question(question_id)
+    original_path = original["explanation_images"][0]["image_path"]
+    original_files = set(store.image_dir.glob("*"))
+
+    def fail_write(*_args, **_kwargs):
+        raise sqlite3.OperationalError("forced failure")
+
+    monkeypatch.setattr(repository, "_write_explanation_image_row", fail_write)
+    assert repository.update_question_explanation(
+        question_id,
+        "변경",
+        ExplanationImageChange.replace(second),
+    ) is False
+
+    loaded = repository.get_question(question_id)
+    assert loaded["explanation"] == "원본"
+    assert loaded["explanation_images"][0]["image_path"] == original_path
+    assert set(store.image_dir.glob("*")) == original_files
+
+
+def test_update_question_persists_explanation_image_change(
+    tmp_path,
+    sample_metadata,
+    sample_question,
+):
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(
+        str(tmp_path / "bank.db"),
+        explanation_image_store=store,
+    )
+    repository.init_database()
+    repository.save_questions([sample_question], sample_metadata)
+    question_id = repository.get_questions_with_choices(limit=1)[0]["id"]
+    source = _test_image(tmp_path / "update.png")
+    loaded = repository.get_question(question_id)
+    loaded["question_text"] = "수정된 문제"
+    loaded["explanation_image_change"] = ExplanationImageChange.replace(source)
+
+    assert repository.update_question(question_id, loaded)
+    assert len(repository.get_question(question_id)["explanation_images"]) == 1
+
+
+def test_create_and_clone_copy_explanation_images_independently(
+    tmp_path,
+    sample_metadata,
+    sample_question,
+):
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(
+        str(tmp_path / "bank.db"),
+        explanation_image_store=store,
+    )
+    repository.init_database()
+    repository.save_questions([sample_question], sample_metadata)
+    source_id = repository.get_questions_with_choices(limit=1)[0]["id"]
+    source = _test_image(tmp_path / "clone.png")
+    template = repository.get_manual_question_clone_template(source_id)
+    template["explanation_image_change"] = ExplanationImageChange.replace(source)
+    first_id = repository.create_manual_question(template)
+    first = repository.get_question(first_id)
+    first_path = first["explanation_images"][0]["image_path"]
+    assert first["explanation_images"] == repository.get_manual_question_clone_template(first_id)[
+        "explanation_images"
+    ]
+
+    clone = repository.get_manual_question_clone_template(first_id)
+    clone["explanation_image_change"] = ExplanationImageChange.replace(
+        store.resolve(first_path)
+    )
+    second_id = repository.create_manual_question(clone)
+    second_path = repository.get_question(second_id)["explanation_images"][0]["image_path"]
+
+    assert first_path != second_path
+    assert store.resolve(first_path).read_bytes() == store.resolve(second_path).read_bytes()
+
+
+def test_single_and_bulk_question_delete_remove_explanation_files(
+    tmp_path,
+    sample_metadata,
+    sample_question,
+):
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(
+        str(tmp_path / "bank.db"),
+        explanation_image_store=store,
+    )
+    repository.init_database()
+    repository.save_questions([sample_question], sample_metadata)
+    source_id = repository.get_questions_with_choices(limit=1)[0]["id"]
+    question_ids = []
+    stored_paths = []
+    for number in range(1, 4):
+        source = _test_image(tmp_path / f"delete-{number}.png")
+        template = repository.get_manual_question_clone_template(source_id)
+        template["explanation_image_change"] = ExplanationImageChange.replace(source)
+        question_id = repository.create_manual_question(template)
+        question_ids.append(question_id)
+        stored_paths.append(
+            repository.get_question(question_id)["explanation_images"][0]["image_path"]
+        )
+
+    assert repository.delete_question(question_ids[0])
+    assert not store.resolve(stored_paths[0]).exists()
+    assert repository.delete_questions(question_ids[1:]) == 2
+    assert not store.resolve(stored_paths[1]).exists()
+    assert not store.resolve(stored_paths[2]).exists()
 
 
 def test_update_question_can_convert_to_descriptive_and_clear_choices(repo, sample_metadata, sample_question):
