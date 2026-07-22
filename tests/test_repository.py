@@ -754,6 +754,39 @@ def test_question_explanation_is_migrated_saved_and_exposed(repo, sample_metadat
     assert repo.get_question(question['id'])['explanation'] is None
 
 
+def test_explanation_image_table_is_migrated_and_exposed(
+    repo,
+    sample_metadata,
+    sample_question,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    question = repo.get_questions_with_choices(limit=1)[0]
+    with sqlite3.connect(repo.db_path) as conn:
+        columns = _columns(conn, "question_explanation_images")
+        conn.execute(
+            """
+            INSERT INTO question_explanation_images (
+                question_id, image_path, display_order, alt_text
+            ) VALUES (?, ?, 0, ?)
+            """,
+            (question["id"], "data/explanation_images/a.png", "출력 계산식"),
+        )
+
+    loaded = repo.get_question(question["id"])
+    listed = repo.get_questions_with_choices(limit=1)[0]
+
+    assert columns == {
+        "id",
+        "question_id",
+        "image_path",
+        "display_order",
+        "alt_text",
+        "created_at",
+    }
+    assert loaded["explanation_images"][0]["alt_text"] == "출력 계산식"
+    assert listed["explanation_images"][0]["image_path"].endswith("a.png")
+
+
 def test_update_question_can_convert_to_descriptive_and_clear_choices(repo, sample_metadata, sample_question):
     repo.save_questions([sample_question], sample_metadata)
     question = repo.get_questions_with_choices(limit=1)[0]

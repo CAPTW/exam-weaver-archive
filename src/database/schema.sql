@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS question_choices (
     UNIQUE(question_id, choice_number)
 );
 
+-- ============ 해설 이미지 첨부 테이블 ============
+CREATE TABLE IF NOT EXISTS question_explanation_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    image_path TEXT NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    alt_text TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(question_id, display_order)
+);
+
 -- ============ 모의고사 테이블 ============
 CREATE TABLE IF NOT EXISTS mock_exams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,3 +139,5 @@ CREATE TABLE IF NOT EXISTS exam_results (
 CREATE INDEX IF NOT EXISTS idx_questions_exam_subject ON questions(exam_subject_id);
 CREATE INDEX IF NOT EXISTS idx_questions_year_session ON questions(year, session);
 CREATE INDEX IF NOT EXISTS idx_choices_question ON question_choices(question_id);
+CREATE INDEX IF NOT EXISTS idx_explanation_images_question
+ON question_explanation_images(question_id, display_order);

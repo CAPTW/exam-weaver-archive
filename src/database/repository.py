@@ -54,6 +54,7 @@ class ExamRepository:
 
     def _get_connection(self):
         connection = sqlite3.connect(self.db_path)
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.create_function(
             "FORMAT_DISPLAY_TEXT",
             1,
@@ -789,11 +790,37 @@ class ExamRepository:
                 choices_by_qid[row['question_id']].append(
                     self._normalize_choice_row(dict(row))
                 )
+            explanation_images_by_qid = self._explanation_images_by_question(conn, ids)
 
         for q in questions:
             q['choices'] = choices_by_qid.get(q['id'], [])
+            q['explanation_images'] = explanation_images_by_qid.get(q['id'], [])
 
         return questions
+
+    @staticmethod
+    def _explanation_images_by_question(
+        conn: sqlite3.Connection,
+        question_ids: Sequence[int],
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        result = {question_id: [] for question_id in question_ids}
+        if not question_ids:
+            return result
+
+        placeholders = ",".join("?" for _ in question_ids)
+        rows = conn.execute(
+            f"""
+            SELECT id, question_id, image_path, display_order, alt_text
+            FROM question_explanation_images
+            WHERE question_id IN ({placeholders})
+            ORDER BY question_id ASC, display_order ASC
+            """,
+            list(question_ids),
+        ).fetchall()
+        for row in rows:
+            item = dict(row)
+            result[item['question_id']].append(item)
+        return result
 
     def get_question(self, question_id: int) -> Optional[Dict]:
         self._ensure_initialized()
@@ -831,6 +858,10 @@ class ExamRepository:
                 self._normalize_choice_row(dict(r))
                 for r in cursor.fetchall()
             ]
+            question['explanation_images'] = self._explanation_images_by_question(
+                conn,
+                [question_id],
+            )[question_id]
             
             return question
 
