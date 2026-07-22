@@ -5,7 +5,9 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
+from PyQt5.QtGui import QImage
 
+from src.explanation_images import ExplanationImageChange, ExplanationImageStore
 from experiments.db_mount_prototype.domain_split import classify_exam, split_database_by_domain
 from experiments.db_mount_prototype.mount_repo import (
     MountedDatabase,
@@ -45,6 +47,13 @@ def _make_db(path, question_text):
         )
     ], metadata)
     return repo
+
+
+def _make_image(path):
+    image = QImage(8, 6, QImage.Format.Format_RGB32)
+    image.fill(0xFF225588)
+    assert image.save(str(path), "PNG")
+    return str(path)
 
 
 def _add_question(repo, exam_type, subject_name, question_text, *, session=1):
@@ -426,6 +435,58 @@ def test_mounted_repository_routes_writes_to_read_only_marked_owner(tmp_path):
     assert mounted.delete_question("first::1")
     assert ExamRepository(str(first_db)).get_question(1) is None
     assert ExamRepository(str(second_db)).get_question(1) is not None
+
+
+def test_mounted_repository_reads_and_writes_explanation_image(tmp_path):
+    first_db = tmp_path / "first.db"
+    second_db = tmp_path / "second.db"
+    _make_db(first_db, "첫 문제")
+    _make_db(second_db, "둘 문제")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [
+            MountedDatabase(id="first", label="First", path=first_db),
+            MountedDatabase(id="second", label="Second", path=second_db),
+        ],
+    )
+    store = ExplanationImageStore(tmp_path / "app")
+    mounted = MountedExamRepository(manifest, explanation_image_store=store)
+    source_image = _make_image(tmp_path / "mounted.png")
+
+    assert mounted.update_question_explanation(
+        "first::1",
+        "이미지 해설",
+        ExplanationImageChange.replace(source_image),
+    )
+
+    loaded = mounted.get_question("first::1")
+    listed = {
+        question["id"]: question
+        for question in mounted.get_questions_with_choices(limit=None)
+    }
+    assert loaded["explanation_images"][0]["id"].startswith("first::")
+    assert loaded["explanation_images"][0]["image_path"].startswith(
+        "data/explanation_images/"
+    )
+    assert listed["first::1"]["explanation_images"] == loaded["explanation_images"]
+    assert mounted.get_question("second::1")["explanation_images"] == []
+
+
+def test_legacy_read_only_mount_without_attachment_table_returns_empty_list(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    _make_db(db_path, "레거시 문제")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE question_explanation_images")
+    manifest = tmp_path / "mounts.json"
+    write_manifest(
+        manifest,
+        [MountedDatabase(id="legacy", label="Legacy", path=db_path, read_only=True)],
+    )
+    mounted = MountedExamRepository(manifest)
+
+    assert mounted.get_question("legacy::1")["explanation_images"] == []
+    assert mounted.get_questions_with_choices(limit=None)[0]["explanation_images"] == []
 
 
 def test_mounted_crud_rejects_invalid_available_answer_pair(tmp_path):

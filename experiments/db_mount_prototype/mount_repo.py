@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
 from src.database.practice_attempts import PracticeAttemptStore
+from src.explanation_images import ExplanationImageChange, ExplanationImageStore
 from src.parser.table_format import format_display_text
 
 
@@ -150,10 +151,15 @@ class MountedExamRepository:
     routed to the configured user workspace mount.
     """
 
-    def __init__(self, manifest_path: str | Path):
+    def __init__(
+        self,
+        manifest_path: str | Path,
+        explanation_image_store: ExplanationImageStore | None = None,
+    ):
         self.manifest_path = Path(manifest_path).resolve()
         self.mounts = [mount for mount in load_manifest(self.manifest_path) if mount.enabled]
         self._mounts_by_id = {mount.id: mount for mount in self.mounts}
+        self.explanation_image_store = explanation_image_store
 
     def init_database(self) -> None:
         self.validate_mounts()
@@ -375,8 +381,13 @@ class MountedExamRepository:
             mount = self._mounts_by_id[mount_id]
             local_ids = [question["local_id"] for question in mount_questions]
             choices_by_id = self._choices_for_mount(mount, local_ids)
+            explanation_images_by_id = self._explanation_images_for_mount(mount, local_ids)
             for question in mount_questions:
                 question["choices"] = choices_by_id.get(question["local_id"], [])
+                question["explanation_images"] = explanation_images_by_id.get(
+                    question["local_id"],
+                    [],
+                )
         return questions
 
     def get_question(self, question_id: Any) -> Optional[Dict[str, Any]]:
@@ -416,6 +427,10 @@ class MountedExamRepository:
                 return None
             question = self._namespace_question(mount, dict(row))
             question["choices"] = self._choices_for_mount(mount, [int(local_id)]).get(int(local_id), [])
+            question["explanation_images"] = self._explanation_images_for_mount(
+                mount,
+                [int(local_id)],
+            ).get(int(local_id), [])
             return question
 
     def get_manual_question_template(self) -> Dict[str, Any]:
@@ -491,9 +506,18 @@ class MountedExamRepository:
             raise RuntimeError(f"{mount.label} DB에서 문제를 수정하지 못했습니다.")
         return True
 
-    def update_question_explanation(self, question_id: Any, explanation: Optional[str]) -> bool:
+    def update_question_explanation(
+        self,
+        question_id: Any,
+        explanation: Optional[str],
+        image_change: ExplanationImageChange | Mapping[str, Any] | None = None,
+    ) -> bool:
         mount, local_id = self._write_target(question_id)
-        if not self._write_repo(mount).update_question_explanation(local_id, explanation):
+        if not self._write_repo(mount).update_question_explanation(
+            local_id,
+            explanation,
+            image_change,
+        ):
             raise RuntimeError(f"{mount.label} DB에서 해설을 저장하지 못했습니다.")
         return True
 
@@ -683,6 +707,51 @@ class MountedExamRepository:
             choices_by_id.setdefault(local_question_id, []).append(choice)
         return choices_by_id
 
+    def _explanation_images_for_mount(
+        self,
+        mount: MountedDatabase,
+        local_question_ids: List[int],
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        result: Dict[int, List[Dict[str, Any]]] = {
+            int(question_id): []
+            for question_id in local_question_ids
+        }
+        if not local_question_ids:
+            return result
+
+        placeholders = ",".join("?" for _ in local_question_ids)
+        with self._connect(mount) as conn:
+            exists = conn.execute(
+                """
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'question_explanation_images'
+                """
+            ).fetchone()
+            if exists is None:
+                return result
+            rows = conn.execute(
+                f"""
+                SELECT id, question_id, image_path, display_order, alt_text
+                FROM question_explanation_images
+                WHERE question_id IN ({placeholders})
+                ORDER BY question_id ASC, display_order ASC
+                """,
+                local_question_ids,
+            ).fetchall()
+
+        for row in rows:
+            image = dict(row)
+            local_id = int(image['id'])
+            local_question_id = int(image['question_id'])
+            image['local_id'] = local_id
+            image['local_question_id'] = local_question_id
+            image['id'] = namespaced_value(mount.id, local_id)
+            image['question_id'] = namespaced_value(mount.id, local_question_id)
+            image['mount_id'] = mount.id
+            result.setdefault(local_question_id, []).append(image)
+        return result
+
     def _namespace_question(self, mount: MountedDatabase, row: Dict[str, Any]) -> Dict[str, Any]:
         local_id = row.get("id")
         row["local_id"] = local_id
@@ -824,11 +893,13 @@ class MountedExamRepository:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid local question id: {local_id}") from exc
 
-    @staticmethod
-    def _write_repo(mount: MountedDatabase):
+    def _write_repo(self, mount: MountedDatabase):
         from src.database.repository import ExamRepository
 
-        repo = ExamRepository(str(mount.path))
+        repo = ExamRepository(
+            str(mount.path),
+            explanation_image_store=self.explanation_image_store,
+        )
         repo.init_database()
         return repo
 
