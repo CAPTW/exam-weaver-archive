@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -45,3 +46,11 @@ def ensure_user_database(base_dir: Optional[str | Path] = None) -> Path:
 
 def get_clipboard_image_dir(base_dir: Optional[str | Path] = None) -> Path:
     return get_data_dir(base_dir) / "clipboard_images"
+
+
+def get_explanation_image_dir(base_dir: Optional[str | Path] = None) -> Path:
+    return get_data_dir(base_dir) / "explanation_images"
+
+
+def get_explanation_image_candidate_dir() -> Path:
+    return Path(tempfile.gettempdir()) / "exam_weaver" / "explanation_image_candidates"
