@@ -93,7 +93,11 @@ class BrowserInterface(QWidget):
         # Filters
         self.examFilterLabel = BodyLabel("시험 종류", self)
         self.examFilterLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.examFilterLabel.setMinimumWidth(44)
+        self.examFilterLabel.setMinimumWidth(
+            self.examFilterLabel.fontMetrics().horizontalAdvance(
+                self.examFilterLabel.text()
+            ) + 8
+        )
 
         self.examFilter = QComboBox()
         self.examFilter.setPlaceholderText("시험 선택")
@@ -101,9 +105,10 @@ class BrowserInterface(QWidget):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self.examFilter.setMinimumContentsLength(12)
-        self.examFilter.setMinimumWidth(150)
-        self.examFilter.setMaximumWidth(200)
+        self.examFilter.setMinimumWidth(320)
+        self.examFilter.setMaximumWidth(480)
         self._apply_combo_item_height(self.examFilter)
+        self.examFilter.currentTextChanged.connect(self.examFilter.setToolTip)
 
         self.subjectFilterLabel = BodyLabel("과목", self)
         self.subjectFilterLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -115,8 +120,8 @@ class BrowserInterface(QWidget):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self.subjectFilter.setMinimumContentsLength(10)
-        self.subjectFilter.setMinimumWidth(140)
-        self.subjectFilter.setMaximumWidth(190)
+        self.subjectFilter.setMinimumWidth(320)
+        self.subjectFilter.setMaximumWidth(480)
         self._apply_combo_item_height(self.subjectFilter)
 
         self.examFilter.currentIndexChanged.connect(lambda *_: self._on_exam_filter_changed())
@@ -153,12 +158,18 @@ class BrowserInterface(QWidget):
         self.actionLayout.addWidget(self.btnValidate, 1, 0)
         self.actionLayout.addWidget(self.btnDeleteSelected, 1, 1)
 
+        self.filterLayout = QGridLayout()
+        self.filterLayout.setContentsMargins(0, 0, 0, 0)
+        self.filterLayout.setHorizontalSpacing(6)
+        self.filterLayout.setVerticalSpacing(4)
+        self.filterLayout.addWidget(self.examFilterLabel, 0, 0)
+        self.filterLayout.addWidget(self.examFilter, 0, 1)
+        self.filterLayout.addWidget(self.subjectFilterLabel, 1, 0)
+        self.filterLayout.addWidget(self.subjectFilter, 1, 1)
+
         self.headerLayout.addLayout(self.titleBlockLayout)
         self.headerLayout.addStretch(1)
-        self.headerLayout.addWidget(self.examFilterLabel)
-        self.headerLayout.addWidget(self.examFilter)
-        self.headerLayout.addWidget(self.subjectFilterLabel)
-        self.headerLayout.addWidget(self.subjectFilter)
+        self.headerLayout.addLayout(self.filterLayout)
         self.headerLayout.addLayout(self.actionLayout)
 
         self.searchLayout.addWidget(self.searchBox, 1)
@@ -257,6 +268,20 @@ class BrowserInterface(QWidget):
         view = combo.view()
         view.setStyleSheet(f"QListView::item {{ height: {height}px; }}")
 
+    def _update_combo_text_visibility(self, combo, max_popup_width=720):
+        item_texts = [combo.itemText(index) for index in range(combo.count())]
+        for index, item_text in enumerate(item_texts):
+            combo.setItemData(index, item_text, Qt.ItemDataRole.ToolTipRole)
+
+        longest_width = max(
+            (combo.fontMetrics().horizontalAdvance(text) for text in item_texts),
+            default=0,
+        )
+        combo.view().setMinimumWidth(
+            min(max(combo.minimumWidth(), longest_width + 48), max_popup_width)
+        )
+        combo.setToolTip(combo.currentText())
+
     def toggle_explanation_sidecar(self):
         self.set_explanation_sidecar_expanded(not self.explanation_sidecar_expanded)
 
@@ -290,6 +315,7 @@ class BrowserInterface(QWidget):
             index = self.examFilter.findData(current_code)
             if index >= 0:
                 self.examFilter.setCurrentIndex(index)
+        self._update_combo_text_visibility(self.examFilter)
         self.examFilter.blockSignals(False)
 
     def _update_repository_status(self, options):

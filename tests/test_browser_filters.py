@@ -3,6 +3,7 @@ import sqlite3
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from src.database.validator import QuestionValidator
@@ -62,6 +63,66 @@ def test_browser_filters_questions_by_exam_and_subject(repo, sample_metadata):
     assert '기관2' in widget.table.item(0, 2).text()
     assert '기관2 전용 문제' in widget.table.item(0, 3).text()
 
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_exam_filter_keeps_full_exam_names_accessible(repo):
+    widget = BrowserInterface(repo.db_path)
+    long_label = "Maritime 전체 문제은행 · 네트워크관리사 2급 필기시험 (exam_bank_network_manager_level_2)"
+    widget.examFilter.addItem(long_label, "long_exam")
+    widget._update_combo_text_visibility(widget.examFilter)
+
+    expected_popup_width = min(
+        widget.examFilter.fontMetrics().horizontalAdvance(long_label) + 48,
+        720,
+    )
+
+    assert widget.examFilter.minimumWidth() >= 300
+    assert widget.examFilter.maximumWidth() >= 400
+    assert widget.examFilter.view().minimumWidth() >= expected_popup_width
+    assert widget.examFilter.itemData(
+        widget.examFilter.count() - 1,
+        Qt.ItemDataRole.ToolTipRole,
+    ) == long_label
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_exam_filter_label_is_not_clipped_when_filter_is_wide(repo):
+    widget = BrowserInterface(repo.db_path)
+    widget.resize(1040, 800)
+    widget.show()
+    APP.processEvents()
+
+    label_text_width = widget.examFilterLabel.fontMetrics().horizontalAdvance(
+        widget.examFilterLabel.text()
+    )
+
+    assert widget.examFilterLabel.width() >= label_text_width
+
+    widget.close()
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_exam_and_subject_filters_are_stacked_with_equal_widths(repo):
+    widget = BrowserInterface(repo.db_path)
+    widget.resize(1035, 800)
+    widget.show()
+    APP.processEvents()
+
+    exam_geometry = widget.examFilter.geometry()
+    subject_geometry = widget.subjectFilter.geometry()
+
+    assert subject_geometry.y() > exam_geometry.y()
+    assert subject_geometry.x() == exam_geometry.x()
+    assert subject_geometry.width() == exam_geometry.width()
+    assert widget.subjectFilter.minimumWidth() == widget.examFilter.minimumWidth()
+    assert widget.subjectFilter.maximumWidth() == widget.examFilter.maximumWidth()
+
+    widget.close()
     widget.deleteLater()
     APP.processEvents()
 
