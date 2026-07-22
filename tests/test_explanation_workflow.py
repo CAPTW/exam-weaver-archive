@@ -6,7 +6,7 @@ from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import QApplication
 
 from src.database.repository import ExamRepository
-from src.explanation_images import ExplanationImageStore
+from src.explanation_images import ExplanationImageChange, ExplanationImageStore
 from src.gui.interface.browser import BrowserInterface
 from src.gui.interface.editor import QuestionEditor
 from src.gui.interface.practice import GRADING_MODE_INSTANT, PracticeInterface
@@ -236,6 +236,155 @@ def test_practice_revealed_answer_can_expand_saved_explanation(
 
     assert widget.explanationBox.isHidden() is False
     assert "출력 계산식" in widget.explanationBox.toPlainText()
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_practice_can_expand_image_only_explanation(
+    repo,
+    sample_metadata,
+    sample_question,
+    tmp_path,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(repo.db_path, explanation_image_store=store)
+    question = repository.get_questions_with_choices(limit=1)[0]
+    source = _write_image(tmp_path / "image-only.png")
+    repository.update_question_explanation(
+        question["id"],
+        None,
+        image_change=ExplanationImageChange.replace(source),
+    )
+    widget = PracticeInterface(repository=repository)
+    _select_subject(widget, "engine1", 1)
+    widget.gradingModeCombo.setCurrentIndex(
+        widget.gradingModeCombo.findData(GRADING_MODE_INSTANT)
+    )
+
+    widget.start_quiz()
+    widget.select_answer(2)
+    assert widget.explanationToggleButton.isHidden() is False
+
+    widget.toggle_current_explanation()
+
+    assert widget.explanationBox.isHidden() is True
+    assert widget.explanationImage.isHidden() is False
+    assert widget.explanationImage.width() <= 420
+    assert widget.explanationImage.height() <= 260
+    assert widget.explanationImageStatusLabel.isHidden() is True
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_practice_combines_explanation_text_and_image(
+    repo,
+    sample_metadata,
+    sample_question,
+    tmp_path,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(repo.db_path, explanation_image_store=store)
+    question = repository.get_questions_with_choices(limit=1)[0]
+    source = _write_image(tmp_path / "combined.png", color=0x884422)
+    repository.update_question_explanation(
+        question["id"],
+        "이미지와 함께 보는 해설",
+        image_change=ExplanationImageChange.replace(source),
+    )
+    widget = PracticeInterface(repository=repository)
+    _select_subject(widget, "engine1", 1)
+    widget.gradingModeCombo.setCurrentIndex(
+        widget.gradingModeCombo.findData(GRADING_MODE_INSTANT)
+    )
+
+    widget.start_quiz()
+    widget.select_answer(2)
+    widget.toggle_current_explanation()
+
+    assert widget.explanationBox.isHidden() is False
+    assert "함께 보는 해설" in widget.explanationBox.toPlainText()
+    assert widget.explanationImage.isHidden() is False
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_practice_reports_missing_explanation_image(
+    repo,
+    sample_metadata,
+    sample_question,
+    tmp_path,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(repo.db_path, explanation_image_store=store)
+    question = repository.get_questions_with_choices(limit=1)[0]
+    with repository._get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO question_explanation_images (
+                question_id, image_path, display_order
+            ) VALUES (?, ?, 0)
+            """,
+            (question["id"], "data/explanation_images/missing.png"),
+        )
+    widget = PracticeInterface(repository=repository)
+    _select_subject(widget, "engine1", 1)
+    widget.gradingModeCombo.setCurrentIndex(
+        widget.gradingModeCombo.findData(GRADING_MODE_INSTANT)
+    )
+
+    widget.start_quiz()
+    widget.select_answer(2)
+    widget.toggle_current_explanation()
+
+    assert widget.explanationImage.isHidden() is True
+    assert widget.explanationImageStatusLabel.isHidden() is False
+    assert "파일 없음" in widget.explanationImageStatusLabel.text()
+
+    widget.deleteLater()
+    APP.processEvents()
+
+
+def test_practice_reports_corrupt_explanation_image(
+    repo,
+    sample_metadata,
+    sample_question,
+    tmp_path,
+):
+    repo.save_questions([sample_question], sample_metadata)
+    store = ExplanationImageStore(tmp_path / "app")
+    repository = ExamRepository(repo.db_path, explanation_image_store=store)
+    question = repository.get_questions_with_choices(limit=1)[0]
+    corrupt = store.image_dir / "corrupt.png"
+    corrupt.parent.mkdir(parents=True, exist_ok=True)
+    corrupt.write_text("not an image", encoding="utf-8")
+    with repository._get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO question_explanation_images (
+                question_id, image_path, display_order
+            ) VALUES (?, ?, 0)
+            """,
+            (question["id"], corrupt.relative_to(store.base_dir).as_posix()),
+        )
+    widget = PracticeInterface(repository=repository)
+    _select_subject(widget, "engine1", 1)
+    widget.gradingModeCombo.setCurrentIndex(
+        widget.gradingModeCombo.findData(GRADING_MODE_INSTANT)
+    )
+
+    widget.start_quiz()
+    widget.select_answer(2)
+    widget.toggle_current_explanation()
+
+    assert widget.explanationImage.isHidden() is True
+    assert widget.explanationImageStatusLabel.isHidden() is False
+    assert "읽을 수 없음" in widget.explanationImageStatusLabel.text()
 
     widget.deleteLater()
     APP.processEvents()

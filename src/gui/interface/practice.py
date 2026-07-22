@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -31,6 +32,7 @@ from qfluentwidgets import (
 )
 
 from ...database.repository import ExamRepository
+from ...explanation_images import ExplanationImageStore
 from ...database.selection import (
     count_group_aware_questions,
     dedupe_group_aware_questions_by_content,
@@ -138,6 +140,10 @@ class PracticeInterface(QWidget):
         if repository is None and db_path is None:
             raise ValueError("db_path or repository is required")
         self.repo = repository or ExamRepository(db_path)
+        self.explanation_image_store = (
+            getattr(self.repo, "explanation_image_store", None)
+            or ExplanationImageStore()
+        )
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.pending_repository = None
         self.validator = QuestionValidator(self.repo)
@@ -173,6 +179,10 @@ class PracticeInterface(QWidget):
 
     def _apply_repository(self, repository):
         self.repo = repository
+        self.explanation_image_store = (
+            getattr(repository, "explanation_image_store", None)
+            or ExplanationImageStore()
+        )
         self.pending_repository = None
         self.validator = QuestionValidator(repository)
         self.load_options()
@@ -351,6 +361,22 @@ class PracticeInterface(QWidget):
         self.explanationBox.setMaximumHeight(180)
         self.explanationBox.setVisible(False)
         self.quizContentLayout.addWidget(self.explanationBox)
+
+        self.explanationImage = ImageLabel(self)
+        self.explanationImage.setScaledContents(True)
+        self.explanationImage.setBorderRadius(8, 8, 8, 8)
+        self.explanationImage.setVisible(False)
+        self.explanationImage.setFixedSize(0, 0)
+        self.quizContentLayout.addWidget(
+            self.explanationImage,
+            0,
+            Qt.AlignmentFlag.AlignLeft,
+        )
+
+        self.explanationImageStatusLabel = BodyLabel("", self)
+        self.explanationImageStatusLabel.setWordWrap(True)
+        self.explanationImageStatusLabel.setVisible(False)
+        self.quizContentLayout.addWidget(self.explanationImageStatusLabel)
 
         self.quizContentLayout.addStretch(1)
 
@@ -757,17 +783,55 @@ class PracticeInterface(QWidget):
 
     def _render_explanation(self, question):
         explanation = str(question.get("explanation") or "").strip()
-        if not self._should_show_feedback(question) or not explanation:
+        attachments = question.get("explanation_images") or []
+        attachment = attachments[0] if attachments else None
+        if not self._should_show_feedback(question) or not (explanation or attachment):
             self.explanationToggleButton.setVisible(False)
             self.explanationBox.setVisible(False)
             self.explanationBox.clear()
+            self._hide_explanation_image()
+            self.explanationImageStatusLabel.clear()
+            self.explanationImageStatusLabel.setVisible(False)
             return
 
         expanded = question["id"] in self.expanded_explanation_question_ids
         self.explanationToggleButton.setText("해설 접기" if expanded else "해설 보기")
         self.explanationToggleButton.setVisible(True)
         self.explanationBox.setPlainText(explanation)
-        self.explanationBox.setVisible(expanded)
+        self.explanationBox.setVisible(expanded and bool(explanation))
+        self._render_explanation_image(attachment, expanded)
+
+    def _render_explanation_image(self, attachment, expanded):
+        self._hide_explanation_image()
+        self.explanationImageStatusLabel.clear()
+        self.explanationImageStatusLabel.setVisible(False)
+        if not expanded or not attachment:
+            return
+
+        path = self.explanation_image_store.resolve(attachment.get("image_path"))
+        if not path.is_file():
+            self.explanationImageStatusLabel.setText("해설 이미지 파일 없음")
+            self.explanationImageStatusLabel.setVisible(True)
+            return
+
+        image = QImage(str(path))
+        if image.isNull():
+            self.explanationImageStatusLabel.setText("해설 이미지를 읽을 수 없음")
+            self.explanationImageStatusLabel.setVisible(True)
+            return
+
+        size = image.size().scaled(
+            420,
+            260,
+            Qt.AspectRatioMode.KeepAspectRatio,
+        )
+        self.explanationImage.setImage(str(path))
+        self.explanationImage.setFixedSize(size)
+        self.explanationImage.setVisible(True)
+
+    def _hide_explanation_image(self):
+        self.explanationImage.setVisible(False)
+        self.explanationImage.setFixedSize(0, 0)
 
     def _format_choice_text(self, choice):
         number = choice.get("number") or choice.get("choice_number")
