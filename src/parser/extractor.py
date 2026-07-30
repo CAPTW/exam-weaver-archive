@@ -31,7 +31,10 @@ from src.parser.layout import (
     build_structured_page,
 )
 from src.parser.formatting import has_suspicious_text_artifact
-from src.parser.text_quality import text_quality_issue_codes
+from src.parser.text_quality import (
+    intrusive_latin_hangul_spans,
+    text_quality_issue_codes,
+)
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
@@ -977,6 +980,19 @@ class PDFExtractor:
             ).ratio()
             windows_noise = cls._ocr_line_noise_score(windows_line.text)
             tesseract_noise = cls._ocr_line_noise_score(tesseract_text)
+            targeted_text = cls._repair_intrusive_latin_hangul_spans(
+                windows_line.text,
+                tesseract_text,
+            )
+            if (
+                targeted_text != windows_line.text
+                and cls._ocr_line_noise_score(targeted_text) < windows_noise
+            ):
+                merged_lines.append(
+                    cls._line_with_repaired_text(windows_line, targeted_text)
+                )
+                unused.remove(index)
+                continue
             adjacent_damage = any(
                 neighbor in damaged_indexes
                 and windows_page.lines[neighbor].column == windows_line.column
@@ -1084,6 +1100,109 @@ class PDFExtractor:
             )
             unused.remove(index)
         return replace(windows_page, lines=tuple(merged_lines))
+
+    @staticmethod
+    def _repair_intrusive_latin_hangul_spans(
+        windows_text: str,
+        tesseract_text: str,
+    ) -> str:
+        """Use clean Tesseract text only inside Windows OCR mixed-script words."""
+
+        repaired = str(windows_text or "")
+        candidate = re.sub(r"\s+", "", str(tesseract_text or ""))
+        for start, end in reversed(intrusive_latin_hangul_spans(repaired)):
+            left_chars = re.findall(r"[가-힣]", repaired[:start])
+            right_chars = re.findall(r"[가-힣]", repaired[end:])
+            if len(left_chars) < 3 or len(right_chars) < 3:
+                continue
+            left_anchor = "".join(left_chars[-3:])
+            right_anchor = "".join(right_chars[:3])
+            damaged = repaired[start:end]
+            damaged_hangul = re.sub(r"[^가-힣]", "", damaged)
+            replacements = []
+            search_from = 0
+            while True:
+                left_at = candidate.find(left_anchor, search_from)
+                if left_at < 0:
+                    break
+                value_start = left_at + len(left_anchor)
+                right_at = candidate.find(right_anchor, value_start)
+                if right_at >= 0:
+                    value = candidate[value_start:right_at]
+                    if (
+                        re.fullmatch(r"[가-힣]{2,12}", value)
+                        and 0.5 * max(1, len(damaged_hangul))
+                        <= len(value)
+                        <= 2.5 * max(1, len(damaged_hangul))
+                    ):
+                        similarity = SequenceMatcher(
+                            None,
+                            damaged_hangul,
+                            value,
+                            autojunk=False,
+                        ).ratio()
+                        if similarity >= 0.35:
+                            replacements.append((similarity, value))
+                search_from = left_at + 1
+            if not replacements:
+                continue
+            replacements.sort(reverse=True)
+            best_similarity, best_value = replacements[0]
+            if (
+                len(replacements) > 1
+                and replacements[1][0] == best_similarity
+                and replacements[1][1] != best_value
+            ):
+                continue
+            repaired = repaired[:start] + best_value + repaired[end:]
+        return repaired
+
+    @staticmethod
+    def _line_with_repaired_text(
+        windows_line: LayoutLine,
+        repaired_text: str,
+    ) -> LayoutLine:
+        marker = re.compile(r"^(?:\d{1,3}[.)]|[①-⑤㉦㉨㉩㉭@])$")
+        first = windows_line.words[0] if windows_line.words else None
+        if first is not None and marker.match(str(first.text).strip()):
+            content = re.sub(
+                r"^(?:\d{1,3}[.)]|[①-⑤㉦㉨㉩㉭@])\s*",
+                "",
+                repaired_text,
+                count=1,
+            ).strip()
+            trailing = windows_line.words[1:]
+            content_bbox = (
+                min(word.bbox[0] for word in trailing),
+                min(word.bbox[1] for word in trailing),
+                max(word.bbox[2] for word in trailing),
+                max(word.bbox[3] for word in trailing),
+            ) if trailing else first.bbox
+            words = (
+                first,
+                LayoutWord(
+                    text=content,
+                    bbox=content_bbox,
+                    confidence=None,
+                    column=windows_line.column,
+                ),
+            )
+        else:
+            words = (
+                LayoutWord(
+                    text=repaired_text,
+                    bbox=windows_line.bbox,
+                    confidence=None,
+                    column=windows_line.column,
+                ),
+            )
+        return LayoutLine(
+            words=words,
+            bbox=windows_line.bbox,
+            page=windows_line.page,
+            column=windows_line.column,
+            decorations=windows_line.decorations,
+        )
 
     @staticmethod
     def _extract_tesseract_structured_page(

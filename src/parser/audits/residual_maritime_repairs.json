@@ -705,6 +705,90 @@
       "evidence_note": "원본 PDF 3쪽 20번을 직접 판독했다.",
       "repaired_stem": "그림은 평행판 축전기를 나타낸 것이다. 충분히 충전된 축전기의 금속 평행판 사이의 거리 d를 감소시켰을 때 나타나는 현상으로 가장 옳지 않은 것은? <그림>",
       "repaired_question_image_path": "data/question_images/maritime/physics_2023_2_q20.png"
+    },
+    {
+      "question_id": 1,
+      "subject": "해사법규",
+      "year": 2021,
+      "session": 1,
+      "question_number": 1,
+      "source_page": 2,
+      "source_pdf_relative_path": "[기출문제]해사법규(21년 경사-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 2쪽 1번의 발문과 선지 전체를 직접 대조했다.",
+      "repaired_stem": "다음 중 「수상에서의 수색·구조 등에 관한 법률」상 가장 옳지 않은 것은?",
+      "repaired_choices": [
+        "중앙구조본부는 수상에서 발생하는 조난사고로부터 사람의 생명과 신체 및 재산을 보호하기 위하여 수난구호협력기관 및 수난구호민간단체 등과 공동으로 매년 수난대비기본훈련을 실시하여야 한다.",
+        "수상에서 조난된 사람, 선박, 항공기, 수상레저기구 등의 수색·구조·구난 및 보호에 필요한 사항을 규정함으로써 조난사고로부터 국민의 생명과 신체 및 재산을 보호하고 공공의 복리증진에 이바지하는 것을 목적으로 한다.",
+        "“수난구호”란 조난을 당한 선박 등 또는 그 밖의 재산(선박 등에 실린 화물을 포함한다)에 관한 원조를 위하여 행하여진 행위 또는 활동을 말한다.",
+        "해수면에서의 수난구호는 구조본부의 장이 수행하고, 내수면에서의 수난구호는 소방관서의 장이 수행한다."
+      ]
+    },
+    {
+      "question_id": 2411,
+      "subject": "항해학",
+      "year": 2018,
+      "session": 2,
+      "question_number": 11,
+      "source_page": 56,
+      "source_pdf_relative_path": "[기출문제]경찰직 항해학(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 56쪽 11번의 발문과 선지 전체를 직접 대조했다.",
+      "repaired_stem": "다음 중 A선박이 B선박을 추월할 경우에 있어서 흡인·배척작용에 대한 설명으로 가장 옳지 않은 것은?(단, A선박과 B선박은 동형이고 같은 크기이다.)",
+      "repaired_choices": [
+        "A선박의 선수가 B선박의 선미를 통과할 때는 A선박의 선수는 진로상에서 외측으로 벗어나려고 한다.",
+        "A선박의 선수가 B선박의 중앙을 통과할 때는 A선박의 선수는 진로상 B선박 쪽으로 향하려고 한다.",
+        "A선박과 B선박이 나란히 되었을 때는 서로 밀어낸다.",
+        "A선박이 B선박의 선수를 벗어날 때는 A선박의 선미는 B선박 선수로부터 반발한다."
+      ]
+    },
+    {
+      "question_id": 1738,
+      "subject": "해사영어",
+      "year": 2018,
+      "session": 3,
+      "question_number": 18,
+      "source_page": 59,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 59쪽 18번의 발문을 직접 대조했다.",
+      "repaired_stem": "다음은 COLREG(International Regulations for Preventing Collisions at Sea) RULE 8 “Action to avoid collision”에 대한 내용이다. 빈칸에 들어갈 가장 적절한 단어는 무엇인가? Any action taken to avoid collision shall, if the circumstances of the case admit, be ( ), made in ample time and with due regard to the observance of good seamanship."
+    },
+    {
+      "question_id": 1844,
+      "subject": "해사영어",
+      "year": 2015,
+      "session": 2,
+      "question_number": 4,
+      "source_page": 74,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 74쪽 4번의 발문과 선지 전체를 직접 대조했다.",
+      "repaired_stem": "SMCP(표준해사통신영어) “What is your freeboard?”에서 밑줄 친 부분의 의미는?",
+      "repaired_choices": [
+        "The height from load line mark to upper deck.",
+        "The height from water surface to the most high point of bulwark.",
+        "The height from water surface to upper deck at a midship.",
+        "The height from water surface to the highest point of upper deck."
+      ]
+    },
+    {
+      "question_id": 1651,
+      "subject": "해사영어",
+      "year": 2019,
+      "session": 1,
+      "question_number": 11,
+      "source_page": 45,
+      "source_pdf_relative_path": "[기출문제]해사영어(24년-13년).pdf",
+      "confidence": "exact_source",
+      "evidence_note": "원본 PDF 45쪽에서 발문, Ⓐ~Ⓘ 열거표시와 네 선지를 직접 대조했다.",
+      "repaired_stem": "해사영어에서 사용되는 약어에 대한 설명 중 옳지 않은 것은 모두 몇 개인가?\nⒶ A/Co. : 정침하다\nⒷ K.O. : 작업종료\nⒸ C.P.A. : 최근접거리\nⒹ BWE : 방파제 입구\nⒺ D.W.T. : 재화중량톤\nⒻ Lat. : 경도\nⒼ P/S : 좌현\nⒽ S.B.E. : 기관사용준비\nⒾ E.T.D. : 입항예정시간",
+      "repaired_choices": [
+        "1개",
+        "2개",
+        "3개",
+        "없음"
+      ]
     }
   ]
 }

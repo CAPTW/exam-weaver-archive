@@ -81,6 +81,7 @@ def prepare_repair_batch(
 
         staging_path = work / f"{target.name}.staging.db"
         _copy_sqlite_database(mounted, staging_path)
+        _migrate_staging_database(staging_path)
         source_result = _empty_ocr_repair_result()
         for repair_path in repair_paths:
             source_result = _sum_ocr_repair_results(
@@ -351,7 +352,11 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _validate_repair_database(path: Path) -> DatabaseRepairValidation:
+def _validate_repair_database(
+    path: Path,
+    *,
+    require_repository_smoke: bool = True,
+) -> DatabaseRepairValidation:
     integrity = "error"
     foreign_keys: tuple[tuple[object, ...], ...] = ()
     schema_errors: list[str] = []
@@ -388,7 +393,7 @@ def _validate_repair_database(path: Path) -> DatabaseRepairValidation:
         error_codes.append("database_read")
 
     smoke_ok = False
-    if not error_codes:
+    if not error_codes and require_repository_smoke:
         try:
             _smoke_repository(path)
             smoke_ok = True
@@ -449,6 +454,14 @@ def _copy_sqlite_database(source: Path, destination: Path) -> None:
     _fsync_file(destination)
 
 
+def _migrate_staging_database(path: Path) -> None:
+    """Bring a copied legacy DB to the current app schema before validation."""
+
+    repository = ExamRepository(str(path.resolve()))
+    repository.init_database()
+    _fsync_file(path)
+
+
 def _prepare_all_backups(
     prepared: Sequence[PreparedDatabaseRepair],
     backup_dir: Path,
@@ -470,7 +483,10 @@ def _prepare_all_backups(
             raise BatchRepairError(
                 f"backup hash mismatch: {item.target.name}"
             )
-        validation = _validate_repair_database(backup)
+        validation = _validate_repair_database(
+            backup,
+            require_repository_smoke=False,
+        )
         if not validation.valid:
             raise BatchRepairError(
                 f"backup validation failed: {item.target.name}"
@@ -503,7 +519,10 @@ def _prepare_all_replacement_copies(
 
 
 def _restore_backup(backup: Path, mounted: Path) -> None:
-    validation = _validate_repair_database(backup)
+    validation = _validate_repair_database(
+        backup,
+        require_repository_smoke=False,
+    )
     if not validation.valid:
         raise BatchRepairError(f"rollback backup is invalid: {backup}")
     rollback = mounted.with_name(

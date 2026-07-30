@@ -1028,6 +1028,30 @@ def test_bundled_repairs_restore_all_verified_damaged_view_lists():
         assert text_quality_issue_codes(view) == ()
 
 
+def test_bundled_repairs_include_source_verified_k007_corrections():
+    payload = json.loads(Path(
+        "src/parser/offline_source_repairs.json"
+    ).read_text(encoding="utf-8"))
+    repairs = {
+        item.get("question_id"): item
+        for item in payload["repairs"]
+        if item.get("question_id")
+    }
+
+    assert repairs[2411]["repaired_choices"][2] == (
+        "A선박과 B선박이 나란히 되었을 때는 서로 밀어낸다."
+    )
+    assert repairs[1738]["repaired_stem"].endswith(
+        "due regard to the observance of good seamanship."
+    )
+    assert repairs[1844]["repaired_choices"][2] == (
+        "The height from water surface to upper deck at a midship."
+    )
+    assert repairs[2890]["repaired_choices"][2] == r"X=\overline{A·B}"
+    assert "Ⓐ A/Co." in repairs[1651]["repaired_stem"]
+    assert "Ⓘ E.T.D." in repairs[1651]["repaired_stem"]
+
+
 def test_offline_candidate_ingestion_preserves_view_and_choice_tables():
     from src.database.staging import _question_from_offline_candidate
     from src.parser.aligned_choice_table import build_aligned_choice_format

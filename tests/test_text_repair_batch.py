@@ -185,6 +185,78 @@ def test_prepare_batch_preserves_unconfirmed_line_breaks(tmp_path):
     assert prepared[0].audit.changes == ()
 
 
+def test_prepare_batch_migrates_legacy_schema_only_in_staging(tmp_path):
+    database = tmp_path / "one.db"
+    _create_valid_database(database, "1")
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE question_explanation_images")
+
+    prepared = prepare_repair_batch(
+        (RepairTarget("one", database),),
+        _repairs_path(tmp_path),
+        tmp_path / "work",
+    )
+
+    with sqlite3.connect(database) as connection:
+        mounted_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'question_explanation_images'
+            """
+        ).fetchone()
+    with sqlite3.connect(prepared[0].staging_path) as connection:
+        staging_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'question_explanation_images'
+            """
+        ).fetchone()
+
+    assert mounted_table is None
+    assert staging_table == (1,)
+    assert prepared[0].validation.valid
+
+
+def test_commit_batch_accepts_byte_exact_legacy_schema_backup(tmp_path):
+    database = tmp_path / "one.db"
+    _create_valid_database(database, "1")
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE question_explanation_images")
+    connection.close()
+    original_hash = _sha256(database)
+
+    prepared = prepare_repair_batch(
+        (RepairTarget("one", database),),
+        _repairs_path(tmp_path),
+        tmp_path / "work",
+    )
+    receipt = commit_repair_batch(
+        prepared,
+        tmp_path / "backups",
+        tmp_path / "receipt.json",
+    )
+
+    backup = tmp_path / "backups" / "one.before.db"
+    assert receipt["status"] == "applied"
+    assert _sha256(backup) == original_hash
+    with sqlite3.connect(backup) as connection:
+        backup_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'question_explanation_images'
+            """
+        ).fetchone()
+    with sqlite3.connect(database) as connection:
+        mounted_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'question_explanation_images'
+            """
+        ).fetchone()
+    assert backup_table is None
+    assert mounted_table == (1,)
+
+
 def test_prepare_batch_limits_automatic_pass_to_confirmed_confusables(
     tmp_path,
     monkeypatch,

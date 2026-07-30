@@ -246,6 +246,40 @@ def test_tesseract_repairs_korean_ocr_garble_without_overwriting_clean_lines():
     assert "BA 반사되어" not in selected_text
 
 
+def test_tesseract_repairs_only_suspicious_mixed_script_spans_in_korean_lines():
+    windows_page = _ocr_page_from_lines(
+        "11. 다음 중 A선박이 B선박을 추월할 경우에 있어서",
+        "① A선박의 선수가 B선박의 선미를 통과할 때는",
+        "A선박의 선수는 진로징b11서 외측으로 벗어나려고 한다.",
+        "② A선박의 선수가 B선박의 중앙을 통과할 때는",
+        "선박의 선수는 진로상 B선박 쪽으로 향하려고 한다.",
+        "③ A선박과 B선박이 L탄히 되었을 때는 서로 밀어낸다.",
+        "④ A선박이 B선박의 선수를 벗어날 때는",
+        "선미는 B선박 선수로부터 반발한다.",
+    )
+    tesseract_page = _ocr_page_from_lines(
+        "|11. 다음 중 ㅅ 선박이 BAYS 추월할 경우에 있어서",
+        "© ㅅ 선박의 선수가 # 선박의 선미를 통과할 때는",
+        "AMO] 선수는 진로상에서 외측으로 벗어나려고 한다.",
+        "@© Arte] 선수가 8 선박의 중앙을 통과할 때는",
+        "선박의 선수는 진로상 BAY} 쪽으로 향하려고 한다.",
+        "© ASH # 선박이 나란히 되었을 때는 서로 밀어낸다.",
+        "@ AAO] # 선박의 선수를 벗어날 때는",
+        "선미는 BAY 선수로부터 반발한다.",
+    )
+
+    selected = PDFExtractor._select_preferred_ocr_page(
+        windows_page, tesseract_page
+    )
+
+    assert selected.lines[2].text == (
+        "A선박의 선수는 진로상에서 외측으로 벗어나려고 한다."
+    )
+    assert selected.lines[5].text == (
+        "③ A선박과 B선박이 나란히 되었을 때는 서로 밀어낸다."
+    )
+
+
 def test_tesseract_repairs_unbalanced_delimiter_ocr_line():
     windows_page = _ocr_page_from_lines(
         "39. 다음 중 휘트스톤 브리지 회로의 미지 저항은?",

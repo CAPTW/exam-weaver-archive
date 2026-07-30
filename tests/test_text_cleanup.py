@@ -1120,8 +1120,23 @@ def test_quality_gate_flags_new_residual_ocr_patterns_before_repair():
         "가장 오은 거 은?",
         "ice¯breaker assistance",
         "해°°뻬 배출되는 폐기물",
+        "A선박의 선수는 진로징b11서 외측으로 벗어나려고 한다.",
+        "A선박과 B선박이 L탄히 되었을 때는 서로 밀어낸다.",
+        'SMCP “What is your freeboard?l에서 밑줄 친 부분의 의미는?',
     ):
         assert "ocr_noise" in text_quality_issue_codes(text)
+
+
+def test_quality_gate_accepts_valid_maritime_latin_hangul_terms():
+    for text in (
+        "A선박과 B선박은 동형이고 같은 크기이다.",
+        "L형 단면의 형상계수와 L값을 비교한다.",
+        "A1해역에서 GMDSS 설비를 점검한다.",
+        "MARPOL 협약 부속서 I에서 의미하는 연차일은?",
+        "임의의 위도 L에서의 수평분각속도 WcosL은?",
+        "전원 주파수 f와 부하전류 I와의 관계는?",
+    ):
+        assert "ocr_noise" not in text_quality_issue_codes(text)
 
 
 def test_quality_gate_accepts_standalone_roman_numerals_with_korean_suffixes():

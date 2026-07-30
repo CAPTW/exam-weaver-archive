@@ -61,6 +61,15 @@ VALID_HANGUL_NUMBER_PATTERN = re.compile(
 VALID_MIXED_SCRIPT_TERM_PATTERN = re.compile(
     r"(?:지진파의[SP]파|A1해역|A2해역|A3해역|A4해역)"
 )
+INTRUSIVE_LATIN_HANGUL_TOKEN_PATTERN = re.compile(
+    r"[가-힣]+[A-Za-z][0-9A-Za-z]{1,5}[가-힣]+"
+    r"|(?<![0-9A-Za-z가-힣])[ILl][가-힣]{2,}"
+)
+VALID_STANDALONE_LATIN_HANGUL_TERM_PATTERN = re.compile(
+    r"[ILl](?:(?:형|자형|값|단면|곡선|방향|축선|형상|형태)"
+    r"(?:은|는|이|가|을|를|의|에|와|과|도|로)?"
+    r"|(?:에서의|와의|과의|으로|에서|은|는|이|가|을|를|의|에|와|과|도|로))"
+)
 VALID_CJK_ANNOTATION_PATTERN = re.compile(
     r"[（(](?=[가-힣一-龥\s,·/]{1,32}[)）])"
     r"(?=[^()）]*[一-龥])[가-힣一-龥\s,·/]{1,32}[)）]"
@@ -188,7 +197,24 @@ def has_intrusive_latin_digit_ocr(text: str) -> bool:
     return bool(
         re.search(r"[가-힣](?:[01IL]|[A-Za-z]{1,3})[가-힣]", value)
         or re.search(r"[가-힣]\)(?:7b)(?=\s|[가-힣])", value)
+        or intrusive_latin_hangul_spans(value)
     )
+
+
+def intrusive_latin_hangul_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Locate high-confidence Latin/digit fragments inside Korean OCR words."""
+
+    value = str(text or "")
+    spans = []
+    for match in INTRUSIVE_LATIN_HANGUL_TOKEN_PATTERN.finditer(value):
+        previous = value[match.start() - 1] if match.start() else ""
+        if (
+            VALID_STANDALONE_LATIN_HANGUL_TERM_PATTERN.fullmatch(match.group(0))
+            and previous not in '?？!"”\'’'
+        ):
+            continue
+        spans.append(match.span())
+    return tuple(spans)
 
 
 def has_unbalanced_delimiters(text: str) -> bool:
