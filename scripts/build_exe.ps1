@@ -136,7 +136,7 @@ start "" "%~dp0ExamGenerator.exe"
 
     if ($GithubPortable) {
         $readmeContent = @"
-기출문제 문제은행 관리자 Portable
+Exam Generator Portable
 
 실행 방법
 1. 이 ZIP 파일을 원하는 폴더에 압축 해제합니다.

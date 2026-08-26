@@ -25,12 +25,12 @@ def test_builtin_menu_packs_supply_every_known_key():
         assert packs["en"].strings[key]
 
 
-def test_builtin_export_menu_labels_use_mock_exam_wording():
+def test_builtin_export_menu_labels_use_format_neutral_wording():
     packs, warnings = discover_menu_language_packs(PROJECT_ROOT)
 
     assert warnings == []
-    assert menu_text(packs["ko"], "menu.export") == "모의고사 출력"
-    assert menu_text(packs["en"], "menu.export") == "Mock Exam Export"
+    assert menu_text(packs["ko"], "menu.export") == "시험지 내보내기"
+    assert menu_text(packs["en"], "menu.export") == "Export Exam"
 
 
 def test_external_pack_uses_korean_fallback_and_ignores_unknown_keys(tmp_path):
@@ -56,7 +56,7 @@ def test_external_pack_uses_korean_fallback_and_ignores_unknown_keys(tmp_path):
 
     assert warnings == []
     assert menu_text(packs["ja"], "menu.home") == "ホーム"
-    assert menu_text(packs["ja"], "menu.export") == "모의고사 출력"
+    assert menu_text(packs["ja"], "menu.export") == "시험지 내보내기"
     assert "unknown" not in packs["ja"].strings
 
 
@@ -105,4 +105,3 @@ def test_menu_locale_setting_round_trips_and_unknown_value_falls_back(tmp_path):
 def test_save_menu_locale_rejects_unknown_value(tmp_path):
     with pytest.raises(ValueError, match="지원하지 않는 메뉴 언어"):
         save_menu_locale(tmp_path, "xx", {"ko", "en"})
-

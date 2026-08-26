@@ -25,9 +25,9 @@ os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
-APP_TITLE = "기출문제 문제은행 관리자"
+APP_TITLE = "Exam Generator"
 APP_ICON_FILENAME = "exam_generator_icon.ico"
-APP_USER_MODEL_ID = "CAPTW.ExamWeaverArchive.QuestionBankManager"
+APP_USER_MODEL_ID = "CAPTW.ExamGenerator"
 DEFAULT_WINDOW_SIZE = (1500, 860)
 WINDOW_WORK_AREA_MARGIN = 32
 RIGHT_SIDECAR_PANEL_WIDTH = 430
@@ -359,7 +359,7 @@ class MainWindow(FluentWindow):
             NavigationItemPosition.TOP
         )
         self.addSubInterface(
-            self.export_interface, FIF.PRINT, "모의고사 출력",
+            self.export_interface, FIF.PRINT, "시험지 내보내기",
             NavigationItemPosition.TOP
         )
         self.addSubInterface(

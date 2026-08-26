@@ -82,3 +82,12 @@ def test_run_readme_explains_both_non_programmer_paths():
     assert "Portable ZIP" in content
     assert "최신 코드" in content
     assert "패키징" in content
+
+
+def test_generated_portable_readme_uses_exam_generator_brand():
+    build_script = ROOT / "scripts" / "build_exe.ps1"
+
+    content = build_script.read_text(encoding="utf-8")
+
+    assert "Exam Generator Portable" in content
+    assert "기출문제 문제은행 관리자 Portable" not in content
