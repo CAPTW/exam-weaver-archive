@@ -1,25 +1,45 @@
-# Repository Rebrand Checklist
+# Repository Rename Record
 
-> Target product name: **Exam Generator**
+> Product name: **Exam Generator**
 >
-> Target repository name: `exam-generator`
+> Canonical repository: `CAPTW/exam-generator`
 >
-> Status: application and documentation foundation prepared on a review branch; repository rename remains a separate owner action after merge acceptance.
+> Previous repository slug: `CAPTW/exam-weaver-archive`
+>
+> Status: **completed and remotely verified on 2026-08-26**
 
-## Changes included in the foundation
+## Accepted authority
+
+- Stable GitHub repository ID: `1002195620`
+- Default branch: `main`
+- Accepted rebrand merge commit: `e6033668eb8daa0ed6467c3382db48840f943d56`
+- Commit tree: `018c99efbbd6111c8b42a2de61456c476e688758`
+- Merge source: PR `#6`, `Rebrand foundation: Exam Generator`
+- Final pre-merge contract workflow: `Rebrand foundation checks` run `#17`
+- Workflow result: `completed / success`
+- Windows contract tests: `34 passed`
+- Portable contract tests: `15 passed`
+
+## Completed changes
 
 - desktop window title changed to `Exam Generator`;
 - Windows AppUserModelID changed to `CAPTW.ExamGenerator`;
-- home screen value proposition refreshed;
+- home-screen value proposition refreshed;
 - export navigation renamed to format-neutral wording;
 - Korean and English menu packs aligned;
 - product-first README introduced;
 - HWPX and Exam Pack boundaries documented;
-- focused Windows CI added for branding, menu, and launcher contracts.
+- focused Windows and portable CI contracts added;
+- PR #6 reviewed and squash-merged into `main`;
+- GitHub repository renamed from `exam-weaver-archive` to `exam-generator`;
+- new HTTPS clone URL confirmed as `https://github.com/CAPTW/exam-generator.git`;
+- the previous repository identifier confirmed to resolve to the same stable repository ID and canonical new slug;
+- README and roadmap paths confirmed under the renamed repository;
+- the successful pre-rename workflow run confirmed accessible under the renamed repository URL.
 
-## Compatibility intentionally preserved
+## Compatibility preserved
 
-The rebrand must not silently relocate or invalidate user data. The foundation therefore preserves:
+The rename did not relocate or invalidate user data. The following remain unchanged:
 
 - `data/exam_bank.db` and current runtime paths;
 - SQLite schema and migration history;
@@ -27,37 +47,40 @@ The rebrand must not silently relocate or invalidate user data. The foundation t
 - `ExamGenerator.spec` and `ExamGenerator.exe` packaging identity;
 - existing launchers;
 - current parser, importer, practice, and DOCX behavior;
-- existing Git history and releases.
+- existing Git history, pull requests, workflow runs, stars, and releases.
 
 Internal package and database identifiers should change only when a migration provides backward compatibility.
 
-## Rename sequence
+## Local clone update
 
-1. Merge the accepted rebrand foundation.
-2. Record the accepted main-branch commit and green checks.
-3. Create a repository backup or verified mirror.
-4. Rename the GitHub repository from `exam-weaver-archive` to `exam-generator`.
-5. Confirm GitHub redirects for the old repository URL.
-6. Update local clones:
+Existing clones may continue to work through GitHub redirect handling, but the canonical remote should be set explicitly:
 
-   ```powershell
-   git remote set-url origin https://github.com/CAPTW/exam-generator.git
-   git remote -v
-   git fetch --prune origin
-   ```
+```powershell
+git remote set-url origin https://github.com/CAPTW/exam-generator.git
+git remote -v
+git fetch --prune origin
+```
 
-7. Update README badges, raw asset URLs, release references, issue templates, and external documentation that still use the old path.
-8. Verify clone, source launch, packaged launch, and pull-request checks from the renamed repository.
-9. Update GitHub About and topics.
-10. Publish a short migration note explaining that user databases and `.examdb.zip` packages are unchanged.
+Expected canonical output:
 
-## Proposed GitHub About
+```text
+origin  https://github.com/CAPTW/exam-generator.git (fetch)
+origin  https://github.com/CAPTW/exam-generator.git (push)
+```
+
+Do not create a new repository using the retired `exam-weaver-archive` slug while the redirect is required.
+
+## Remaining repository-profile hygiene
+
+The repository rename is complete. The following profile-level improvements are separate, non-blocking follow-ups:
+
+### GitHub About
 
 ```text
 Local-first exam document parser and question-bank workspace for reviewing, practising, and exporting editable exams.
 ```
 
-## Proposed topics
+### GitHub topics
 
 ```text
 exam-generator
@@ -74,9 +97,9 @@ local-first
 
 Add `hwpx` only after the HWPX acceptance gates pass and the feature is present in a released build.
 
-## Post-rename search audit
+## Post-rename source audit policy
 
-Search the active source and user-facing documentation for:
+Search active source and current user-facing documentation for obsolete product identifiers:
 
 ```text
 Exam Weaver Archive
@@ -85,16 +108,14 @@ CAPTW.ExamWeaverArchive
 기출문제 문제은행 관리자
 ```
 
-Historical plans and archived technical references may retain old names when changing them would rewrite project history. Current README, app UI, launch instructions, packaging metadata, and release documentation should use the new brand.
+Historical plans, old release notes, commit messages, and archived technical references may retain old names when changing them would rewrite history. Current README, app UI, launch instructions, packaging metadata, and new release documentation should use the new brand and canonical repository slug.
 
-## Rollback
+## Rollback boundary
 
-If the renamed repository fails a required clone, CI, packaging, or release-path check:
+No rollback is currently required. If a future clone, CI, packaging, or release-path failure is traced specifically to the rename:
 
-1. stop further release publication;
+1. stop affected release publication;
 2. preserve the failing evidence;
-3. restore references or rename the repository back;
-4. verify the original remote and launch path;
-5. correct the rebrand on a branch before attempting the rename again.
-
-A GitHub repository rename must not be combined with an unverified data migration, schema migration, HWPX implementation, or Exam Pack extraction.
+3. verify the stable repository ID and canonical remote;
+4. repair stale URLs or local remotes before considering a repository rename reversal;
+5. keep data migration, schema migration, HWPX implementation, and Exam Pack extraction outside the rename recovery boundary.
