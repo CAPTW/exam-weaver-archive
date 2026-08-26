@@ -1,8 +1,8 @@
 # HWPX Export Roadmap
 
-> Status: **planned, not implemented**
+> Status: **format-neutral ExamDocument foundation implemented on this feature branch; HWPX exporter is not implemented**
 >
-> The production application currently exports editable exam sheets as DOCX. This document defines the boundary for adding HWPX without coupling exam composition to one document format.
+> The production application currently exports editable exam sheets as DOCX only. This document records the implemented ExamDocument foundation and the remaining HWPX qualification boundary.
 
 ## Goal
 
@@ -180,6 +180,26 @@ Before release, open representative outputs in supported Hancom Office versions:
 - mixed Korean, English, symbols, and equations;
 - long 50- to 100-question exam;
 - content crossing a column or page boundary.
+
+## Current implementation status
+
+Gate 1 is implemented on `feature/exam-document-format-neutral-foundation`:
+
+- `src/exporter/exam_document.py` — immutable format-neutral contracts
+- `src/exporter/builder.py` — `ExamDocumentBuilder` composition
+- `DocxExporter.export_document(...)` renders an `ExamDocument`
+- legacy `DocxExporter.export(...)` remains a compatible facade
+- GUI export still says DOCX only and still uses the same save-dialog strings
+
+Not implemented in this gate:
+
+- HWPX exporter
+- HWPX dependency
+- HWPX template
+- output format selector
+- any user-facing HWPX support claim
+
+The next HWPX work requires a separate qualification Gate after this foundation is independently accepted. The current legacy DOCX API remains compatible.
 
 ## Delivery gates
 

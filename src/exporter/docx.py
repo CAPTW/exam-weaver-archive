@@ -31,6 +31,8 @@ from ..choice_markers import (
     normalize_choice_marker_style,
 )
 from .table_layout import fallback_table_layout, resolve_table_layout
+from .builder import ExamDocumentBuilder
+from .exam_document import ExamDocument, QuestionBlock, SharedPassageBlock
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,16 @@ class DocxExporter:
             include_answer_key: Append a separate answer key page when needed.
             sections: Optional grouped sections, each with title and questions.
         """
+        document = ExamDocumentBuilder().build(
+            title=title,
+            questions=questions,
+            sections=sections,
+            shuffle_choices=shuffle_choices,
+            include_answer_key=include_answer_key,
+        )
+        self.export_document(document, output_path)
+
+    def export_document(self, document: ExamDocument, output_path: str):
         doc = Document()
         self.warnings = []
 
@@ -94,66 +106,110 @@ class DocxExporter:
 
         self._set_columns(section, 2)
 
-        for title_line in self._split_title(title):
+        for title_line in document.title_lines:
             header = doc.add_paragraph()
             self._format_paragraph(header, alignment=WD_ALIGN_PARAGRAPH.CENTER)
             run = header.add_run(f"{title_line} ")
             self._format_run(run, size_pt=16, bold=True)
 
-        rng = random.Random()
-        answer_key = []
-        display_number = 1
-        if sections:
-            for section_spec in sections:
-                last_group_id = None
-                section_title = (section_spec or {}).get('title')
-                if section_title:
-                    self._add_subject_heading(doc, section_title)
-                    spacer = doc.add_paragraph()
-                    self._format_paragraph(spacer)
-                for q in (section_spec or {}).get('questions') or []:
-                    last_group_id = self._add_group_shared_passage_if_needed(
-                        doc,
-                        q,
-                        last_group_id,
-                    )
-                    answer = self._add_question(
-                        doc,
-                        q,
-                        display_number=display_number,
-                        shuffle_choices=shuffle_choices,
-                        rng=rng
-                    )
-                    answer_key.append((display_number, answer))
-                    display_number += 1
-                    spacer = doc.add_paragraph()
-                    self._format_paragraph(spacer)
-        else:
-            last_group_id = None
-            for q in questions:
-                last_group_id = self._add_group_shared_passage_if_needed(
-                    doc,
-                    q,
-                    last_group_id,
-                )
-                answer = self._add_question(
-                    doc,
-                    q,
-                    display_number=display_number,
-                    shuffle_choices=shuffle_choices,
-                    rng=rng
-                )
-                answer_key.append((display_number, answer))
-                display_number += 1
+        for exam_section in document.sections:
+            if exam_section.title:
+                self._add_subject_heading(doc, exam_section.title)
+                spacer = doc.add_paragraph()
+                self._format_paragraph(spacer)
+            for block in exam_section.blocks:
+                if isinstance(block, SharedPassageBlock):
+                    self._add_shared_passage(doc, block.text)
+                    continue
+                self._render_question_block(doc, block)
                 spacer = doc.add_paragraph()
                 self._format_paragraph(spacer)
 
-        if include_answer_key and answer_key:
-            self._add_answer_key(doc, answer_key)
+        if document.include_answer_key and document.answer_key:
+            presented = [
+                (entry.display_number, self._present_answer_key_entry(entry))
+                for entry in document.answer_key
+            ]
+            self._add_answer_key(doc, presented)
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         doc.save(output_path)
         logger.info(f"Exported to {output_path}")
+
+    def _present_answer_key_entry(self, entry):
+        if entry.question_type == "descriptive":
+            return "서술형"
+        if entry.correct_answer is None:
+            return None
+        if entry.correct_answer == ALL_CHOICES_CORRECT:
+            return "전원 정답"
+        return choice_marker(
+            entry.correct_answer,
+            self.choice_marker_style,
+            fallback=NUMBER_TO_CHOICE_SYMBOL.get(entry.correct_answer, str(entry.correct_answer)),
+        )
+
+    def _render_question_block(self, doc, block: QuestionBlock):
+        p = self._add_text_with_format_tables(
+            doc,
+            block.text,
+            block.format_json,
+            prefix=f"{block.display_number}. ",
+        )
+        if self._image_exists(block.image_path):
+            self._keep_paragraph_together(p, keep_with_next=True)
+        self._add_image(
+            doc,
+            block.image_path,
+            width_mm=60,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER,
+            keep_with_next=bool(block.choices),
+            keep_together=True,
+        )
+
+        if block.question_type == "descriptive":
+            model_answer = str(block.model_answer or "").strip()
+            if model_answer:
+                p = doc.add_paragraph()
+                self._format_paragraph(p)
+                self._add_formatted_text(
+                    p,
+                    model_answer,
+                    prefix="모범답안: ",
+                    size_pt=10,
+                )
+            return
+
+        for choice in block.choices:
+            stored_symbol = choice.symbol or ""
+            symbol = choice_marker(
+                choice.number,
+                self.choice_marker_style,
+                fallback=stored_symbol,
+            )
+            is_correct = (
+                block.correct_answer == ALL_CHOICES_CORRECT
+                or choice.number == block.correct_answer
+            )
+            choice_text = (
+                ""
+                if is_aligned_choice_format(choice.format_json)
+                else (choice.text or "")
+            )
+            p = self._add_text_with_format_tables(
+                doc,
+                choice_text,
+                choice.format_json,
+                prefix=f"{symbol} " if symbol else "",
+                size_pt=10,
+                highlight=is_correct,
+            )
+            self._add_image(
+                doc,
+                choice.image_path,
+                width_mm=42,
+                paragraph=p,
+            )
 
     def _add_group_shared_passage_if_needed(self, doc, question, last_group_id):
         group_id = question.get('group_id')
