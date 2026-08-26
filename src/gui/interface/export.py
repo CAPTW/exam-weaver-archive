@@ -21,6 +21,7 @@ from ...database.selection import (
 )
 from ...database.validator import QuestionValidator
 from ...exporter.docx import DocxExporter
+from ...exporter.builder import ExamDocumentBuilder
 from ...choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     normalize_choice_marker_style,
@@ -44,6 +45,7 @@ class ExportInterface(QScrollArea):
         self.validator = QuestionValidator(self.repo)
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.exporter = DocxExporter(choice_marker_style=self.choice_marker_style)
+        self.document_builder = ExamDocumentBuilder()
         self.setObjectName("ExportInterface")
 
         self.setFrameShape(QFrame.NoFrame)
@@ -794,13 +796,24 @@ class ExportInterface(QScrollArea):
                         self.subjectFilter.currentText() if subject_code else None,
                         random_count
                     )
-                self.exporter.export(
-                    title,
-                    questions,
-                    file_path,
+                builder = self.__dict__.get("document_builder") or ExamDocumentBuilder()
+                document = builder.build(
+                    title=title,
+                    questions=questions,
+                    sections=sections,
                     shuffle_choices=self.shuffleChoices.isChecked(),
-                    sections=sections
+                    include_answer_key=False,
                 )
+                if hasattr(self.exporter, "export_document"):
+                    self.exporter.export_document(document, file_path)
+                else:
+                    self.exporter.export(
+                        title,
+                        questions,
+                        file_path,
+                        shuffle_choices=self.shuffleChoices.isChecked(),
+                        sections=sections,
+                    )
 
                 export_warnings = getattr(self.exporter, 'warnings', [])
                 if export_warnings:
