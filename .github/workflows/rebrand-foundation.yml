@@ -36,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Verify branding and launcher contracts
+      - name: Verify branding, menu, and launcher contracts
         shell: pwsh
         run: |
-          python -m pytest -q tests/test_main_window_layout.py tests/test_launchers.py
+          python -m pytest -q tests/test_main_window_layout.py tests/test_menu_language.py tests/test_launchers.py
