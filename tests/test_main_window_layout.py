@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.gui import main as gui_main
+from src.gui.interface import home as home_module
 
 
 class _MicaWindowStub:
@@ -30,15 +31,23 @@ def test_initial_window_size_keeps_default_on_roomy_screen():
     ) == gui_main.DEFAULT_WINDOW_SIZE
 
 
-def test_app_title_is_declared_for_exam_bank_admin():
-    assert gui_main.APP_TITLE == "기출문제 문제은행 관리자"
+def test_app_title_declares_exam_generator_brand():
+    assert gui_main.APP_TITLE == "Exam Generator"
+
+
+def test_home_screen_declares_exam_generator_brand_and_value_proposition():
+    source = home_module.__loader__.get_source(home_module.__name__)
+
+    assert 'TitleLabel("Exam Generator"' in source
+    assert "기출문서를 문제은행으로" in source
+    assert "편집 가능한 시험지로" in source
 
 
 def test_app_icon_asset_is_declared_and_available():
     icon_path = Path(gui_main.get_app_icon_path())
 
     assert gui_main.APP_ICON_FILENAME == "exam_generator_icon.ico"
-    assert gui_main.APP_USER_MODEL_ID == "CAPTW.ExamWeaverArchive.QuestionBankManager"
+    assert gui_main.APP_USER_MODEL_ID == "CAPTW.ExamGenerator"
     assert icon_path.exists()
     assert icon_path.suffix == ".ico"
     assert icon_path.read_bytes()[:4] == b"\x00\x00\x01\x00"
@@ -180,10 +189,10 @@ def test_main_window_passes_and_refreshes_question_repository_for_export():
     assert "self.export_interface.set_repository(repository)" in source
 
 
-def test_main_window_declares_mock_exam_export_navigation_copy():
+def test_main_window_declares_exam_export_navigation_copy():
     source = gui_main.__loader__.get_source(gui_main.__name__)
 
-    assert 'self.export_interface, FIF.PRINT, "모의고사 출력"' in source
+    assert 'self.export_interface, FIF.PRINT, "시험지 내보내기"' in source
 
 
 def test_codex_toggle_navigation_is_declared():
@@ -192,7 +201,7 @@ def test_codex_toggle_navigation_is_declared():
     assert "CodexToggle" in source
     assert "codex_sidecar_container" in source
     assert "Codex 패널 펼치기" in source
-    assert "기출문제 문제은행 관리자" in source
+    assert "Exam Generator" in source
 
 
 def test_opaque_background_fallback_disables_mica():
