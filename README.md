@@ -182,18 +182,20 @@ source_notes/          Source and reference notes
 ## 현재 상태
 
 - **제품명:** Exam Generator
+- **Repository:** `CAPTW/exam-generator`
+- **Repository rename:** 2026-08-26 완료; 이전 `CAPTW/exam-weaver-archive` URL은 새 저장소로 redirect
 - **Desktop:** Windows-first PyQt application
 - **Current editable export:** DOCX
 - **Planned editable export:** HWPX
 - **Storage:** local SQLite and mountable Exam DB packages
 - **Parser:** source-specific quality varies; human review remains authoritative
-- **Repository rename:** content and compatibility checks are prepared first; GitHub repository rename is a separate owner action after acceptance
 
 ## 기술 문서
 
 - **[Full technical reference](README.technical.2026-08-25.md)** — 기존 상세 architecture, parser, DB schema, screens, CLI, packaging reference
 - **[HWPX Export Roadmap](docs/roadmap/hwpx-export.md)** — format-neutral export model과 HWPX acceptance gates
 - **[Exam Pack Distribution Roadmap](docs/roadmap/exam-packs.md)** — 데이터 repository 분리, manifest, release, rights 및 MCP boundary
+- **[Repository Rename Record](docs/roadmap/repository-rebrand.md)** — repository rename 검증, 호환성 및 후속 조치
 - **[DB Mount Prototype](experiments/db_mount_prototype/README.md)** — domain DB mount와 이동 prototype
 
 ## 라이선스와 출처 권리
