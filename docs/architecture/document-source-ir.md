@@ -1,0 +1,46 @@
+# DocumentSourceIR
+
+Import-side immutable intermediate representation. It is **not** `ExamDocument`.
+
+## Purpose
+
+Convert a source file into backend-neutral structure before any exam-domain parsing:
+
+`source file` → `probe_document_format` → `DocumentSourceAdapter` → immutable `DocumentSource` → future `ExamStructureParser` → existing question/database model.
+
+## Distinction from ExamDocument
+
+| IR | Side | Role |
+|---|---|---|
+| `DocumentSourceIR` (`src/document_source`) | import | physical document structure, coordinates, diagnostics, attachments |
+| `ExamDocument` (`src/exporter`) | export | composed exam semantics for DOCX (and future HWPX) |
+
+Neither replaces the other. This package does not import Qt, SQLite, DOCX, or HWPX libraries.
+
+## Model
+
+Frozen slotted dataclasses with tuple collections: `DocumentSource`, `DocumentSection`, `DocumentParagraph`, `DocumentRun`, `DocumentTable*`, `DocumentImage`, `DocumentField`, `DocumentMasterPage`, `DocumentLayoutBreak`, `SourceCoordinate`, `SourceDiagnostic`, `SourceAttachment`.
+
+Unsupported content is recorded as diagnostics, not dropped silently.
+
+## Signature detection
+
+`probe_document_format(path)` inspects content, not extension:
+
+- PDF: `%PDF-` in a bounded header window
+- HWPX: ZIP plus `mimetype=application/hwp+zip` and required OWPML parts; generic ZIP is rejected
+- HWP 5: CFB container plus `FileHeader` stream starting with `HWP Document File`; generic OLE/CFB is rejected
+
+Resource caps apply to ZIP entries and CFB FAT chains. Extension/signature mismatch is a warning.
+
+## PDF mapping
+
+One `DocumentSection` per PDF page (`page-N`). Text comes from existing extractor lines when present, otherwise page text with `PDF_ADAPTER_TEXT_ONLY_PAGE`. Tables and images map when the extractor exposes them. Images become `SourceAttachment` hashes, not raw bytes in the IR.
+
+## Future adapters (not integrated)
+
+- `hwpxkit==0.2.1`: `SELECTED_HWPX_PARSER_NOT_INTEGRATED` (MIT)
+- `hwp-hwpx-parser==1.0.0`: `SELECTED_HWP_PARSER_NOT_INTEGRATED` (Apache-2.0)
+- Native Hancom UI automation: `DEPRIORITIZED_RESEARCH_ONLY_NOT_PRODUCT_PATH`
+
+Production code in this package does not import those backends.
