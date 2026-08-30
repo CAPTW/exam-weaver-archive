@@ -91,6 +91,8 @@ class HwpxSourceAdapter:
     def parse(self, path: str, options=None) -> DocumentSourceResult:
         started = time.perf_counter()
         source = Path(path)
+        if source.stat().st_size > MAX_SOURCE_BYTES:
+            return _fail("HWPX_RESOURCE_LIMIT", "source exceeds size policy", "0" * 64, time.perf_counter() - started)
         size, sha, mtime = _hash_file(source)
         elapsed = lambda: time.perf_counter() - started
         if size > MAX_SOURCE_BYTES:
@@ -144,12 +146,13 @@ class HwpxSourceAdapter:
         post_size, post_sha, post_mtime = _hash_file(source)
         if (post_size, post_sha, post_mtime) != (size, sha, mtime):
             return _fail("HWPX_PARSE_FAILED", "source mutated", sha, elapsed(), version)
-        diags = document.diagnostics
+        diags = tuple((*probe.diagnostics, *document.diagnostics))
+        success = not any(diag.severity is DiagnosticSeverity.ERROR for diag in diags)
         return DocumentSourceResult(
             document=document,
             diagnostics=diags,
             adapter_info=document.backend_info,
             elapsed_seconds=elapsed(),
             source_sha256=sha,
-            success=True,
+            success=success,
         )

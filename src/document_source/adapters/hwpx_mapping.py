@@ -162,6 +162,7 @@ def map_hwpx_document(
     attachments: list[SourceAttachment] = []
     attachment_ids: set[str] = set()
     media_by_stem: dict[str, object] = {}
+    layout_by_part = {layout.part: layout for layout in package.section_layouts} if package is not None else {}
     if package is not None:
         for item in package.media:
             stem = Pathish(item.part)
@@ -208,6 +209,7 @@ def map_hwpx_document(
                 elif rtype == "hwpx_image":
                     ref = str(rec.get("binary_item_ref") or "")
                     att_id = Pathish(ref) if ref else f"image-{para_id}"
+                    media = media_by_stem.get(att_id) or media_by_stem.get(ref)
                     if att_id not in attachment_ids:
                         diagnostics.append(_diag("HWPX_ATTACHMENT_UNRESOLVED", f"image {att_id} not in package media"))
                         raw_items = ((payload.get("bin_data") or {}).get("items")) or []
@@ -230,7 +232,7 @@ def map_hwpx_document(
                         DocumentImage(
                             image_id=f"img-{para_id}",
                             attachment_id=att_id,
-                            media_type="image",
+                            media_type=media.media_type if media is not None else "application/octet-stream",
                             coordinate=_coord(part=part, block_id=f"img-{para_id}"),
                             properties=_props(("binary_item_ref", ref)),
                         )
@@ -245,12 +247,13 @@ def map_hwpx_document(
                         )
                     )
                     diagnostics.append(_diag("HWPX_UNSUPPORTED_CONTROL", f"unsupported record {rtype}"))
-        page_width = float(package.page_width) if package and package.page_width is not None else None
-        page_height = float(package.page_height) if package and package.page_height is not None else None
-        column_count = package.column_count if package else None
-        column_gap = float(package.column_gap) if package and package.column_gap is not None else None
-        if package is None:
-            diagnostics.append(_diag("HWPX_SECTION_LAYOUT_UNAVAILABLE", "package supplement absent"))
+        layout = layout_by_part.get(part)
+        page_width = float(layout.page_width) if layout and layout.page_width is not None else None
+        page_height = float(layout.page_height) if layout and layout.page_height is not None else None
+        column_count = layout.column_count if layout else None
+        column_gap = float(layout.column_gap) if layout and layout.column_gap is not None else None
+        if layout is None:
+            diagnostics.append(_diag("HWPX_SECTION_LAYOUT_UNAVAILABLE", f"layout unavailable for {part}"))
         sections.append(
             DocumentSection(
                 section_id=f"section-{index}",
@@ -261,10 +264,10 @@ def map_hwpx_document(
                 column_gap=column_gap,
                 coordinate=_coord(part=part, block_id=f"section-{index}"),
                 properties=_props(
-                    ("margin_left", package.margin_left if package else None),
-                    ("margin_right", package.margin_right if package else None),
-                    ("margin_top", package.margin_top if package else None),
-                    ("margin_bottom", package.margin_bottom if package else None),
+                    ("margin_left", layout.margin_left if layout else None),
+                    ("margin_right", layout.margin_right if layout else None),
+                    ("margin_top", layout.margin_top if layout else None),
+                    ("margin_bottom", layout.margin_bottom if layout else None),
                     ("unit", "hwpunit"),
                 ),
             )

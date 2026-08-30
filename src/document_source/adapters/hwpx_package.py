@@ -30,6 +30,19 @@ class PackageMasterPage:
 
 
 @dataclass(frozen=True, slots=True)
+class PackageSectionLayout:
+    part: str
+    page_width: int | None
+    page_height: int | None
+    column_count: int | None
+    column_gap: int | None
+    margin_left: int | None
+    margin_right: int | None
+    margin_top: int | None
+    margin_bottom: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class PackageSupplement:
     entries: tuple[str, ...]
     page_width: int | None
@@ -43,6 +56,7 @@ class PackageSupplement:
     master_pages: tuple[PackageMasterPage, ...]
     media: tuple[PackageMedia, ...]
     section_parts: tuple[str, ...]
+    section_layouts: tuple[PackageSectionLayout, ...]
 
 
 def _local(tag: str) -> str:
@@ -75,6 +89,7 @@ def inspect_hwpx_package(path: str | Path) -> PackageSupplement:
     media: list[PackageMedia] = []
     masters: list[PackageMasterPage] = []
     section_parts: list[str] = []
+    section_layouts: list[PackageSectionLayout] = []
     page_width = page_height = None
     column_count = column_gap = None
     margin_left = margin_right = margin_top = margin_bottom = None
@@ -116,26 +131,53 @@ def inspect_hwpx_package(path: str | Path) -> PackageSupplement:
             if re.fullmatch(r"Contents/section\d+\.xml", name):
                 section_parts.append(name)
                 root = _safe_xml(zf.read(info))
+                section_page_width = section_page_height = None
+                section_column_count = section_column_gap = None
+                section_margin_left = section_margin_right = section_margin_top = section_margin_bottom = None
+                layout_seen = False
                 for el in root.iter():
                     loc = _local(el.tag)
                     if loc == "pagePr":
-                        page_width = _int(el.attrib.get("width")) or page_width
-                        page_height = _int(el.attrib.get("height")) or page_height
+                        layout_seen = True
+                        section_page_width = _int(el.attrib.get("width"))
+                        section_page_height = _int(el.attrib.get("height"))
                         for child in list(el):
                             if _local(child.tag) == "margin":
-                                margin_left = _int(child.attrib.get("left"))
-                                margin_right = _int(child.attrib.get("right"))
-                                margin_top = _int(child.attrib.get("top"))
-                                margin_bottom = _int(child.attrib.get("bottom"))
+                                section_margin_left = _int(child.attrib.get("left"))
+                                section_margin_right = _int(child.attrib.get("right"))
+                                section_margin_top = _int(child.attrib.get("top"))
+                                section_margin_bottom = _int(child.attrib.get("bottom"))
                     if loc == "colPr":
-                        count = _int(el.attrib.get("colCount"))
-                        gap = _int(el.attrib.get("sameGap"))
-                        if count and count >= 2:
-                            column_count = count
-                            column_gap = gap
-                        elif column_count is None:
-                            column_count = count
-                            column_gap = gap
+                        layout_seen = True
+                        section_column_count = _int(el.attrib.get("colCount"))
+                        section_column_gap = _int(el.attrib.get("sameGap"))
+                if layout_seen:
+                    if section_column_count is None:
+                        section_column_count = 1
+                    layout = PackageSectionLayout(
+                        part=name,
+                        page_width=section_page_width,
+                        page_height=section_page_height,
+                        column_count=section_column_count,
+                        column_gap=section_column_gap,
+                        margin_left=section_margin_left,
+                        margin_right=section_margin_right,
+                        margin_top=section_margin_top,
+                        margin_bottom=section_margin_bottom,
+                    )
+                    section_layouts.append(layout)
+                    page_width = layout.page_width if layout.page_width is not None else page_width
+                    page_height = layout.page_height if layout.page_height is not None else page_height
+                    margin_left = layout.margin_left
+                    margin_right = layout.margin_right
+                    margin_top = layout.margin_top
+                    margin_bottom = layout.margin_bottom
+                    if layout.column_count and layout.column_count >= 2:
+                        column_count = layout.column_count
+                        column_gap = layout.column_gap
+                    elif column_count is None:
+                        column_count = layout.column_count
+                        column_gap = layout.column_gap
             if re.fullmatch(r"Contents/masterpage\d+\.xml", name):
                 root = _safe_xml(zf.read(info))
                 kind = root.attrib.get("type") or "UNKNOWN"
@@ -155,4 +197,5 @@ def inspect_hwpx_package(path: str | Path) -> PackageSupplement:
         master_pages=tuple(masters),
         media=tuple(media),
         section_parts=tuple(section_parts),
+        section_layouts=tuple(section_layouts),
     )

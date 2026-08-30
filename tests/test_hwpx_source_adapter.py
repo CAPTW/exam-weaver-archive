@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+import src.document_source.adapters.hwpx as hwpx_module
 from src.document_source.adapters.hwpx import HwpxSourceAdapter
 from src.document_source.adapters.hwpx_mapping import map_hwpx_document
 from src.document_source.model import (
+    DiagnosticSeverity,
+    DocumentImage,
     DocumentSourceFormat,
     DocumentTable,
     SourceAttachment,
@@ -16,6 +21,7 @@ from tests.hwpx_fixture_factory import (
     hx4_table,
     hx5_image,
     hx8_malformed,
+    hx_multi_section_layouts,
     mapper_payload_hx1,
     mapper_payload_table,
 )
@@ -119,6 +125,149 @@ class _Doc:
         return {"items": [], "summary": {"total": 0}}
 
 
+def _parse_payload(path: Path, payload: dict):
+    class Backend:
+        def parse_file(self, _given: str):
+            return _Doc(payload)
+
+    return HwpxSourceAdapter(backend_loader=lambda: Backend(), version_loader=lambda: "0.2.1").parse(str(path))
+
+
+def _section_property(section, name: str):
+    return next(prop.value for prop in section.properties if prop.name == name)
+
+
+@pytest.mark.parametrize(
+    ("layouts", "expected_counts", "expected_gaps", "expected_widths", "expected_left_margins"),
+    [
+        (
+            [
+                {"page_width": 59528, "page_height": 84188, "column_count": 1, "column_gap": 0, "margin_left": 7001, "margin_right": 7002, "margin_top": 7003, "margin_bottom": 7004},
+                {"page_width": 72852, "page_height": 103180, "column_count": 2, "column_gap": 2268, "margin_left": 8001, "margin_right": 8002, "margin_top": 8003, "margin_bottom": 8004},
+            ],
+            [1, 2],
+            [0.0, 2268.0],
+            [59528.0, 72852.0],
+            [7001, 8001],
+        ),
+        (
+            [
+                {"page_width": 72852, "page_height": 103180, "column_count": 2, "column_gap": 2268, "margin_left": 8101, "margin_right": 8102, "margin_top": 8103, "margin_bottom": 8104},
+                {"page_width": 59528, "page_height": 84188, "column_count": 1, "column_gap": 0, "margin_left": 7101, "margin_right": 7102, "margin_top": 7103, "margin_bottom": 7104},
+            ],
+            [2, 1],
+            [2268.0, 0.0],
+            [72852.0, 59528.0],
+            [8101, 7101],
+        ),
+        (
+            [
+                {"page_width": 59528, "page_height": 84188, "column_count": 1, "column_gap": 111, "margin_left": 7201, "margin_right": 7202, "margin_top": 7203, "margin_bottom": 7204},
+                {"page_width": 72852, "page_height": 103180, "column_count": 2, "column_gap": 222, "margin_left": 8201, "margin_right": 8202, "margin_top": 8203, "margin_bottom": 8204},
+                {"page_width": 61200, "page_height": 90000, "column_count": 1, "column_gap": 333, "margin_left": 9201, "margin_right": 9202, "margin_top": 9203, "margin_bottom": 9204},
+            ],
+            [1, 2, 1],
+            [111.0, 222.0, 333.0],
+            [59528.0, 72852.0, 61200.0],
+            [7201, 8201, 9201],
+        ),
+    ],
+    ids=("L1-forward-with-local-properties", "L2-reverse-with-local-properties", "L3-alternating-with-local-properties"),
+)
+def test_section_layouts_are_bound_to_exact_source_sections(
+    tmp_path: Path,
+    layouts: list[dict[str, int]],
+    expected_counts: list[int],
+    expected_gaps: list[float],
+    expected_widths: list[float],
+    expected_left_margins: list[int],
+) -> None:
+    path = tmp_path / "layouts.hwpx"
+    hx_multi_section_layouts(path, layouts)
+    payload = mapper_payload_hx1()
+    payload["body_text"]["sections"] = [{"index": index, "paragraphs": []} for index in range(len(layouts))]
+
+    result = _parse_payload(path, payload)
+
+    assert result.success is True
+    assert result.document is not None
+    assert [section.section_id for section in result.document.sections] == [f"section-{index}" for index in range(len(layouts))]
+    assert [section.column_count for section in result.document.sections] == expected_counts
+    assert [section.column_gap for section in result.document.sections] == expected_gaps
+    assert [section.page_width for section in result.document.sections] == expected_widths
+    assert [_section_property(section, "margin_left") for section in result.document.sections] == expected_left_margins
+    assert all(isinstance(section.properties, tuple) for section in result.document.sections)
+
+
+def test_missing_section_layout_does_not_borrow_neighbor(tmp_path: Path) -> None:
+    path = tmp_path / "missing-layout.hwpx"
+    hx_multi_section_layouts(
+        path,
+        [
+            {"page_width": 59528, "page_height": 84188, "column_count": 1, "column_gap": 0, "margin_left": 7001, "margin_right": 7002, "margin_top": 7003, "margin_bottom": 7004},
+            {"page_width": 72852, "page_height": 103180, "column_count": 2, "column_gap": 2268, "margin_left": 8001, "margin_right": 8002, "margin_top": 8003, "margin_bottom": 8004},
+        ],
+    )
+    payload = mapper_payload_hx1()
+    payload["body_text"]["sections"] = [{"index": index, "paragraphs": []} for index in range(3)]
+
+    result = _parse_payload(path, payload)
+
+    assert result.success is True
+    assert result.document is not None
+    assert [section.column_count for section in result.document.sections] == [1, 2, None]
+    assert result.document.sections[2].page_width is None
+    assert any(d.code == "HWPX_SECTION_LAYOUT_UNAVAILABLE" for d in result.diagnostics)
+
+
+def test_empty_semantic_document_with_error_is_unsuccessful(tmp_path: Path) -> None:
+    path = tmp_path / "empty-sections.hwpx"
+    hx1_minimal(path)
+    payload = mapper_payload_hx1()
+    payload["body_text"]["sections"] = []
+
+    result = _parse_payload(path, payload)
+
+    assert result.document is not None
+    assert result.success is False
+    assert any(d.code == "HWPX_SCHEMA_UNSUPPORTED" and d.severity is DiagnosticSeverity.ERROR for d in result.diagnostics)
+
+
+def test_valid_document_with_semantic_error_is_unsuccessful(tmp_path: Path) -> None:
+    path = tmp_path / "semantic-error.hwpx"
+    hx1_minimal(path)
+    payload = mapper_payload_hx1()
+    payload["body_text"]["sections"][0]["paragraphs"].append(
+        {
+            "para_header": {"instance_id": 99},
+            "records": [{"type": "table", "table": {"attributes": {"row_count": 0, "col_count": 0}, "cells": []}}],
+        }
+    )
+
+    result = _parse_payload(path, payload)
+
+    assert result.document is not None
+    assert result.document.sections[0].blocks
+    assert result.success is False
+    assert any(d.code == "HWPX_TABLE_TOPOLOGY_INVALID" and d.severity is DiagnosticSeverity.ERROR for d in result.diagnostics)
+
+
+def test_source_size_cap_is_enforced_before_hashing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "oversize.hwpx"
+    path.write_bytes(b"xx")
+    monkeypatch.setattr(hwpx_module, "MAX_SOURCE_BYTES", 1)
+
+    def unexpected_hash(_path: Path):
+        pytest.fail("oversize source was hashed before the size cap was enforced")
+
+    monkeypatch.setattr(hwpx_module, "_hash_file", unexpected_hash)
+
+    result = HwpxSourceAdapter().parse(str(path))
+
+    assert result.success is False
+    assert any(d.code == "HWPX_RESOURCE_LIMIT" for d in result.diagnostics)
+
+
 def test_injected_backend_parse_and_source_unchanged(tmp_path: Path) -> None:
     path = tmp_path / "doc.hwpx"
     hx1_minimal(path)
@@ -208,6 +357,16 @@ def test_backend_warnings_not_silent(tmp_path: Path) -> None:
     assert "HWPX_BACKEND_WARNING" in codes
 
 
+def test_successful_parse_retains_probe_diagnostics(tmp_path: Path) -> None:
+    path = tmp_path / "extension-mismatch.bin"
+    hx1_minimal(path)
+
+    result = _parse_payload(path, mapper_payload_hx1())
+
+    assert result.success is True
+    assert any(d.code == "SOURCE_EXTENSION_MISMATCH" and d.severity is DiagnosticSeverity.WARNING for d in result.diagnostics)
+
+
 def test_image_attachment_resolution(tmp_path: Path) -> None:
     path = tmp_path / "img.hwpx"
     hx5_image(path)
@@ -229,6 +388,26 @@ def test_image_attachment_resolution(tmp_path: Path) -> None:
     assert result.document is not None
     assert result.document.attachments
     assert all(isinstance(a, SourceAttachment) for a in result.document.attachments)
+
+
+def test_mapped_image_uses_attachment_mime_type(tmp_path: Path) -> None:
+    path = tmp_path / "img-mime.hwpx"
+    hx5_image(path)
+    payload = mapper_payload_hx1()
+    payload["body_text"]["sections"][0]["paragraphs"].append(
+        {
+            "para_header": {"instance_id": 9},
+            "records": [{"type": "hwpx_image", "binary_item_ref": "image1", "brightness": 0, "contrast": 0, "effect": "REAL_PIC", "alpha": 0}],
+        }
+    )
+    payload["bin_data"]["items"] = [{"index": 0, "name": "image1", "data": ""}]
+
+    result = _parse_payload(path, payload)
+
+    assert result.success is True
+    assert result.document is not None
+    images = [block for section in result.document.sections for block in section.blocks if isinstance(block, DocumentImage)]
+    assert [image.media_type for image in images] == ["image/png"]
 
 
 def test_hx4_package_probe(tmp_path: Path) -> None:

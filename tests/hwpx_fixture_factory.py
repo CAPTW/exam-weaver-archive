@@ -26,7 +26,18 @@ NS = (
     'xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf"'
 )
 
-def _secpr(*, width="59528", height="84188", col_count="1", same_gap="0", master_cnt="0"):
+def _secpr(
+    *,
+    width="59528",
+    height="84188",
+    col_count="1",
+    same_gap="0",
+    master_cnt="0",
+    margin_left="8504",
+    margin_right="8504",
+    margin_top="5668",
+    margin_bottom="4252",
+):
     return (
         f'<hp:run charPrIDRef="0"><hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134" '
         f'tabStop="8000" tabStopVal="4000" tabStopUnit="HWPUNIT" outlineShapeIDRef="1" memoShapeIDRef="0" '
@@ -36,7 +47,8 @@ def _secpr(*, width="59528", height="84188", col_count="1", same_gap="0", master
         f'<hp:visibility hideFirstHeader="0" hideFirstFooter="0" hideFirstMasterPage="0" border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" showLineNumber="0"/>'
         f'<hp:lineNumberShape restartType="0" countBy="0" distance="0" startNumber="0"/>'
         f'<hp:pagePr landscape="WIDELY" width="{width}" height="{height}" gutterType="LEFT_ONLY">'
-        f'<hp:margin header="4252" footer="4252" gutter="0" left="8504" right="8504" top="5668" bottom="4252"/></hp:pagePr>'
+        f'<hp:margin header="4252" footer="4252" gutter="0" left="{margin_left}" right="{margin_right}" '
+        f'top="{margin_top}" bottom="{margin_bottom}"/></hp:pagePr>'
         f'<hp:footNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/>'
         f'<hp:noteLine length="-1" type="SOLID" width="0.12 mm" color="#000000"/>'
         f'<hp:noteSpacing betweenNotes="283" belowLine="567" aboveLine="850"/></hp:footNotePr>'
@@ -133,6 +145,23 @@ def hx3_multi_section(path: Path) -> Path:
         "Contents/masterpage1.xml": f'<?xml version="1.0" encoding="UTF-8"?><hm:masterPage {NS} type="ODD"><hp:p id="1" paraPrIDRef="3" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>ODD</hp:t></hp:run></hp:p></hm:masterPage>',
     }
     return write_package(path, _base_parts({"section0": s0, "section1": s1}, extra))
+
+
+def hx_multi_section_layouts(path: Path, layouts: list[dict[str, int]]) -> Path:
+    sections: dict[str, str] = {}
+    for index, layout in enumerate(layouts):
+        sections[f"section{index}"] = _section(
+            _p(f"EG-LAYOUT-{index}", pid="1"),
+            width=str(layout["page_width"]),
+            height=str(layout["page_height"]),
+            col_count=str(layout["column_count"]),
+            same_gap=str(layout["column_gap"]),
+            margin_left=str(layout["margin_left"]),
+            margin_right=str(layout["margin_right"]),
+            margin_top=str(layout["margin_top"]),
+            margin_bottom=str(layout["margin_bottom"]),
+        )
+    return write_package(path, _base_parts(sections))
 
 def _cell(r: int, c: int, text: str, rs=1, cs=1) -> str:
     return (
