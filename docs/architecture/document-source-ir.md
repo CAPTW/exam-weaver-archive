@@ -15,7 +15,7 @@ Convert a source file into backend-neutral structure before any exam-domain pars
 | `DocumentSourceIR` (`src/document_source`) | import | physical document structure, coordinates, diagnostics, attachments |
 | `ExamDocument` (`src/exporter`) | export | composed exam semantics for DOCX (and future HWPX) |
 
-Neither replaces the other. This package does not import Qt, SQLite, DOCX, or HWPX libraries.
+Neither replaces the other. Third-party parser objects do not cross the IR boundary. `HwpxSourceAdapter` is the first backend-specific non-PDF adapter candidate. `HwpSourceAdapter` is not implemented. GUI import remains PDF-only.
 
 ## Model
 
@@ -37,10 +37,9 @@ Resource caps apply to ZIP entries and CFB FAT chains. Extension/signature misma
 
 One `DocumentSection` per PDF page (`page-N`). Text comes from existing extractor lines when present, otherwise page text with `PDF_ADAPTER_TEXT_ONLY_PAGE`. Tables and images map when the extractor exposes them. Images become `SourceAttachment` hashes, not raw bytes in the IR.
 
-## Future adapters (not integrated)
+## Adapters
 
-- `hwpxkit==0.2.1`: `SELECTED_HWPX_PARSER_NOT_INTEGRATED` (MIT)
-- `hwp-hwpx-parser==1.0.0`: `SELECTED_HWP_PARSER_NOT_INTEGRATED` (Apache-2.0)
+- `PdfSourceAdapter`: implemented thin mapping over the existing extractor
+- `HwpxSourceAdapter`: local feature candidate using `hwpxkit==0.2.1` (MIT). Not GUI-integrated.
+- `HwpSourceAdapter`: not implemented. `hwp-hwpx-parser==1.0.0` remains `SELECTED_NOT_INTEGRATED`
 - Native Hancom UI automation: `DEPRIORITIZED_RESEARCH_ONLY_NOT_PRODUCT_PATH`
-
-Production code in this package does not import those backends.

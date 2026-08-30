@@ -1,4 +1,5 @@
 from src.document_source.adapters.base import DocumentSourceAdapter
+from src.document_source.adapters.hwpx import HwpxSourceAdapter
 from src.document_source.model import (
     DiagnosticSeverity,
     DocumentField,
@@ -37,6 +38,7 @@ __all__ = [
     "DocumentSection",
     "DocumentSource",
     "DocumentSourceAdapter",
+    "HwpxSourceAdapter",
     "DocumentSourceAdapterInfo",
     "DocumentSourceFormat",
     "DocumentSourceResult",
