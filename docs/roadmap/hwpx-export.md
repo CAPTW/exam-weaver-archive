@@ -1,8 +1,8 @@
 # HWPX Export Roadmap
 
-> Status: **Direct HWPX compiler MVP implemented on a local feature candidate**
+> Status: **Compiler is on canonical `main`. GUI DOCX/HWPX selector is this feature candidate.**
 >
-> Canonical `main` and user-facing editable export remain DOCX only.
+> Remaining: independent review, PR/main integration, public release validation.
 
 ## Goal
 
@@ -32,23 +32,21 @@ Implemented on the local feature candidate:
 
 Still not implemented:
 
-- GUI DOCX/HWPX selector
-- canonical `main` integration
 - public release
 - HWP binary output
+- HWPX import selector
+- HWPX-to-question parsing
 - advanced equations and drawings
 - native Hancom acceptance corpus
 
 ## Output selector
 
-A GUI format selector is not implemented. The save dialog remains DOCX.
+This feature candidate adds a session-only `출력 형식` ComboBox (`docx` / `hwpx`), format-specific save dialogs, and exclusive routing of one `ExamDocument` to `DocxExporter` or `HwpxCompiler`. Default remains DOCX.
 
-## Delivery gates (future)
+## Delivery gates
 
-1. Export-model extraction — **done** (ExamDocument + DOCX).
-2. Direct OWPML compiler MVP — **local feature candidate implemented**.
-3. Format-selection UI — not started.
-4. Optional native smoke — after compiler exists.
+1. Export-model extraction — **done**.
+2. Direct OWPML compiler — **done on main**.
+3. Format-selection UI — **this feature candidate**.
+4. Independent review / push / merge — later.
 5. Advanced fidelity — later.
-
-No README or UI claim should present HWPX output as a current feature.

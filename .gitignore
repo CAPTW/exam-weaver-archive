@@ -28,4 +28,5 @@ dist/
 
 # Generated exam documents
 *.docx
+*.hwpx
 *.pdf
