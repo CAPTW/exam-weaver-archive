@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.document_source import probe_document_format
 from src.document_source.adapters.hwpx import EXPECTED_HWPXKIT_VERSION, HwpxSourceAdapter
 
 
@@ -13,13 +12,48 @@ def test_requirements_pin_is_exact() -> None:
 
 
 def test_public_package_import_does_not_load_hwpxkit() -> None:
+    import json
+    import subprocess
     import sys
 
-    assert "hwpxkit" not in sys.modules
-    import src.document_source as ds
+    repo_root = Path(__file__).resolve().parents[1]
+    child_code = (
+        "import json\n"
+        "import sys\n"
+        "def loaded():\n"
+        "    return sorted(name for name in sys.modules "
+        "if name == 'hwpxkit' or name.startswith('hwpxkit.'))\n"
+        "before = loaded()\n"
+        "import src.document_source\n"
+        "after = loaded()\n"
+        "print(json.dumps({'after': after, 'before': before}, "
+        "sort_keys=True, separators=(',', ':')))\n"
+        "raise SystemExit(0 if before == [] and after == [] else 1)\n"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", child_code],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError("clean public-package import child timed out after 30 seconds") from exc
 
-    assert ds.probe_document_format is probe_document_format
-    assert "hwpxkit" not in sys.modules
+    diagnostics = (
+        f"child returncode={completed.returncode}\n"
+        f"stdout={completed.stdout!r}\n"
+        f"stderr={completed.stderr!r}"
+    )
+    assert completed.returncode == 0, diagnostics
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"child did not emit deterministic JSON\n{diagnostics}") from exc
+    assert payload == {"after": [], "before": []}, diagnostics
 
 
 def test_adapter_module_import_does_not_load_hwpxkit() -> None:

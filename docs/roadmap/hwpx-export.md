@@ -1,8 +1,8 @@
 # HWPX Export Roadmap
 
-> Status: **ExamDocument foundation implemented; HWPX compiler is not implemented**
+> Status: **Direct HWPX compiler MVP implemented on a local feature candidate**
 >
-> User-facing editable export remains DOCX only.
+> Canonical `main` and user-facing editable export remain DOCX only.
 
 ## Goal
 
@@ -14,23 +14,30 @@ Compose an exam once as `ExamDocument` and later compile both DOCX and HWPX from
 
 Legacy `DocxExporter.export(...)` is a compatibility facade.
 
-## HWPX compiler strategy (future)
+## HWPX compiler candidate
 
-Not implemented in this Gate.
+Implemented on the local feature candidate:
 
-Required direction:
+- direct HWPX ZIP/OWPML compiler MVP from immutable `ExamDocument`
+- title lines, semantic sections, questions, and variable-count choices
+- descriptive questions and model answers
+- question, passage, and choice images with byte deduplication
+- simple and merged native tables
+- explicit image/text fallback for complex tables
+- deterministic 12×8 answer-key tables and continuation
+- internal package validation and canonical `HwpxSourceAdapter` semantic readback
+- atomic output with stable warning and failure codes
+- repository-owned clean-room profile with no runtime private template
+- no Hancom Office runtime dependency
 
-- one `ExamDocument` build
-- direct HWPX ZIP/OWPML package compiler
-- private sanitized external template derivative (uncommitted until separate clearance): `PRIVATE_LOCAL_DERIVATIVE_NOT_CLEARED_FOR_COMMIT`
-- **direct OWPML package layer as correctness authority**
-- `python-hwpx` only where reliable (`SELECTED_HWPX_WRITER_STRATEGY_NOT_IMPLEMENTED`)
-- known limitation: `python-hwpx` save can fail open-safety on stale `lineseg` caches after text replacement
-- package validation and semantic readback
-- explicit fallback warnings
-- no Hancom Office runtime requirement
-- optional native open-smoke only after a direct compiler exists
-- native Hancom UI automation is `DEPRIORITIZED_RESEARCH_ONLY_NOT_PRODUCT_PATH` and is not a template-authoring prerequisite
+Still not implemented:
+
+- GUI DOCX/HWPX selector
+- canonical `main` integration
+- public release
+- HWP binary output
+- advanced equations and drawings
+- native Hancom acceptance corpus
 
 ## Output selector
 
@@ -39,7 +46,7 @@ A GUI format selector is not implemented. The save dialog remains DOCX.
 ## Delivery gates (future)
 
 1. Export-model extraction — **done** (ExamDocument + DOCX).
-2. Direct OWPML compiler MVP — not started.
+2. Direct OWPML compiler MVP — **local feature candidate implemented**.
 3. Format-selection UI — not started.
 4. Optional native smoke — after compiler exists.
 5. Advanced fidelity — later.
