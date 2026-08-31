@@ -1,7 +1,7 @@
 ﻿import random
-
 import re
 from datetime import date
+from pathlib import Path
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -26,6 +26,18 @@ from ...choice_markers import (
     DEFAULT_CHOICE_MARKER_STYLE,
     normalize_choice_marker_style,
 )
+from ..export_formats import (
+    DEFAULT_FORMAT,
+    FORMAT_DOCX,
+    FORMAT_HWPX,
+    button_text,
+    default_suffix,
+    dialog_filter,
+    dialog_title,
+    error_message,
+    normalize_save_path,
+    warning_summary,
+)
 
 
 class ExportInterface(QScrollArea):
@@ -35,6 +47,7 @@ class ExportInterface(QScrollArea):
         parent=None,
         repository=None,
         choice_marker_style=DEFAULT_CHOICE_MARKER_STYLE,
+        hwpx_compiler_factory=None,
     ):
         super().__init__(parent)
         if repository is None:
@@ -46,6 +59,9 @@ class ExportInterface(QScrollArea):
         self.choice_marker_style = normalize_choice_marker_style(choice_marker_style)
         self.exporter = DocxExporter(choice_marker_style=self.choice_marker_style)
         self.document_builder = ExamDocumentBuilder()
+        self.hwpx_compiler_factory = hwpx_compiler_factory
+        self._hwpx_compiler = None
+        self._export_state = {"format": DEFAULT_FORMAT}
         self.setObjectName("ExportInterface")
 
         self.setFrameShape(QFrame.NoFrame)
@@ -65,16 +81,17 @@ class ExportInterface(QScrollArea):
     def set_choice_marker_style(self, style):
         self.choice_marker_style = normalize_choice_marker_style(style)
         self.exporter.set_choice_marker_style(self.choice_marker_style)
+        self._hwpx_compiler = None
 
     def init_ui(self):
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
         self.vBoxLayout.setSpacing(10)
 
-        self.titleLabel = SubtitleLabel("모의고사 출력 (DOCX)", self)
+        self.titleLabel = SubtitleLabel("시험지 내보내기", self)
         self.vBoxLayout.addWidget(self.titleLabel)
 
         self.descLabel = BodyLabel(
-            "출제 조건과 과목별 문항 수를 선택해 하나의 DOCX 시험지를 만듭니다.", self
+            "출제 조건과 과목별 문항 수를 선택해 DOCX 또는 HWPX 시험지를 만듭니다.", self
         )
         self.vBoxLayout.addWidget(self.descLabel)
         self.repositoryStatusLabel = BodyLabel("현재 문제은행: 확인 중", self)
@@ -204,11 +221,20 @@ class ExportInterface(QScrollArea):
         self.vBoxLayout.addWidget(self.tableRenderModeLabel)
         self.vBoxLayout.addWidget(self.tableRenderModeFilter)
 
+        self.formatLabel = BodyLabel("출력 형식", self)
+        self.outputFormatFilter = QComboBox(self)
+        self.outputFormatFilter.addItem("DOCX · Word 문서", FORMAT_DOCX)
+        self.outputFormatFilter.addItem("HWPX · 한글 표준 문서", FORMAT_HWPX)
+        self.outputFormatFilter.setCurrentIndex(0)
+        self.outputFormatFilter.setToolTip("저장할 시험지 파일 형식을 선택합니다. 선택은 이 세션에서만 유지됩니다.")
+        self.outputFormatFilter.currentIndexChanged.connect(self._on_output_format_changed)
+        self.vBoxLayout.addWidget(self.formatLabel)
+        self.vBoxLayout.addWidget(self.outputFormatFilter)
+
         self.vBoxLayout.addStretch(1)
 
-        # Export Button
-        self.btnExport = PrimaryPushButton("DOCX로 내보내기", self)
-        self.btnExport.clicked.connect(self.export_docx)
+        self.btnExport = PrimaryPushButton(button_text(DEFAULT_FORMAT), self)
+        self.btnExport.clicked.connect(self.export_exam)
         self.vBoxLayout.addWidget(self.btnExport)
 
         for combo in (self.examFilter, self.yearFromFilter, self.yearToFilter, self.subjectFilter):
@@ -232,6 +258,46 @@ class ExportInterface(QScrollArea):
 
     def _on_table_render_mode_changed(self, *_args):
         self.exporter.set_table_render_mode(self._selected_table_render_mode())
+
+    def _safe_attr(self, name, default=None):
+        try:
+            return object.__getattribute__(self, name)
+        except Exception:
+            return default
+
+    def _selected_output_format(self):
+        state = self._safe_attr("_export_state")
+        if isinstance(state, dict) and state.get("format") in {FORMAT_DOCX, FORMAT_HWPX}:
+            return state["format"]
+        combo = self._safe_attr("outputFormatFilter")
+        if combo is None:
+            return DEFAULT_FORMAT
+        value = combo.currentData()
+        return value if value in {FORMAT_DOCX, FORMAT_HWPX} else DEFAULT_FORMAT
+
+    def _on_output_format_changed(self, *_args):
+        combo = self._safe_attr("outputFormatFilter")
+        state = self._safe_attr("_export_state")
+        if combo is not None and isinstance(state, dict):
+            value = combo.currentData()
+            if value in {FORMAT_DOCX, FORMAT_HWPX}:
+                state["format"] = value
+        button = self._safe_attr("btnExport")
+        if button is not None:
+            button.setText(button_text(self._selected_output_format()))
+
+    def _get_hwpx_compiler(self):
+        existing = self._safe_attr("_hwpx_compiler")
+        if existing is not None:
+            return existing
+        factory = self._safe_attr("hwpx_compiler_factory")
+        if factory is None:
+            from ...exporter.hwpx import HwpxCompiler
+
+            factory = lambda: HwpxCompiler(choice_marker_style=self.choice_marker_style)
+        compiler = factory()
+        self._hwpx_compiler = compiler
+        return compiler
 
     def load_options(self):
         options = self.repo.get_filter_options()
@@ -464,7 +530,7 @@ class ExportInterface(QScrollArea):
             filename += f"_{self._local_filter_code(subject_code)}"
         if random_count:
             filename += f"_rand{random_count}"
-        return filename + ".docx"
+        return filename + default_suffix(self._selected_output_format())
 
     @staticmethod
     def _local_filter_code(code):
@@ -495,7 +561,7 @@ class ExportInterface(QScrollArea):
             if year_from == year_to
             else f"{year_from}-{year_to}"
         )
-        return f"multi_exam_{year_part}_rand{total_count}.docx"
+        return f"multi_exam_{year_part}_rand{total_count}{default_suffix(self._selected_output_format())}"
 
     def _format_exam_name_for_title(self, exam_name):
         return re.sub(r"(?<=\d급)(?=\S)", " ", exam_name or "", count=1)
@@ -596,7 +662,54 @@ class ExportInterface(QScrollArea):
     def _sample_questions(self, questions, count):
         return select_group_aware_questions(questions, count, rng=random)
 
+    def _render_selected(self, document, file_path, output_format):
+        if output_format == FORMAT_HWPX:
+            result = self._get_hwpx_compiler().export_document(document, file_path)
+            if result.warnings:
+                InfoBar.warning(
+                    title="HWPX 내보내기 완료 · 경고 포함",
+                    content=(
+                        f"{Path(file_path).name} · 경고 {len(result.warnings)}건 · "
+                        f"{warning_summary(result.warnings, result.fallback_count)}"
+                    ),
+                    parent=self,
+                    duration=5000,
+                )
+            else:
+                InfoBar.success(
+                    title="HWPX 내보내기 완료",
+                    content=Path(file_path).name,
+                    parent=self,
+                    duration=3000,
+                )
+            return
+        exporter = self.exporter
+        if hasattr(exporter, "warnings"):
+            exporter.warnings = []
+        exporter.export_document(document, file_path)
+        export_warnings = getattr(exporter, "warnings", [])
+        if export_warnings:
+            InfoBar.warning(
+                title="내보내기 완료 · 표 폴백 적용",
+                content=(
+                    f"DOCX를 저장했으며 {len(export_warnings)}개 표에 "
+                    "대체 출력 방식을 적용했습니다."
+                ),
+                parent=self,
+                duration=5000,
+            )
+        else:
+            InfoBar.success(
+                title="내보내기 완료",
+                content=f"DOCX 시험지를 저장했습니다: {file_path}",
+                parent=self,
+                duration=3000,
+            )
+
     def export_docx(self):
+        return self.export_exam()
+
+    def export_exam(self):
         exam_code = self.examFilter.currentData()
         year_from = self.yearFromFilter.currentData()
         year_to = self.yearToFilter.currentData()
@@ -776,69 +889,69 @@ class ExportInterface(QScrollArea):
             filename = self._build_filename(
                 exam_code, year_from, year_to, subject_code, random_count
             )
+        output_format = self._selected_output_format()
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "DOCX 시험지 저장", filename, "DOCX 문서 (*.docx)"
+            self,
+            dialog_title(output_format),
+            filename,
+            dialog_filter(output_format),
         )
-
-        if file_path:
-            try:
-                if multi_exam_mode:
-                    title = self._build_multi_exam_title()
-                elif subject_requests:
-                    title = self._build_mock_exam_title(
-                        self.examFilter.currentText()
-                    )
-                else:
-                    title = self._build_title(
-                        self.examFilter.currentText(),
-                        year_from,
-                        year_to,
-                        self.subjectFilter.currentText() if subject_code else None,
-                        random_count
-                    )
-                builder = self.__dict__.get("document_builder") or ExamDocumentBuilder()
-                document = builder.build(
+        if not file_path:
+            return
+        normalized, path_error = normalize_save_path(file_path, output_format)
+        if path_error:
+            InfoBar.warning(
+                title="확장자 확인 필요",
+                content=error_message(path_error),
+                parent=self,
+            )
+            return
+        file_path = normalized
+        button = self.__dict__.get("btnExport")
+        if button is not None:
+            button.setEnabled(False)
+        try:
+            if multi_exam_mode:
+                title = self._build_multi_exam_title()
+            elif subject_requests:
+                title = self._build_mock_exam_title(
+                    self.examFilter.currentText()
+                )
+            else:
+                title = self._build_title(
+                    self.examFilter.currentText(),
+                    year_from,
+                    year_to,
+                    self.subjectFilter.currentText() if subject_code else None,
+                    random_count
+                )
+            builder = self.__dict__.get("document_builder") or ExamDocumentBuilder()
+            document = builder.build(
                     title=title,
                     questions=questions,
                     sections=sections,
                     shuffle_choices=self.shuffleChoices.isChecked(),
                     include_answer_key=False,
                 )
-                if hasattr(self.exporter, "export_document"):
-                    self.exporter.export_document(document, file_path)
-                else:
-                    self.exporter.export(
-                        title,
-                        questions,
-                        file_path,
-                        shuffle_choices=self.shuffleChoices.isChecked(),
-                        sections=sections,
-                    )
+            self._render_selected(document, file_path, output_format)
+        except Exception as exc:
+            from ...exporter.hwpx import HwpxCompileError
 
-                export_warnings = getattr(self.exporter, 'warnings', [])
-                if export_warnings:
-                    InfoBar.warning(
-                        title="내보내기 완료 · 표 폴백 적용",
-                        content=(
-                            f"DOCX를 저장했으며 {len(export_warnings)}개 표에 "
-                            "대체 출력 방식을 적용했습니다."
-                        ),
-                        parent=self,
-                        duration=5000,
-                    )
-                else:
-                    InfoBar.success(
-                        title="내보내기 완료",
-                        content=f"DOCX 시험지를 저장했습니다: {file_path}",
-                        parent=self,
-                        duration=3000
-                    )
-            except Exception as e:
+            if isinstance(exc, HwpxCompileError):
+                InfoBar.error(
+                    title="HWPX 내보내기 실패",
+                    content=error_message(exc.code),
+                    parent=self,
+                )
+            else:
                 InfoBar.error(
                     title="내보내기 실패",
-                    content=f"DOCX 시험지를 저장하지 못했습니다. {e}",
+                    content="시험지를 저장하지 못했습니다.",
                     parent=self
                 )
+        finally:
+            if button is not None:
+                button.setEnabled(True)
 
     def _filter_questions_by_year_range(self, questions, year_from, year_to):
         filtered = []

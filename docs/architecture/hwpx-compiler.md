@@ -2,7 +2,7 @@
 
 ## Status
 
-This implementation is a **local feature candidate**. It is not integrated into canonical `main`, exposed by the GUI, or released to users.
+This implementation is the canonical compiler on `main`, with a user-facing DOCX/HWPX selector in this GUI feature candidate. HWP binary output, HWPX import, and question extraction are not implemented.
 
 ## Input and output
 
@@ -64,5 +64,5 @@ Tracked code contains safe authored constants only. It has no runtime access to 
 
 ## Unsupported and advanced features
 
-Advanced equations, drawings, arbitrary complex-table native reconstruction, HWP binary output, and native Hancom acceptance are outside this candidate. Complex content follows the documented warning or fail-closed policy. A user-facing DOCX/HWPX selector is not implemented.
+Advanced equations, drawings, arbitrary complex-table native reconstruction, HWP binary output, and native Hancom acceptance are outside this candidate. Complex content follows the documented warning or fail-closed policy. The GUI selector uses format-specific dialogs and warning/error InfoBars.
 

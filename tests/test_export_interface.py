@@ -13,6 +13,24 @@ from src.gui.interface.export import ExportInterface
 APP = QApplication.instance() or QApplication([])
 
 
+def _bind_canonical_export(interface, exported):
+    class Builder:
+        def build(self, **kwargs):
+            exported["title"] = kwargs.get("title")
+            exported["questions"] = kwargs.get("questions")
+            exported["sections"] = kwargs.get("sections")
+            exported["shuffle_choices"] = kwargs.get("shuffle_choices")
+            return object()
+
+    class Renderer:
+        def export_document(self, document, file_path):
+            exported["document"] = document
+            exported["file_path"] = file_path
+
+    interface.document_builder = Builder()
+    interface.exporter = Renderer()
+
+
 def test_export_interface_forwards_choice_marker_style_to_docx_exporter():
     applied = []
 
@@ -274,7 +292,7 @@ def test_export_interface_uses_injected_repository_with_mount_labels():
 def test_export_interface_exposes_two_korean_composition_modes():
     widget = ExportInterface(repository=_MultiExamRepository())
 
-    assert widget.titleLabel.text() == "모의고사 출력 (DOCX)"
+    assert widget.titleLabel.text() == "시험지 내보내기"
     assert widget.singleExamModeCheck.text() == "한 시험에서 구성"
     assert widget.multiExamModeCheck.text() == "여러 시험의 과목을 조합"
     assert widget.singleExamModeCheck.isChecked()
@@ -286,7 +304,7 @@ def test_export_interface_exposes_two_korean_composition_modes():
     assert widget._is_multi_exam_mode() is True
     assert widget.subjectSelectionTable.horizontalHeaderItem(1).text() == "문제은행"
     assert widget.subjectSelectionTable.horizontalHeaderItem(2).text() == "시험 종류"
-    assert widget.btnExport.text() == "DOCX로 내보내기"
+    assert widget.btnExport.text() == "DOCX 시험지 저장"
 
     widget.deleteLater()
     APP.processEvents()
@@ -591,7 +609,7 @@ def test_export_docx_filters_selected_year_range_before_deduping(monkeypatch):
             exported['sections'] = sections
 
     interface.repo = Repo()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.QFileDialog.getSaveFileName',
@@ -690,7 +708,7 @@ def test_export_docx_combines_random_questions_from_multiple_subjects(monkeypatc
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
@@ -775,7 +793,7 @@ def test_export_docx_combines_subjects_from_different_exams(monkeypatch):
 
     interface.repo = Repo()
     interface.validator = _AlwaysEligibleValidator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, captured)
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
         lambda population, count: list(population)[:count],
@@ -961,7 +979,7 @@ def test_export_docx_random_subject_keeps_grouped_questions_together_in_group_or
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
@@ -1040,7 +1058,7 @@ def test_export_docx_random_subject_excludes_entire_group_when_any_child_is_inva
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
@@ -1112,7 +1130,7 @@ def test_export_docx_random_subject_filters_invalid_duplicate_group_before_dedup
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
@@ -1215,7 +1233,7 @@ def test_export_docx_multi_subject_random_keeps_duplicate_text_group_atomic(monk
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',
@@ -1303,7 +1321,7 @@ def test_export_docx_skips_duplicate_random_questions_across_subject_sections(mo
 
     interface.repo = Repo()
     interface.validator = Validator()
-    interface.exporter = Exporter()
+    _bind_canonical_export(interface, exported)
 
     monkeypatch.setattr(
         'src.gui.interface.export.random.sample',

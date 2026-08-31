@@ -20,7 +20,7 @@ database created from the schema and seed metadata.
 - COMCBT/public-exam PDF importer and quality checks.
 - SQLite schema, seed metadata, repository layer, validation, and selection logic.
 - Question browser, editor, explanation workflow, practice mode, DB mount tools,
-  import screen, and DOCX export screen.
+  import screen, and exam export screen with DOCX/HWPX selector.
 - DOCX exporter with support for grouped passages, images, answer keys, basic
   formatting, underline/overline spans, and math-like notation.
 - Codex SDK side panel prepared for per-user login.
@@ -122,7 +122,7 @@ Primary screens:
   copies, support 4-10 multiple-choice options, store descriptive
   question/model-answer pairs, explain, and delete.
 - Practice: generate and take mock exams with grading modes.
-- Exam Export: sample questions and export DOCX exam sheets.
+- Exam Export: sample questions and export DOCX or HWPX exam sheets from one ExamDocument.
 - Import: parse question/answer PDFs into the local database.
 - DB Mount: prototype UI for split/domain database management, including
   exporting/importing standalone SQLite DB files and image-inclusive

@@ -2,11 +2,11 @@
 
 Production export path:
 
-`ExportInterface` selects questions, then `ExamDocumentBuilder.build(...)` produces an immutable `ExamDocument`, then `DocxExporter.export_document(...)` renders DOCX.
+`ExportInterface` selects questions and an output format, then `ExamDocumentBuilder.build(...)` produces one immutable `ExamDocument`, then exactly one sibling renderer runs: `DocxExporter.export_document(...)` or `HwpxCompiler.export_document(...)`.
 
-`DocxExporter.export(...)` remains a thin compatibility facade over the same builder and renderer.
+`DocxExporter.export(...)` remains a thin compatibility facade and is not used by the production GUI route.
 
-DOCX is the only user-facing editable export. HWPX export is not implemented.
+User-facing editable export is DOCX or HWPX. HWP binary output is not implemented.
 
 ## Import vs export IRs
 

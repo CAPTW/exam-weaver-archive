@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Desktop](https://img.shields.io/badge/Desktop-PyQt5-41CD52?style=for-the-badge&logo=qt&logoColor=white)
 ![Database](https://img.shields.io/badge/Database-SQLite-0F80CC?style=for-the-badge&logo=sqlite&logoColor=white)
-![Export](https://img.shields.io/badge/Export-DOCX-2B579A?style=for-the-badge&logo=microsoftword&logoColor=white)
+![Export](https://img.shields.io/badge/Export-DOCX%20%2F%20HWPX-2B579A?style=for-the-badge&logo=microsoftword&logoColor=white)
 ![Data](https://img.shields.io/badge/Data-local--first-7C3AED?style=for-the-badge)
 
 [빠른 시작](#빠른-시작) · [주요 기능](#주요-기능) · [출력 형식](#출력-형식) · [데이터 경계](#데이터-경계) · [기술 문서](#기술-문서)
@@ -34,8 +34,7 @@ flowchart LR
     D --> E["검색 · 검수 · 수정<br/>해설 · 복제"]
     D --> F["Practice"]
     D --> G["시험지 구성"]
-    G --> H["DOCX<br/>현재 지원"]
-    G -. "로드맵" .-> I["HWPX<br/>계획 중"]
+    G --> H["DOCX 또는 HWPX<br/>현재 지원"]
 ```
 
 ## 주요 기능
@@ -46,7 +45,7 @@ flowchart LR
 | **문항 구조화** | 문항 번호, 본문, 선지, 과목, 정답, 공통 지문, 서술형 모범답안 및 서식 metadata 관리 |
 | **문제은행 관리** | 검색, 필터, 검증, 수정, 사용자 문항 추가, 기존 문항 복제, 해설 작성, 안전한 삭제 |
 | **문제 풀이** | 연결된 문제은행에서 조건별 문항을 선택해 로컬 모의고사 구성 및 채점 |
-| **시험지 내보내기** | 단일·다중 시험 과목 조합, 묶음 문항 유지, 선지 섞기, 표·이미지·정답표를 포함한 DOCX 생성 |
+| **시험지 내보내기** | 단일·다중 시험 과목 조합, 묶음 문항 유지, 선지 섞기, 표·이미지·정답표를 포함한 DOCX 또는 HWPX 생성 |
 | **문제은행 연결** | SQLite DB 및 이미지 포함 `.examdb.zip` package 가져오기·내보내기, 여러 domain DB mount |
 | **로컬 통합** | 사용자별 Codex side panel, 휴대 가능한 설정, 로컬 데이터와 인증정보 분리 |
 
@@ -79,9 +78,9 @@ flowchart LR
 - 선지 순서 섞기와 정답 재계산
 - 선택형 정답표
 
-### HWPX — 공식 로드맵
+### HWPX — 현재 지원
 
-HWPX는 아직 현재 기능으로 제공하지 않습니다. DOCX 코드를 복제하는 대신, 한 번 구성한 시험 내용을 두 exporter가 함께 사용하는 format-neutral `ExamDocument` 계층을 먼저 도입할 예정입니다.
+시험지 내보내기 화면에서 `출력 형식`으로 HWPX를 선택하면 같은 `ExamDocument`를 direct OWPML compiler로 저장합니다. 복잡한 표·수식은 경고와 함께 보이는 대체 출력을 사용합니다. HWP 바이너리 출력, HWPX 가져오기, 문항 추출은 지원하지 않습니다.
 
 - 설계 및 acceptance gate: **[HWPX Export Roadmap](docs/roadmap/hwpx-export.md)**
 - 목표: 사용자가 `.docx` 또는 `.hwpx`를 선택해 같은 시험 내용을 편집 가능한 문서로 저장
@@ -173,7 +172,7 @@ source_notes/          Source and reference notes
 - `data/` runtime state
 - 개인 Codex 인증정보
 - OCR cache와 임시 추출물
-- logs, generated DOCX/PDF, build 결과, virtual environment
+- logs, generated DOCX/HWPX/PDF, build 결과, virtual environment
 
 새 checkout은 빈 SQLite schema를 초기화해 앱을 실행할 수 있습니다. 실제 운영 데이터는 로컬에서 공급하거나 사용자가 명시적으로 연결해야 합니다.
 
@@ -185,8 +184,8 @@ source_notes/          Source and reference notes
 - **Repository:** `CAPTW/exam-generator`
 - **Repository rename:** 2026-08-26 완료; 이전 `CAPTW/exam-weaver-archive` URL은 새 저장소로 redirect
 - **Desktop:** Windows-first PyQt application
-- **Current editable export:** DOCX
-- **Planned editable export:** HWPX
+- **Current editable export:** DOCX, HWPX
+- **Not supported:** HWP binary export, HWPX import, HWPX-to-question parsing
 - **Storage:** local SQLite and mountable Exam DB packages
 - **Parser:** source-specific quality varies; human review remains authoritative
 

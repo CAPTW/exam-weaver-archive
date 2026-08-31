@@ -34,6 +34,13 @@ Codex 패널
 - 로그인 결과는 로컬 런타임 폴더인 data\codex_panel_home 아래에만 저장됩니다.
 - 이미 %USERPROFILE%\.codex\auth.json이 있는 사용자는 앱이 해당 인증을 data\codex_panel_home으로 복사해 사용합니다.
 
+시험지 내보내기
+
+- 패키지 앱에서 DOCX 또는 HWPX를 선택할 수 있습니다.
+- HWPX 생성에 Hancom Office 설치는 필요하지 않습니다.
+- HWP 바이너리 출력은 지원하지 않습니다.
+- 복잡한 표나 수식은 경고와 함께 대체 출력될 수 있습니다.
+
 주의
 
 - Build_And_Run_Packaged_App.bat은 패키징 과정 때문에 시간이 걸릴 수 있습니다.
